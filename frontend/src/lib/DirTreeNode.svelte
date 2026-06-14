@@ -1,0 +1,86 @@
+<script lang="ts">
+  import DirTreeNode from './DirTreeNode.svelte'
+  import type { FileTreeNode } from './fileTree'
+
+  let {
+    node,
+    collapsed,
+    toggle,
+    depth = 0,
+  }: {
+    node: FileTreeNode
+    collapsed: Set<string>
+    toggle: (path: string) => void
+    depth?: number
+  } = $props()
+
+  const isDir = $derived(node.children.length > 0)
+  const isCollapsed = $derived(collapsed.has(node.path))
+  const pad = $derived(depth * 18)
+</script>
+
+<div class="dtn" style="padding-left: {pad}px">
+  {#if isDir}
+    <span class="arr" onclick={() => toggle(node.path)}>
+      {#if isCollapsed}
+        <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
+      {:else}
+        <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M3 6l5 5 5-5H3z"/></svg>
+      {/if}
+    </span>
+    <span class="ico" onclick={() => toggle(node.path)}>
+      {#if isCollapsed}
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M2 5a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" opacity="0.7"/></svg>
+      {:else}
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M2 5a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/></svg>
+      {/if}
+    </span>
+  {:else}
+    <span class="arr-placeholder"></span>
+    <span class="ico"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" opacity="0.5"><path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-5.586a1 1 0 01-.707-.293L9.293 3.293A1 1 0 008.586 3H4z"/></svg></span>
+  {/if}
+  <span class="nm" class:dir={isDir} onclick={() => isDir && toggle(node.path)}>{node.name}</span>
+</div>
+
+{#if isDir && !isCollapsed}
+  {#each node.children as child (child.path)}
+      <DirTreeNode node={child} {collapsed} {toggle} depth={depth + 1} />
+  {/each}
+{/if}
+
+<style>
+  .dtn {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 0;
+    white-space: nowrap;
+    border-radius: 3px;
+  }
+  .dtn:hover { background: var(--surface2); }
+  .arr {
+    width: 14px; flex-shrink: 0;
+    cursor: pointer;
+    color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .arr-placeholder {
+    width: 14px; flex-shrink: 0;
+    display: inline-block;
+  }
+  .ico {
+    width: 20px; flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+  }
+  .nm {
+    font-size: 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .nm.dir { cursor: pointer; font-weight: 500; }
+</style>

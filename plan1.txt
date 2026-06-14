@@ -1,0 +1,206 @@
+---
+
+## 详细计划
+
+经过仔细审查所有文件后，我梳理出以下现状和建议：
+
+---
+
+### 一、当前问题清单
+
+| # | 问题 | 位置 | 严重性 |
+|---|------|------|--------|
+| 1 | `blender_path` 既在项目配置(`MetaConfig`)又在应用配置(`AppConfig`)中，逻辑混乱 | `config.rs` + `lib.rs` | 中 |
+| 2 | `project_remote` 字段存在于配置中但 CLI/Tauri push 并不依赖它做 push（push 直接调用 `git_project::push`，不检查有无 remote） | `config.rs` + `main.rs` + `ActionBar.svelte` | 低 |
+| 3 | `page_password` 字段存在但完全无用（HTML 已无密码弹层） | `config.rs` + `html_gen` | 高 |
+| 4 | `get_changed_files` / `get_changed_files_status` / `has_blend_files` / `get_git_author` 在 `main.rs` 和 `lib.rs` 两处重复 | `main.rs:320-405` + `lib.rs:658-756` | 高 |
+| 5 | `AppConfig` 定义、读写、路径 全部 inline 在 `lib.rs` 里 | `lib.rs:758-817` | 中 |
+| 6 | `update_config` Tauri command 仍然接受 `page_password` 和 `project_remote` | `lib.rs:282-308` | 中 |
+| 7 | SettingsDialog 仍然有"工程仓库地址"字段 | `SettingsDialog.svelte:103-105` | 低 |
+| 8 | ActionBar 的 push/pull 按钮用 `hasProjectRemote` 控制可用，但实际 push 对项目仓库用的是 `git_project::push`（不需要配置字段） | `ActionBar.svelte:45-53` | 中 |
+| 9 | HTML 模板中 CDN Three.js（`cdn.jsdelivr.net`）—— 离线不可用 | `html_gen.rs:84-91` | 中 |
+| 10 | `cmd_config_show` 和 `cmd_config_set` CLI 命令引用废弃字段 | `main.rs:407-479` | 低 |
+
+---
+
+### 二、建议方案
+
+#### P0 — 结构重构（消除重复 + 配置清理）
+
+**1. 新增 `src/git_helpers.rs`，提取公共函数**
+
+从 `main.rs` 和 `lib.rs` 中提取：
+- `get_changed_files(project_root, commit_hash) -> Vec<String>`
+- `get_changed_files_status(project_root, commit_hash) -> Vec<String>`
+- `has_blend_files(files) -> bool`
+- `get_git_author(project_root) -> String`
+
+两个调用点都改为 `saki_step::git_helpers::*`。
+
+**2. 新增 `src/app_config.rs`，从 `lib.rs` 提取 `AppConfig`**
+
+按照 `recent.rs` 的模式：
+- `AppConfig { blender_path: Option<String> }`
+- `AppConfig::load()` / `AppConfig::save()`
+- `default_app_config_path()` — 复用 `recent.rs` 的平台路径逻辑
+- `get_blender_path()` / `set_blender_path()` — 封装读写
+
+`lib.rs` 中的 `APP_CONFIG_PATH`、`read_app_config`、`write_app_config`、`AppConfig` struct 全部删除，改为调用 `saki_step::app_config::*`。
+
+**3. 清理 `config.rs` — MetaConfig 移除废弃字段**
+
+```rust
+pub struct MetaConfig {
+    pub version: String,
+    pub init_time: String,
+    #[serde(default, skip_serializing_if = "is_default_path")]
+    pub project_root: PathBuf,
+    #[serde(default, skip_serializing_if = "is_default_path")]
+    pub web_root: PathBuf,
+    // ❌ 移除 project_remote — 项目 push 不依赖此字段
+    pub web_remote: Option<String>,           // ✅ 保留
+    #[serde(default)]
+    pub web_push_enabled: bool,               // ✅ 保留
+    // ❌ 移除 page_password — Caddy 处理认证
+    // ❌ 移除 blender_path — 已迁移到 AppConfig
+}
+```
+
+注意：`project_remote` 在 CLI `cmd_push` 中并未检查，`git_project::push` 直接调 `git push -u origin <branch>`（依赖 git remote 已配置）；在 Tauri `push` 命令同理。所以这个字段记录了但没实际使用。
+
+**是否保留 `project_remote`？** 我建议移除，原因：
+- 实际 push 就是裸 `git push -u origin <branch>`，不需要程序知道 remote URL
+- 用户有 WebDAV 同步项目文件的需求，git remote 配置交给用户手动完成
+- 保留它会给人"我需要在这里填写才能 push"的错觉
+
+---
+
+#### P1 — 前端 & Tauri 清理
+
+**4. 清理 `update_config` command**
+
+只保留 `web_remote` 和 `web_push_enabled` 两个 key：
+```rust
+match key.as_str() {
+    "web_remote" => meta.web_remote = value,
+    "web_push_enabled" => { ... }
+    _ => return Err(format!("unknown config key: {key}"))
+}
+```
+
+**5. 清理 SettingsDialog**
+
+- 移除"工程仓库地址"输入框
+- 保留"网页仓库地址"和新增"自动推送到网页"开关（`web_push_enabled`）
+- Blender 区域保持不变
+
+**6. 清理 types.ts**
+
+```typescript
+export interface MetaConfig {
+  version: string
+  init_time: string
+  project_root: string
+  web_root: string
+  web_remote: string | null
+  web_push_enabled: boolean
+}
+```
+
+**7. ActionBar push/pull 按钮逻辑**
+
+当前 `hasProjectRemote` 检查 `cfg.project_remote`。移除后应改为：
+- **项目 push/pull**：永远启用（用户自行确保 `git remote` 已配置，否则 git 会报错，我们 catch 即可）
+- 或者：改为检查 `git remote -v` 是否有 origin（但这增加了复杂度）
+
+**建议**：简单方案 — push/pull 按钮永远启用，git 报错时用 toast 通知用户。这比维护一个不准确的配置字段好。
+
+**8. `main.rs` 的 `cmd_config` 清理**
+
+- 移除 `project_remote` 和 `page_password` 的显示/设置
+- 只保留 `web_remote` 和 `web_push_enabled`
+
+---
+
+#### P2 — HTML 生成优化
+
+**9. HTML Three.js 本地化**
+
+当前方案（CDN importmap）：
+```html
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/..." } }
+</script>
+```
+
+改为：在 `generate_index_html` 时，同时写一个 `three.min.js` 到 `web_root/`，HTML 引用本地文件：
+```html
+<script src="three.min.js"></script>
+```
+
+问题：Three.js 的 ES module + importmap + GLTFLoader/OrbitControls 的组合在本地文件模式下难以工作（browser CORS 限制阻止 `file://` 的 ES module import）。
+
+**两个方案：**
+- **方案 A**：保持 CDN importmap（简单，但需要联网）— 通过 Gitea 部署时本身就需要网络
+- **方案 B**：打成单文件 IIFE bundle（把 Three.js + OrbitControls + GLTFLoader 编译进 HTML 模板）— 可离线、无 CORS 问题，但维护成本高
+
+**建议**：既然网页通过 Caddy + Gitea 提供，访问者必须联网，**方案 A 保持 CDN 就行**。如果将来需要离线浏览，再用方案 B。
+
+**10. Diff 数据外置（可选）**
+
+当前 `generate_index_html` 把所有 diff 内嵌到 HTML 的 `{{DIFFS_JSON}}` 中。如果提交多、文件多，HTML 会很大。
+
+可以改为：diff 写入 `web_root/diffs.json`，HTML 用 `fetch('diffs.json')` 动态加载。
+
+好处：HTML 更小，diff 按需加载。坏处：多一个 HTTP 请求，需要服务端支持（但 Gitea 静态文件服务天然支持）。
+
+**建议**：这个作为后续优化，当前不急。
+
+---
+
+#### P3 — 可选改进
+
+**11. `web_remote` 初始化体验**
+
+当前流程：用户需要在设置中手动填 `web_remote`。可以加入 `init_project` 时的 web repo 自动初始化逻辑（类似项目 git init），但这不是必须的。
+
+**12. `web_push_enabled` 默认值**
+
+当前默认 `false`。用户如果在 settings 中填了 `web_remote`，也许应该自动推。建议改为：填了 `web_remote` 后，`web_push_enabled` 自动变为 `true`，或者在 commit 后提示"是否推送网页？"。
+
+**不建议现在做**，保持现有行为即可。
+
+---
+
+### 三、执行顺序
+
+```
+Step 1: 新建 src/git_helpers.rs — 提取公共函数
+Step 2: 新建 src/app_config.rs — 提取 AppConfig
+Step 3: 更新 src/lib.rs — 添加两个新 mod
+Step 4: main.rs — 删除重复函数，改用 git_helpers
+Step 5: lib.rs (Tauri) — 删除重复函数，改用 git_helpers + app_config
+Step 6: config.rs — 移除 project_remote, page_password, blender_path
+Step 7: main.rs cmd_config — 清理废弃字段
+Step 8: lib.rs update_config — 清理废弃 key
+Step 9: html_gen.rs — 移除密码相关残留（如果有）
+Step 10: types.ts — 清理 MetaConfig 接口
+Step 11: SettingsDialog.svelte — 移除工程仓库，加入 web_push toggle
+Step 12: ActionBar.svelte — push/pull 改为永远启用
+Step 13: App.svelte — 移除 hasProjectRemote 状态
+Step 14: api.ts — 无需改动（updateConfig 已经是通用 key/value）
+Step 15: cargo test — 验证所有改动
+```
+
+---
+
+### 四、风险点
+
+| 风险 | 缓解 |
+|------|------|
+| 旧 `.saki-step.toml` 有 `page_password` / `project_remote` / `blender_path` | `serde(default)` + `skip_serializing_if` 保证向后兼容，读取时忽略，写入时不再包含 |
+| `git_helpers` 提取后 CLI 和 Tauri 行为必须一致 | 提取后两个路径都调同一函数，反而更一致 |
+| 移除 `project_remote` 后 SettingsDialog 中原来填的值丢失 | 值本来就无意义（push 不用它），丢失无影响 |
+| 移除 `blender_path` from MetaConfig 后旧配置中 blender_path 丢失 | `read_meta` 时检测到有此字段，迁移到 AppConfig；或者首次启动时从项目配置复制到应用配置 |
+
+**`blender_path` 迁移策略**：最安全的做法是在 `read_meta` 或 `init_project` 中加一个一次性迁移逻辑：如果项目配置有 `blender_path` 且应用配置为空，就复制一份到应用配置并清空项目配置。但这增加了复杂度。**我建议暂不做迁移**，因为当前用户极少（你自己），在 Settings 里重新选一次 Blender 路径即可。
