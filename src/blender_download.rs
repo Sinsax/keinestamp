@@ -51,6 +51,27 @@ pub fn list_blender_versions() -> Vec<String> {
     KNOWN_VERSIONS.iter().map(|s| s.to_string()).collect()
 }
 
+pub fn list_installed_blender_versions() -> Vec<String> {
+    let dir = blender_install_dir();
+    let mut installed = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            // Directories are named like "blender-4.2.0-windows-x64" — extract version
+            if let Some(rest) = name.strip_prefix("blender-") {
+                if let Some(ver_end) = rest.find('-') {
+                    let ver = &rest[..ver_end];
+                    if ver.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                        installed.push(ver.to_string());
+                    }
+                }
+            }
+        }
+    }
+    installed
+}
+
 pub fn fetch_blender_versions() -> Result<Vec<String>> {
     eprintln!("[debug] fetch_blender_versions: trying mirrors");
     for mirror in VERSION_MIRRORS {

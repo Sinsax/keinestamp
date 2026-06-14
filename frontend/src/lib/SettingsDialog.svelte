@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { open } from '@tauri-apps/plugin-dialog'
   import { listen } from '@tauri-apps/api/event'
   import * as api from '../api'
 
@@ -16,9 +15,9 @@
 
   let webRemote = $state('')
   let webPushEnabled = $state(false)
-  let blenderPath = $state('')
   let selectedVersion = $state('')
   let versions = $state<string[]>([])
+  let installedVersions = $state<string[]>([])
   let versionsLoading = $state(false)
   let saving = $state(false)
   let downloading = $state(false)
@@ -44,11 +43,6 @@
         } catch { /* ignore */ }
       })()
     }
-    (async () => {
-      try {
-        blenderPath = await api.getBlenderPath()
-      } catch { /* ignore */ }
-    })()
 
     if (versions.length > 0 && !selectedVersion) {
       selectedVersion = versions[0]
@@ -56,6 +50,7 @@
     if (versions.length === 0) {
       loadVersions()
     }
+    loadInstalled()
 
     const unlistenPromise = listen<BlenderProgress>('blender-download-progress', (event) => {
       dlPhase = event.payload.phase
@@ -76,13 +71,14 @@
     versionsLoading = false
   }
 
-  async function pickBlender() {
-    const selected = await open({
-      multiple: false,
-      title: '选择 Blender 可执行文件',
-      filters: [{ name: 'Blender', extensions: ['exe', 'blender', ''] }]
-    })
-    if (selected) blenderPath = selected
+  async function loadInstalled() {
+    try {
+      installedVersions = await api.listInstalledBlenderVersions()
+    } catch { /* ignore */ }
+  }
+
+  function isInstalled(v: string): boolean {
+    return installedVersions.includes(v)
   }
 
   async function downloadBlender() {
@@ -92,9 +88,9 @@
     dlPercent = 0
     try {
       const exePath = await api.downloadBlender(selectedVersion || null)
-      blenderPath = exePath
       dlPhase = 'done'
       dlMessage = '下载完成 — 使用自带 Blender，无插件干扰 ✓'
+      loadInstalled()
     } catch (e) {
       dlPhase = 'error'
       dlMessage = `下载失败: ${e}`
@@ -105,7 +101,6 @@
   async function save() {
     saving = true
     try {
-      await api.setBlenderPath(blenderPath || '')
       if (hasProject) {
         await api.updateConfig(path, 'web_remote', webRemote || null)
         await api.updateConfig(path, 'web_push_enabled', webPushEnabled ? 'true' : 'false')
@@ -137,11 +132,6 @@
     <div class="section">
       <div class="section-title">Blender</div>
       <div class="field">
-        <label>Blender 路径</label>
-        <div class="input-row">
-          <input type="text" bind:value={blenderPath} placeholder="留空则使用系统 PATH 中的 blender" />
-          <button class="browse-btn" onclick={pickBlender}>浏览</button>
-        </div>
         <span class="hint">SakiStep 自带独立 Blender，不影响系统已安装的版本，无插件冲突风险</span>
         <div class="dl-row">
           {#if versionsLoading}
@@ -149,12 +139,14 @@
           {:else}
             <select bind:value={selectedVersion} disabled={downloading}>
               {#each versions as v}
-                <option value={v}>{v}{v === versions[0] ? ' (最新)' : ''}</option>
+                <option value={v}>
+                  {v}{v === versions[0] ? ' (最新)' : ''}{isInstalled(v) ? ' ✓' : ''}
+                </option>
               {/each}
             </select>
           {/if}
-          <button class="accent" onclick={downloadBlender} disabled={downloading || !selectedVersion}>
-            {downloading ? '下载中...' : '下载 Blender'}
+          <button class="accent" onclick={downloadBlender} disabled={downloading || !selectedVersion || isInstalled(selectedVersion)}>
+            {downloading ? '下载中...' : isInstalled(selectedVersion) ? '已安装' : '下载 Blender'}
           </button>
         </div>
         {#if dlPhase === 'downloading'}
@@ -186,7 +178,7 @@
         <div class="field">
           <label>网页仓库地址</label>
           <input type="text" bind:value={webRemote} placeholder="https://gitea.example.com/user/project-web.git" />
-          <span class="hint">推送时间线页面到 Gitea 远端仓库，Caddy 代理提供访问</span>
+          <span class="hint">建议：推送时间线页面到 Gitea 远端仓库，Caddy 代理提供访问</span>
         </div>
         <div class="field toggle-field">
           <label>
@@ -232,12 +224,9 @@
   .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
   .field input[type="text"] { width: 100%; }
   .hint { display: block; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
-  .input-row { display: flex; gap: 6px; }
-  .input-row input { flex: 1; }
-  .browse-btn { flex-shrink: 0; padding: 7px 14px; font-size: 12px; }
   .dl-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .dl-row button { font-size: 12px; padding: 5px 14px; }
-  .dl-row select { width: 160px; font-size: 12px; padding: 5px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+  .dl-row select { width: 200px; font-size: 12px; padding: 5px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
   .versions-loading { font-size: 11px; color: var(--text-dim); }
 
   .progress-bar-container {

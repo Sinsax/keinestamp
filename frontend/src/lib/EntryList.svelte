@@ -174,7 +174,7 @@
   }
 </script>
 
-<div class="entries">
+<div class="entries" onclick={() => onSelect('')}>
   {#if entries.length === 0}
     <div class="empty-state">
       <div class="big">~</div>
@@ -199,8 +199,8 @@
         class:active={entry.id === selectedId}
         class:tagged={!!entryTag}
         style={entryTag ? `--tag-color:${tagColor(entryTag)}` : ''}
-        onclick={() => onSelect(entry.id)}
-        ondblclick={() => onDblClick(entry)}
+        onclick={(e) => { e.stopPropagation(); onSelect(entry.id); }}
+        ondblclick={(e) => { e.stopPropagation(); onDblClick(entry); }}
       >
         <div class="top">
           <span class="hash">{entry.id.slice(0, 7)}</span>

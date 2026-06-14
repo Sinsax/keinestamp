@@ -2,6 +2,30 @@ use crate::timeline::Timeline;
 use anyhow::{Context, Result};
 use std::path::Path;
 
+fn base64_encode(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::new();
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(CHARS[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
+}
+
 fn compute_diff(project_root: &Path, entry_id: &str, file_path: &str) -> String {
     let output = std::process::Command::new("git")
         .args([
@@ -53,9 +77,12 @@ pub fn generate_index_html(
                 let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
                 let glb_path = web_root.join("previews_glb").join(format!("{}.glb", glb_name));
                 if glb_path.exists() {
+                    let b64 = std::fs::read(&glb_path)
+                        .map(|b| base64_encode(&b))
+                        .unwrap_or_default();
                     glb_map.entry(entry.id.clone())
                         .or_insert_with(Vec::new)
-                        .push(serde_json::json!({"file": file, "path": format!("previews_glb/{}.glb", glb_name)}));
+                        .push(serde_json::json!({"file": file, "base64": b64}));
                 }
             }
         }
@@ -77,15 +104,19 @@ pub fn generate_index_html(
     Ok(())
 }
 
-const THREE_VERSION: &str = "0.170.0";
+const THREE_CJS: &[u8] = include_bytes!("three-src/three.cjs");
+
+const ORBIT_CONTROLS_SRC: &[u8] = include_bytes!("three-src/controls/OrbitControls.js");
+
+const GLTF_LOADER_SRC: &[u8] = include_bytes!("three-src/loaders/GLTFLoader.js");
+
+const BUFFER_GEOMETRY_UTILS_SRC: &[u8] = include_bytes!("three-src/utils/BufferGeometryUtils.js");
 
 fn ensure_threejs(three_dir: &Path) -> Result<()> {
-    // Remove old module-based files that are no longer needed
     let old_files = ["three.module.js"];
     for old in &old_files {
         let path = three_dir.join(old);
         if path.exists() {
-            eprintln!("[debug] ensure_threejs: removing old file {:?}", path);
             let _ = std::fs::remove_file(path);
         }
     }
@@ -99,60 +130,36 @@ fn ensure_threejs(three_dir: &Path) -> Result<()> {
         }
     }
 
-    let downloads = [
-        ("three.cjs", format!("https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/build/three.cjs"), false),
-        ("controls/OrbitControls.js", format!("https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/controls/OrbitControls.js"), true),
-        ("loaders/GLTFLoader.js", format!("https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/loaders/GLTFLoader.js"), true),
-        ("utils/BufferGeometryUtils.js", format!("https://cdn.jsdelivr.net/npm/three@{THREE_VERSION}/examples/jsm/utils/BufferGeometryUtils.js"), true),
+    let files: [(&str, &[u8], bool); 4] = [
+        ("three.cjs", THREE_CJS, false),
+        ("controls/OrbitControls.js", ORBIT_CONTROLS_SRC, true),
+        ("loaders/GLTFLoader.js", GLTF_LOADER_SRC, true),
+        ("utils/BufferGeometryUtils.js", BUFFER_GEOMETRY_UTILS_SRC, true),
     ];
 
-    for (name, url, needs_transform) in &downloads {
+    for (name, data, needs_transform) in &files {
         let dest = three_dir.join(name);
+
+        let content = std::str::from_utf8(data)
+            .with_context(|| format!("three.js file {} is not valid UTF-8", name))?;
+
+        let expected = if *needs_transform {
+            transform_addon_js(content)
+        } else {
+            content.to_string()
+        };
+
         if dest.exists() {
-            if *needs_transform {
-                let content = std::fs::read_to_string(&dest).unwrap_or_default();
-                if !content.starts_with("(function(){") {
-                    eprintln!("[debug] ensure_threejs: re-transforming {:?} (no IIFE)", dest);
-                    let _ = std::fs::remove_file(&dest);
-                } else {
+            if let Ok(existing) = std::fs::read_to_string(&dest) {
+                if existing == expected {
                     continue;
                 }
-            } else {
-                continue;
             }
         }
-        eprintln!("[debug] ensure_threejs: downloading {} -> {:?}", url, dest);
-        let tmp_path = three_dir.join(format!("{}.download", name.replace('/', "_")));
-        if let Ok(()) = download_file(url, &tmp_path) {
-            if *needs_transform {
-                let content = std::fs::read_to_string(&tmp_path)
-                    .with_context(|| format!("failed to read {:?}", tmp_path))?;
-                let transformed = transform_addon_js(&content);
-                let tmp2 = dest.with_extension("tmp-js");
-                std::fs::write(&tmp2, &transformed)
-                    .with_context(|| format!("failed to write {:?}", tmp2))?;
-                std::fs::rename(&tmp2, &dest)
-                    .with_context(|| format!("failed to rename to {:?}", dest))?;
-                let _ = std::fs::remove_file(&tmp_path);
-            } else {
-                std::fs::rename(&tmp_path, &dest)
-                    .with_context(|| format!("failed to rename to {:?}", dest))?;
-            }
-            continue;
-        }
-        let _ = std::fs::remove_file(&tmp_path);
-        let mirror_urls = get_threejs_mirror_urls(name);
-        let mut downloaded = false;
-        for mirror_url in mirror_urls {
-            eprintln!("[debug] ensure_threejs: trying mirror {}", mirror_url);
-            if let Ok(()) = download_file(&mirror_url, &dest) {
-                downloaded = true;
-                break;
-            }
-        }
-        if !downloaded {
-            eprintln!("[debug] ensure_threejs: WARNING - could not download {}, 3D preview may not work", name);
-        }
+
+        eprintln!("[debug] ensure_threejs: writing {}", name);
+        std::fs::write(&dest, &expected)
+            .with_context(|| format!("failed to write {:?}", dest))?;
     }
 
     Ok(())
@@ -255,13 +262,6 @@ fn transform_addon_js(content: &str) -> String {
         if trimmed.starts_with("import {") && trimmed.contains("} from 'three';") {
             continue;
         }
-        if trimmed.starts_with("import {") {
-            in_import_block = true;
-            continue;
-        }
-        if trimmed.starts_with("import ") && (trimmed.contains(" from 'three';") || trimmed.contains(" from \"three\";")) {
-            continue;
-        }
         if trimmed.starts_with("import ") && trimmed.contains(" from '../utils/") {
             let content = trimmed.trim_start_matches("import ");
             let brace_part = content.split("} from").next().unwrap_or(content);
@@ -273,6 +273,10 @@ fn transform_addon_js(content: &str) -> String {
                 let alias = parts.get(1).unwrap_or(&parts[0]);
                 result.push_str(&format!("  var {} = window.{};\n", alias, parts[0]));
             }
+            continue;
+        }
+        if trimmed.starts_with("import {") {
+            in_import_block = true;
             continue;
         }
 
@@ -292,39 +296,6 @@ fn transform_addon_js(content: &str) -> String {
     }
     result.push_str("})();\n");
     result
-}
-
-fn get_threejs_mirror_urls(name: &str) -> Vec<String> {
-    match name {
-        "three.cjs" => vec![
-            format!("https://mirrors.tuna.tsinghua.edu.cn/npm/three@{}/build/three.cjs", THREE_VERSION),
-            format!("https://registry.npmmirror.com/three@{}/build/three.cjs", THREE_VERSION),
-        ],
-        "controls/OrbitControls.js" => vec![
-            format!("https://mirrors.tuna.tsinghua.edu.cn/npm/three@{}/examples/jsm/controls/OrbitControls.js", THREE_VERSION),
-            format!("https://registry.npmmirror.com/three@{}/examples/jsm/controls/OrbitControls.js", THREE_VERSION),
-        ],
-        "loaders/GLTFLoader.js" => vec![
-            format!("https://mirrors.tuna.tsinghua.edu.cn/npm/three@{}/examples/jsm/loaders/GLTFLoader.js", THREE_VERSION),
-            format!("https://registry.npmmirror.com/three@{}/examples/jsm/loaders/GLTFLoader.js", THREE_VERSION),
-        ],
-        "utils/BufferGeometryUtils.js" => vec![
-            format!("https://mirrors.tuna.tsinghua.edu.cn/npm/three@{}/examples/jsm/utils/BufferGeometryUtils.js", THREE_VERSION),
-            format!("https://registry.npmmirror.com/three@{}/examples/jsm/utils/BufferGeometryUtils.js", THREE_VERSION),
-        ],
-        _ => vec![],
-    }
-}
-
-fn download_file(url: &str, dest: &Path) -> Result<()> {
-    let resp = ureq::get(url).call().map_err(|e| anyhow::anyhow!("download failed: {}", e))?;
-    let mut reader = resp.into_reader();
-    let mut buf = Vec::new();
-    reader.read_to_end(&mut buf).map_err(|e| anyhow::anyhow!("read failed: {}", e))?;
-    let tmp = dest.with_extension(format!("tmp{}_{}", std::process::id(), dest.file_name().unwrap_or_default().to_string_lossy()));
-    std::fs::write(&tmp, &buf).with_context(|| format!("failed to write {:?}", tmp))?;
-    std::fs::rename(&tmp, dest).with_context(|| format!("failed to rename {:?} to {:?}", tmp, dest))?;
-    Ok(())
 }
 
 const TEMPLATE: &str = r#"<!DOCTYPE html>
@@ -383,7 +354,20 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
 .dl.mod { background: rgba(100, 140, 255, 0.12); color: #648cff; }
 .dl.mod .dl-num { color: #648cff; }
 .model-placeholder { font-size: 11px; color: #6c7086; padding: 8px; text-align: center; background: #181825; border-radius: 6px; }
-.model-box { width: 100%; border-radius: 6px; overflow: hidden; background: #1a1a2e; }
+.model-box { width: 100%; border-radius: 6px; overflow: hidden; background: #1a1a2e; position: relative; }
+.model-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: rgba(17,17,27,0.82); z-index: 10; font-size: 11px; }
+.model-toolbar .sep { width: 1px; height: 16px; background: #45475a; margin: 0 4px; }
+.mbtn { padding: 3px 8px; background: rgba(69,71,90,0.5); border: 1px solid #45475a; border-radius: 4px; color: #a6adc8; cursor: pointer; font-size: 10px; font-family: inherit; transition: background 0.15s, color 0.15s; white-space: nowrap; }
+.mbtn:hover { background: rgba(69,71,90,0.9); }
+.mbtn.active { background: rgba(137,180,250,0.2); border-color: #89b4fa; color: #89b4fa; }
+.model-expand-btn { width: 26px; height: 26px; background: rgba(30,30,46,0.85); border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: background 0.2s; margin-left: auto; }
+.model-expand-btn:hover { background: rgba(69,71,90,0.95); }
+.model-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; background: #11111b; display: flex; flex-direction: column; }
+.model-overlay-bar { display: flex; align-items: center; gap: 4px; padding: 6px 12px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; font-size: 11px; }
+.model-overlay-bar .sep { width: 1px; height: 16px; background: #45475a; margin: 0 4px; }
+.model-overlay-close { width: 26px; height: 26px; background: rgba(224,108,117,0.15); border: 1px solid #e06c75; border-radius: 4px; color: #e06c75; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; margin-left: auto; }
+.model-overlay-close:hover { background: rgba(224,108,117,0.3); }
+.model-overlay-canvas { flex: 1; position: relative; }
 
 </style>
 </head>
@@ -533,7 +517,7 @@ function render() {
         h += '<div class="sec-body" style="">';
         eGlbs.forEach(function(g) {
           h += '<div class="diff-entry"><div class="diff-path">' + esc(g.file) + '</div>';
-          h += '<div class="model-box" data-src="' + g.path + '"><div class="model-placeholder">加载 3D 模型...</div></div>';
+          h += '<div class="model-box" data-base64="' + g.base64 + '"><div class="model-placeholder">加载 3D 模型...</div></div>';
           h += '</div>';
         });
         h += '</div>';
@@ -556,8 +540,241 @@ function toggleSec(el) {
   }
 }
 
+function createViewer(container, w, h, b64, isOverlay) {
+  var scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x1a1a2e);
+  var camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 1000);
+  camera.position.set(0, 0, 7);
+
+  var renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(w, h);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+
+  var OC = window.OrbitControls || THREE.OrbitControls;
+  var controls = new OC(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.1;
+  controls.target.set(0, 0, 0);
+  controls.update();
+
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  var keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  keyLight.position.set(5, 8, 5);
+  scene.add(keyLight);
+  var fillLight = new THREE.DirectionalLight(0x8888ff, 0.4);
+  fillLight.position.set(-3, 2, -3);
+  scene.add(fillLight);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 0.3));
+  var grid = new THREE.GridHelper(10, 10, 0x444466, 0x333355);
+  scene.add(grid);
+
+  var modelObj = null;
+  var originalMaterials = [];
+  var wireframeVisible = false;
+  var xrayMode = false;
+
+  function saveMaterials() {
+    originalMaterials = [];
+    if (!modelObj) return;
+    modelObj.traverse(function(c) {
+      if (c.isMesh && c.material) {
+        var mats = Array.isArray(c.material) ? c.material : [c.material];
+        originalMaterials.push({ mesh: c, saved: mats.map(function(m) { return m.clone(); }) });
+      }
+    });
+  }
+
+  function rebuildWireframe() {
+    if (!modelObj) return;
+    modelObj.traverse(function(c) {
+      if (!c.isMesh) return;
+      var toRemove = [];
+      c.children.forEach(function(child) {
+        if (child.userData._wireframeEdge) toRemove.push(child);
+      });
+      toRemove.forEach(function(child) { c.remove(child); });
+    });
+    if (!wireframeVisible) return;
+    modelObj.traverse(function(c) {
+      if (!c.isMesh) return;
+      try {
+        var edges = new THREE.WireframeGeometry(c.geometry);
+        var lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x89b4fa, opacity: 0.7, transparent: true }));
+        lines.userData._wireframeEdge = true;
+        c.add(lines);
+      } catch(e) {}
+    });
+  }
+
+  function applyShading() {
+    if (!modelObj) return;
+    modelObj.traverse(function(c) {
+      if (!c.isMesh) return;
+      var info = originalMaterials.find(function(o) { return o.mesh === c; });
+      if (!info) return;
+      if (xrayMode) {
+        var base = Array.isArray(info.saved) && info.saved.length === 1 ? info.saved[0] : info.saved[0];
+        var xmat = base.clone();
+        xmat.transparent = true;
+        xmat.opacity = 0.35;
+        xmat.wireframe = false;
+        xmat.depthWrite = false;
+        c.material = xmat;
+      } else {
+        c.material = Array.isArray(info.saved) && info.saved.length === 1 ? info.saved[0] : info.saved;
+        c.material.transparent = false;
+        c.material.opacity = 1.0;
+        c.material.depthWrite = true;
+      }
+    });
+  }
+
+  function resetFrontView() {
+    if (!modelObj) return;
+    var box = new THREE.Box3().setFromObject(modelObj);
+    var size = box.getSize(new THREE.Vector3());
+    var center = box.getCenter(new THREE.Vector3());
+    var dist = Math.max(size.x, size.y, size.z) * 1.8;
+    camera.position.set(center.x, center.y, center.z + dist);
+    controls.target.set(center.x, center.y, center.z);
+    controls.update();
+  }
+
+  function showError(msg) {
+    renderer.domElement.remove();
+    var ph = document.createElement('div');
+    ph.className = 'model-placeholder';
+    ph.textContent = msg;
+    container.appendChild(ph);
+  }
+
+  var binary = atob(b64);
+  var bytes = new Uint8Array(binary.length);
+  for (var i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  var GL = window.GLTFLoader || THREE.GLTFLoader;
+  var loader = new GL();
+  loader.parse(bytes.buffer, '', function(gltf) {
+    modelObj = gltf.scene;
+    var box = new THREE.Box3().setFromObject(modelObj);
+    var size = box.getSize(new THREE.Vector3());
+    var center = box.getCenter(new THREE.Vector3());
+    var maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0) {
+      var s = 3.5 / maxDim;
+      modelObj.scale.set(s, s, s);
+      modelObj.position.set(-center.x * s, -center.y * s + (size.y * s) / 2, -center.z * s);
+      scene.add(modelObj);
+      saveMaterials();
+      applyShading();
+      resetFrontView();
+    } else {
+      showError('3D 模型无可见网格');
+    }
+  }, function(err) {
+    console.error('GLB parse failed:', err);
+    showError('3D 模型解析失败');
+  });
+
+  function btn(label, cls, onclick) {
+    var b = document.createElement('button');
+    b.className = cls || 'mbtn';
+    b.textContent = label;
+    b.addEventListener('click', function(e) { e.stopPropagation(); onclick(b); });
+    return b;
+  }
+
+  function makeToolbar(expandCb) {
+    var tb = document.createElement('div');
+    tb.className = isOverlay ? 'model-overlay-bar' : 'model-toolbar';
+
+    var shadeModes = ['material', 'flat', 'normal'];
+    var shadeLabels = { material: '贴图', flat: '灰模', normal: '平滑' };
+    var currentShading = 'material';
+    shadeModes.forEach(function(m) {
+      var b = btn(shadeLabels[m], 'mbtn' + (currentShading===m?' active':''), function() {
+        currentShading = m;
+        if (modelObj) {
+          modelObj.traverse(function(c) {
+            if (!c.isMesh) return;
+            var info = originalMaterials.find(function(o) { return o.mesh === c; });
+            if (!info) return;
+            if (m === 'material') {
+              c.material = Array.isArray(info.saved) && info.saved.length === 1 ? info.saved[0] : info.saved;
+              c.material.flatShading = false;
+              c.material.needsUpdate = true;
+            } else if (m === 'flat') {
+              c.material = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.7, metalness: 0 });
+            } else if (m === 'normal') {
+              c.material = new THREE.MeshNormalMaterial();
+            }
+            if (xrayMode && c.material) {
+              c.material.transparent = true;
+              c.material.opacity = 0.35;
+              c.material.depthWrite = false;
+            }
+          });
+        }
+        tb.querySelectorAll('.shade-btn').forEach(function(x) { x.classList.remove('active'); });
+        b.classList.add('active');
+      });
+      b.classList.add('shade-btn');
+      if (currentShading === m) b.classList.add('active');
+      tb.appendChild(b);
+    });
+
+    tb.appendChild(document.createElement('span')).className = 'sep';
+
+    var wireBtn = btn('线框', 'mbtn', function() {
+      wireframeVisible = !wireframeVisible;
+      rebuildWireframe();
+      if (wireframeVisible) wireBtn.classList.add('active'); else wireBtn.classList.remove('active');
+    });
+    tb.appendChild(wireBtn);
+
+    var xrayBtn = btn('透视', 'mbtn', function() {
+      xrayMode = !xrayMode;
+      applyShading();
+      if (xrayMode) xrayBtn.classList.add('active'); else xrayBtn.classList.remove('active');
+    });
+    tb.appendChild(xrayBtn);
+
+    var gridBtn = btn('网格', 'mbtn active', function() {
+      grid.visible = !grid.visible;
+      if (grid.visible) gridBtn.classList.add('active'); else gridBtn.classList.remove('active');
+    });
+    tb.appendChild(gridBtn);
+
+    var frontBtn = btn('正视图', 'mbtn', function() {
+      resetFrontView();
+    });
+    tb.appendChild(frontBtn);
+
+    if (expandCb) {
+      var eb = document.createElement('button');
+      eb.className = 'model-expand-btn';
+      eb.innerHTML = '&#x26F6;';
+      eb.addEventListener('click', function(e) { e.stopPropagation(); expandCb(); });
+      tb.appendChild(eb);
+    }
+    if (isOverlay) {
+      var cb = document.createElement('button');
+      cb.className = 'model-overlay-close';
+      cb.innerHTML = '&times;';
+      cb.addEventListener('click', function() { container.closest('.model-overlay').remove(); });
+      tb.appendChild(cb);
+    }
+    return tb;
+  }
+
+  return { scene: scene, renderer: renderer, camera: camera, controls: controls, makeToolbar: makeToolbar, grid: grid, modelObj: modelObj, perspCam: camera };
+}
+
 function initModels() {
-  if (!document.querySelector('.model-box[data-src]')) return;
+  if (!document.querySelector('.model-box[data-base64]')) return;
   if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) {
     console.error('Three.js not loaded');
     document.querySelectorAll('.model-placeholder').forEach(function(el) {
@@ -566,117 +783,66 @@ function initModels() {
     return;
   }
 
-  document.querySelectorAll('.model-box[data-src]').forEach(function(el) {
-    var src = el.getAttribute('data-src');
-    if (!src) return;
+  document.querySelectorAll('.model-box[data-base64]').forEach(function(el) {
+    var b64 = el.getAttribute('data-base64');
+    if (!b64) return;
     if (el.getAttribute('data-initialized')) return;
     el.setAttribute('data-initialized', '1');
-    var w = el.clientWidth || 400;
-    var h = 280;
+    var w = el.clientWidth || 600;
+    var h = 450;
     el.style.height = h + 'px';
-    el.innerHTML = '<div class="model-placeholder">⏳ 加载 3D 模型中... (' + src + ')</div>';
 
-    var scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1a1a2e);
+    var v = createViewer(el, w, h, b64, false);
+    el.innerHTML = '';
+    el.appendChild(v.makeToolbar(function() { openFullscreen(el); }));
+    el.appendChild(v.renderer.domElement);
 
-    var camera = new THREE.PerspectiveCamera(45, w / h, 0.1, 1000);
-    camera.position.set(3, 2, 5);
-
-    var renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(w, h);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
-
-    var OrbitControls = window.OrbitControls || (THREE.OrbitControls);
-    var GLTFLoader = window.GLTFLoader || (THREE.GLTFLoader);
-    var controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 2.0;
-    controls.target.set(0, 0, 0);
-    controls.update();
-
-    var ambient = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambient);
-    var key = new THREE.DirectionalLight(0xffffff, 1.2);
-    key.position.set(5, 8, 5);
-    scene.add(key);
-    var fill = new THREE.DirectionalLight(0x8888ff, 0.4);
-    fill.position.set(-3, 2, -3);
-    scene.add(fill);
-    var hemi = new THREE.HemisphereLight(0xffffff, 0x444444, 0.3);
-    scene.add(hemi);
-    var grid = new THREE.GridHelper(10, 10, 0x444466, 0x333355);
-    scene.add(grid);
-
-    function showError(msg) {
-      renderer.domElement.remove();
-      var ph = document.createElement('div');
-      ph.className = 'model-placeholder';
-      ph.textContent = msg;
-      el.appendChild(ph);
+    function anim() {
+      requestAnimationFrame(anim);
+      v.controls.update();
+      v.renderer.render(v.scene, v.camera);
     }
+    anim();
+  });
+}
 
-    var loader = new GLTFLoader();
-    var xhr = new XMLHttpRequest();
-    xhr.open('GET', src, true);
-    xhr.responseType = 'arraybuffer';
-    xhr.timeout = 180000;
-    xhr.onprogress = function(ev) {
-      if (ev.lengthComputable && ev.total > 0) {
-        var pct = Math.round(ev.loaded / ev.total * 100);
-        var placeholders = el.querySelectorAll('.model-placeholder');
-        if (placeholders.length > 0) {
-          placeholders[0].textContent = '⏳ 加载 3D 模型中... ' + pct + '% (' + Math.round(ev.loaded / 1048576) + '/' + Math.round(ev.total / 1048576) + 'MB)';
-        }
-      }
-    };
-    xhr.onload = function() {
-      if (xhr.status === 200 || xhr.status === 0) {
-        el.innerHTML = '';
-        el.appendChild(renderer.domElement);
-        loader.parse(xhr.response, '', function(gltf) {
-          var model = gltf.scene;
-          var box = new THREE.Box3().setFromObject(model);
-          var size = box.getSize(new THREE.Vector3());
-          var center = box.getCenter(new THREE.Vector3());
-          var maxDim = Math.max(size.x, size.y, size.z);
-          if (maxDim > 0) {
-            var s = 2.5 / maxDim;
-            model.scale.set(s, s, s);
-            model.position.set(
-              -center.x * s,
-              -center.y * s + (size.y * s) / 2,
-              -center.z * s
-            );
-            scene.add(model);
-          } else {
-            showError('3D 模型无可见网格');
-          }
-        }, function(err) {
-          console.error('GLB parse failed:', src, err);
-          showError('3D 模型解析失败');
-        });
-      } else {
-        showError('3D 模型加载失败 (' + xhr.status + ')');
-      }
-    };
-    xhr.onerror = function() {
-      showError('3D 模型加载失败（网络错误）');
-    };
-    xhr.ontimeout = function() {
-      showError('3D 模型加载超时');
-    };
-    xhr.send();
+function openFullscreen(el) {
+  var b64 = el.getAttribute('data-base64');
+  if (!b64) return;
+  var overlay = document.createElement('div');
+  overlay.className = 'model-overlay';
+  var vw = window.innerWidth;
+  var vh = window.innerHeight - 42;
 
-    function animate() {
-      requestAnimationFrame(animate);
-      controls.update();
-      renderer.render(scene, camera);
-    }
-    animate();
+  var v = createViewer(overlay, vw, vh, b64, true);
+  var bar = v.makeToolbar(null);
+  overlay.appendChild(bar);
+  var canvasArea = document.createElement('div');
+  canvasArea.className = 'model-overlay-canvas';
+  canvasArea.appendChild(v.renderer.domElement);
+  overlay.appendChild(canvasArea);
+  document.body.appendChild(overlay);
+
+  function onKey(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+  }
+  document.addEventListener('keydown', onKey);
+
+  function anim() {
+    if (!document.body.contains(overlay)) return;
+    requestAnimationFrame(anim);
+    v.controls.update();
+    v.renderer.render(v.scene, v.camera);
+  }
+  anim();
+
+  window.addEventListener('resize', function onResize() {
+    if (!document.body.contains(overlay)) { window.removeEventListener('resize', onResize); return; }
+    var nw = window.innerWidth;
+    var nh = window.innerHeight - 42;
+    v.perspCam.aspect = nw / nh;
+    v.perspCam.updateProjectionMatrix();
+    v.renderer.setSize(nw, nh);
   });
 }
 render();
@@ -771,5 +937,52 @@ mod tests {
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
+    }
+
+    #[test]
+    fn test_transform_gltf_loader() {
+        let src = std::str::from_utf8(GLTF_LOADER_SRC).unwrap();
+        let result = transform_addon_js(src);
+        assert!(result.starts_with("(function(){"), "should wrap in IIFE");
+        assert!(result.contains("var THREE = window.THREE;"), "should have THREE alias");
+        assert!(result.contains("var toTrianglesDrawMode = window.toTrianglesDrawMode;"), "should handle cross-addon import");
+        assert!(result.contains("window.GLTFLoader = GLTFLoader;"), "should export GLTFLoader to window");
+        assert!(!result.contains("import {"), "should have no import statements");
+        assert!(!result.contains("export {"), "should have no export statements");
+        assert!(!result.contains("import "), "should have no import at all");
+    }
+
+    #[test]
+    fn test_base64_encode_standard() {
+        assert_eq!(base64_encode(b"f"), "Zg==");
+        assert_eq!(base64_encode(b"fo"), "Zm8=");
+        assert_eq!(base64_encode(b"foo"), "Zm9v");
+        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
+        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
+        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
+    }
+
+    #[test]
+    fn test_base64_encode_empty() {
+        assert_eq!(base64_encode(b""), "");
+    }
+
+    #[test]
+    fn test_base64_encode_binary() {
+        let data: Vec<u8> = (0..255).collect();
+        let b64 = base64_encode(&data);
+        assert_eq!(b64.len(), ((data.len() + 2) / 3) * 4);
+        assert!(b64.is_ascii());
+        assert!(!b64.is_empty());
+    }
+
+    #[test]
+    fn test_transform_orbit_controls() {
+        let src = std::str::from_utf8(ORBIT_CONTROLS_SRC).unwrap();
+        let result = transform_addon_js(src);
+        assert!(result.starts_with("(function(){"), "should wrap in IIFE");
+        assert!(result.contains("window.OrbitControls = OrbitControls;"), "should export OrbitControls to window");
+        assert!(!result.contains("import "), "should have no import at all");
+        assert!(!result.contains("export "), "should have no export at all");
     }
 }

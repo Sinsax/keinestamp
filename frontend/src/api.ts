@@ -93,6 +93,10 @@ export async function listBlenderVersions(): Promise<string[]> {
   return invoke<string[]>('list_blender_versions')
 }
 
+export async function listInstalledBlenderVersions(): Promise<string[]> {
+  return invoke<string[]>('list_installed_blender_versions')
+}
+
 export async function getBlenderPath(): Promise<string> {
   return invoke<string>('get_blender_path')
 }

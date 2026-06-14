@@ -7,7 +7,7 @@
   let tag = $state('')
   let customTag = $state('')
   let useCustom = $state(false)
-  let noPreview = $state(false)
+  let previewEnabled = $state(true)
 
   function effectiveTag(): string | null {
     if (!tag && !useCustom) return null
@@ -16,7 +16,7 @@
   }
 
   function handleConfirm() {
-    if (message.trim()) onConfirm(message.trim(), effectiveTag(), noPreview)
+    if (message.trim()) onConfirm(message.trim(), effectiveTag(), !previewEnabled)
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -37,7 +37,7 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="dialog-overlay" onclick={onCancel} role="dialog">
-  <div class="dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
+  <div class="dialog commit-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
     <h3>Commit Progress</h3>
     <div class="field">
       <label>Commit message</label>
@@ -72,11 +72,9 @@
         />
       {/if}
     </div>
-    <div class="field">
-      <label class="checkbox-label">
-        <input type="checkbox" bind:checked={noPreview} />
-        <span>跳过 3D 预览 (不导出 GLB)</span>
-      </label>
+    <div class="field row-field">
+      <label>3D 预览</label>
+      <input type="checkbox" bind:checked={previewEnabled} />
     </div>
     <div class="actions">
       <button onclick={onCancel}>Cancel</button>
@@ -88,6 +86,9 @@
 </div>
 
 <style>
+  :global(.commit-dialog) {
+    width: 460px;
+  }
   .tag-row {
     display: flex;
     flex-wrap: wrap;
@@ -127,16 +128,18 @@
     background: var(--bg);
     color: var(--text);
   }
-  .checkbox-label {
+  .row-field {
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 12px;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 4px 0;
+    gap: 10px;
   }
-  .checkbox-label input {
+  .row-field label {
+    margin-bottom: 0 !important;
+  }
+  .row-field input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
     accent-color: var(--accent);
+    cursor: pointer;
   }
 </style>

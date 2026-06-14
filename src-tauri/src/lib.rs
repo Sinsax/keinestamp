@@ -635,6 +635,12 @@ async fn list_blender_versions() -> Vec<String> {
 }
 
 #[tauri::command]
+fn list_installed_blender_versions() -> Vec<String> {
+    eprintln!("[debug] list_installed_blender_versions()");
+    saki_step::blender_download::list_installed_blender_versions()
+}
+
+#[tauri::command]
 fn get_blender_path() -> String {
     eprintln!("[debug] get_blender_path()");
     let result = saki_step::app_config::get_blender_path()
@@ -706,6 +712,7 @@ pub fn run() {
             get_glb_preview,
             download_blender,
             list_blender_versions,
+            list_installed_blender_versions,
             get_blender_path,
             set_blender_path,
         ])
