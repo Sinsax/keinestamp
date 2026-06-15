@@ -35,6 +35,7 @@
   let showCommit = $state(false)
   let showSettings = $state(false)
   let cachedVersions = $state<string[]>([])
+  let hasRemote = $state(false)
 
   async function loadCachedVersions() {
     if (cachedVersions.length === 0) {
@@ -88,6 +89,7 @@
       if (pt === 'initialized') {
         const timeline = await api.getTimeline(path)
         entries = timeline.entries.toReversed()
+        hasRemote = await api.hasRemote(path)
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
       } else {
         entries = []
@@ -327,6 +329,9 @@
               activePath={activePath}
               onSelect={(id) => selectedEntryId = id}
               onDblClick={(e) => detailEntry = e}
+              onPush={handlePush}
+              onPull={handlePull}
+              {hasRemote}
             />
           </div>
         {/if}
@@ -337,8 +342,6 @@
         onCommit={() => showCommit = true}
         onExport={handleExport}
         onRevert={handleRevert}
-        onPush={handlePush}
-        onPull={handlePull}
       />
 
       <StatusBar text={statusText} />

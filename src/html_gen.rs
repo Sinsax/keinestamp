@@ -89,6 +89,16 @@ pub fn generate_index_html(
     }
     let glb_json = serde_json::to_string(&glb_map)?;
 
+    let mut calendar: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    for entry in &timeline.entries {
+        if let Some(date) = entry.timestamp.split('T').next() {
+            if !date.is_empty() {
+                calendar.entry(date.to_string()).or_default().push(entry.id.clone());
+            }
+        }
+    }
+    let calendar_json = serde_json::to_string(&calendar)?;
+
     let three_dir = web_root.join("three");
     ensure_threejs(&three_dir)?;
 
@@ -96,6 +106,7 @@ pub fn generate_index_html(
         .replace("{{TIMELINE_JSON}}", &timeline_json)
         .replace("{{GLB_JSON}}", &glb_json)
         .replace("{{DIFFS_JSON}}", &diffs_json)
+        .replace("{{CALENDAR_JSON}}", &calendar_json)
         .replace("{{PAGE_TITLE}}", page_title);
 
     std::fs::write(web_root.join("index.html"), &html)
@@ -313,7 +324,9 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1e1e2e; color: #cdd6f4; line-height: 1.6; }
-.container { max-width: 800px; margin: 0 auto; padding: 40px 20px; }
+.page { display: flex; min-height: 100vh; }
+.left-col { width: 230px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; padding: 16px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.right-col { flex: 1; min-width: 0; max-width: 800px; margin: 0 auto; padding: 40px 24px; }
 h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
 .subtitle { color: #6c7086; margin-bottom: 32px; }
 .entry { background: #181825; border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid #313244; border-left: 3px solid #313244; }
@@ -353,6 +366,32 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
 .dl.del .dl-num { color: #e06c75; }
 .dl.mod { background: rgba(100, 140, 255, 0.12); color: #648cff; }
 .dl.mod .dl-num { color: #648cff; }
+.cal { }
+.cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.cal-title { font-size: 13px; font-weight: 700; color: #cdd6f4; }
+.cal-nav { display: flex; gap: 4px; }
+.cal-nav button { width: 20px; height: 20px; background: rgba(69,71,90,0.4); border: 1px solid #45475a; border-radius: 3px; color: #a6adc8; cursor: pointer; font-size: 10px; line-height: 1; display: flex; align-items: center; justify-content: center; }
+.cal-nav button:hover { background: rgba(69,71,90,0.8); }
+.cal-month { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+.cal-mlabel { font-size: 9px; color: #585b70; width: 14px; flex-shrink: 0; text-align: right; }
+.cal-days { display: flex; gap: 2px; flex-wrap: wrap; }
+.cal-cday { width: 6px; height: 6px; border-radius: 1px; background: #313244; cursor: pointer; }
+.cal-cday:hover { outline: 1px solid #89b4fa; outline-offset: 0; }
+.cal-cday.h1 { background: #1a6d3c; }
+.cal-cday.h2 { background: #238a4a; }
+.cal-cday.h3 { background: #30a758; }
+.cal-cday.h4 { background: #40c468; }
+.cal-cday.today { outline: 1px solid #f9e2af; outline-offset: 0; }
+.cal-legend { display: flex; align-items: center; gap: 2px; margin-top: 6px; font-size: 8px; color: #585b70; }
+.cal-legend .s { width: 8px; height: 8px; border-radius: 1px; background: #313244; display: inline-block; }
+.cal-legend .s.s1 { background: #1a6d3c; }
+.cal-legend .s.s2 { background: #238a4a; }
+.cal-legend .s.s3 { background: #30a758; }
+.cal-legend .s.s4 { background: #40c468; }
+.left-footer { margin-top: auto; display: flex; flex-direction: column; gap: 4px; padding-top: 12px; border-top: 1px solid #313244; }
+.left-footer-btn { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 6px; background: rgba(69,71,90,0.3); border: 1px solid #45475a; color: #cdd6f4; cursor: pointer; font-size: 12px; font-weight: 600; transition: background 0.12s; }
+.left-footer-btn:hover { background: rgba(69,71,90,0.6); }
+.left-footer-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
 .model-placeholder { font-size: 11px; color: #6c7086; padding: 8px; text-align: center; background: #181825; border-radius: 6px; }
 .model-box { width: 100%; border-radius: 6px; overflow: hidden; background: #1a1a2e; position: relative; }
 .model-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: rgba(17,17,27,0.82); z-index: 10; font-size: 11px; }
@@ -372,11 +411,22 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
 </style>
 </head>
 <body>
-<div class="container" id="app"></div>
+<div class="page">
+  <div class="left-col">
+    <div id="cal-sidebar"></div>
+    <div class="left-footer">
+      <span style="font-size:10px;color:#6c7086;text-align:center">SakiStep</span>
+    </div>
+  </div>
+  <div class="right-col">
+    <div id="app"></div>
+  </div>
+</div>
 <script>
 var data = {{TIMELINE_JSON}};
 var glbData = {{GLB_JSON}};
 var diffsData = {{DIFFS_JSON}};
+var calData = {{CALENDAR_JSON}};
 
 var TAG_PRESETS = {'建模':0,'UV拆分':1,'绑定':2,'贴图':3,'修复':4};
 var TAG_COLORS = ['#89b4fa','#a6e3a1','#cba6f7','#fab387','#f38ba8','#94e2d5'];
@@ -467,7 +517,8 @@ function render() {
 
       var tagClass = tag ? ' tagged' : '';
       var tagStyle = tag ? ';--tag-color:' + tagColor(tag) : '';
-      h += '<div class="entry' + tagClass + '" style="' + tagStyle + '">';
+      var dateId = e.timestamp ? e.timestamp.substring(0,10) : '';
+      h += '<div class="entry' + tagClass + '" style="' + tagStyle + '"' + (dateId ? ' id="d-' + dateId + '"' : '') + '>';
       h += '<div class="entry-header">';
       h += '<span class="entry-id">' + esc(e.id.substring(0,7)) + '</span>';
       h += '<span class="entry-date">' + esc(e.timestamp ? e.timestamp.substring(0,19).replace('T',' ') : '') + '</span>';
@@ -538,6 +589,50 @@ function toggleSec(el) {
     body.style.display = isHidden ? '' : 'none';
     arr.textContent = isHidden ? '▾' : '▸';
   }
+}
+
+function renderCalendar() {
+  var el = document.getElementById('cal-sidebar');
+  if (!el) return;
+  var dates = Object.keys(calData || {}).sort();
+  if (dates.length === 0) { el.style.display = 'none'; return; }
+
+  var calYear = parseInt(new Date().getFullYear());
+
+  function buildYear(year) {
+    var h = '<div class="cal-header"><span class="cal-title">' + year + '</span><div class="cal-nav"><button onclick="calNav(-1)">&#x25C0;</button><button onclick="calNav(1)">&#x25B6;</button></div></div>';
+    for (var m = 0; m < 12; m++) {
+      var daysInMonth = new Date(year, m + 1, 0).getDate();
+      h += '<div class="cal-month">';
+      h += '<span class="cal-mlabel">' + (m + 1) + '</span>';
+      h += '<span class="cal-days">';
+      for (var d = 1; d <= daysInMonth; d++) {
+        var ds = year + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        var ids = calData[ds];
+        var cls = 'cal-cday';
+        if (ids) cls += ids.length > 3 ? ' h4' : ids.length > 2 ? ' h3' : ids.length > 1 ? ' h2' : ' h1';
+        var today = new Date();
+        var isToday = ds === today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+        if (isToday) cls += ' today';
+        h += '<span class="' + cls + '" title="' + ds + (ids ? ' (' + ids.length + ')' : '') + '" onclick="calScroll(\'' + ds + '\')"></span>';
+      }
+      h += '</span></div>';
+    }
+    h += '<div class="cal-legend">少<span class="s"></span><span class="s s1"></span><span class="s s2"></span><span class="s s3"></span><span class="s s4"></span>多</div>';
+    el.innerHTML = h;
+    calYear = year;
+  }
+
+  window.calNav = function(dir) {
+    buildYear(calYear + dir);
+  };
+
+  window.calScroll = function(ds) {
+    var target = document.getElementById('d-' + ds);
+    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  buildYear(calYear);
 }
 
 function createViewer(container, w, h, b64, isOverlay) {
@@ -846,6 +941,7 @@ function openFullscreen(el) {
   });
 }
 render();
+renderCalendar();
 initModels();
 </script>
 </body>

@@ -21,6 +21,10 @@ export async function pull(path: string): Promise<void> {
   return invoke<void>('pull', { path })
 }
 
+export async function hasRemote(path: string): Promise<boolean> {
+  return invoke<boolean>('has_remote', { path })
+}
+
 export async function revert(path: string): Promise<void> {
   return invoke<void>('revert', { path })
 }

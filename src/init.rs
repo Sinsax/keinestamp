@@ -162,11 +162,16 @@ fn ensure_project_gitignore(project_root: &Path) -> Result<()> {
     if gitignore_path.exists() {
         content = std::fs::read_to_string(&gitignore_path)?;
     }
-    if !content.contains("web-timeline/") {
-        if !content.is_empty() && !content.ends_with('\n') {
+    for pattern in &["web-timeline/", ".saki-step.toml"] {
+        if !content.contains(pattern) {
+            if !content.is_empty() && !content.ends_with('\n') {
+                content.push('\n');
+            }
+            content.push_str(pattern);
             content.push('\n');
         }
-        content.push_str("web-timeline/\n");
+    }
+    if !gitignore_path.exists() || content != std::fs::read_to_string(&gitignore_path).unwrap_or_default() {
         std::fs::write(&gitignore_path, &content)?;
     }
     Ok(())

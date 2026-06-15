@@ -6,15 +6,11 @@
     onCommit,
     onExport,
     onRevert,
-    onPush,
-    onPull,
   }: {
     projectType: ProjectType | null
     onCommit: () => void
     onExport: () => void
     onRevert: () => void
-    onPush: () => void
-    onPull: () => void
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
@@ -34,18 +30,6 @@
   <button onclick={onRevert} disabled={!initialized}>
     <span class="ab-label">撤回</span>
     <span class="ab-hint">revert</span>
-  </button>
-
-  <div class="spacer"></div>
-
-  <button onclick={onPush} disabled={!initialized}>
-    <span class="ab-label">推送</span>
-    <span class="ab-hint">push</span>
-  </button>
-
-  <button onclick={onPull} disabled={!initialized}>
-    <span class="ab-label">拉取</span>
-    <span class="ab-hint">pull</span>
   </button>
 </div>
 

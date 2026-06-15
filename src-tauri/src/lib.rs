@@ -212,6 +212,24 @@ fn pull(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn has_remote(path: String) -> bool {
+    eprintln!("[debug] has_remote({})", path);
+    let p = PathBuf::from(&path);
+    let meta_path = saki_step::config::meta_path(&p);
+    let result = match saki_step::config::read_meta(&meta_path) {
+        Ok(meta) => {
+            let has_git_remote = saki_step::git_project::has_remote(&meta.project_root);
+            let has_web_remote = meta.web_remote.as_ref().map_or(false, |r| !r.is_empty());
+            eprintln!("[debug] has_remote: git={} web={}", has_git_remote, has_web_remote);
+            has_git_remote || has_web_remote
+        }
+        Err(_) => false,
+    };
+    eprintln!("[debug] has_remote → {}", result);
+    result
+}
+
+#[tauri::command]
 fn open_folder(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     if !p.exists() {
@@ -693,6 +711,7 @@ pub fn run() {
             commit,
             push,
             pull,
+            has_remote,
             revert,
             status,
             log,

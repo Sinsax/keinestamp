@@ -40,6 +40,14 @@ pub fn pull(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn has_remote(project_root: &Path) -> bool {
+    let output = run_git_output(project_root, &["remote"]);
+    match output {
+        Ok(s) => !s.trim().is_empty(),
+        Err(_) => false,
+    }
+}
+
 pub fn revert(project_root: &Path) -> Result<()> {
     eprintln!("[debug] revert: root={:?}", project_root);
     run_git(project_root, &["reset", "--soft", "HEAD~1"])?;

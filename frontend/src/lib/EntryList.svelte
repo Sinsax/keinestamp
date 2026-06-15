@@ -9,12 +9,18 @@
     activePath = '',
     onSelect,
     onDblClick,
+    onPush,
+    onPull,
+    hasRemote = false,
   }: {
     entries: TimelineEntry[]
     selectedId: string
     activePath?: string
     onSelect: (id: string) => void
     onDblClick: (entry: TimelineEntry) => void
+    onPush: () => void
+    onPull: () => void
+    hasRemote?: boolean
   } = $props()
 
   let expandedSections = $state<Record<string, Record<string, boolean>>>({})
@@ -281,6 +287,16 @@
         {/if}
       </div>
     {/each}
+    <div class="entries-footer">
+      <button class="footer-btn" onclick={() => onPush()} disabled={!hasRemote}>
+        <span class="fb-label">推送</span>
+        <span class="fb-hint">push</span>
+      </button>
+      <button class="footer-btn" onclick={() => onPull()} disabled={!hasRemote}>
+        <span class="fb-label">拉取</span>
+        <span class="fb-hint">pull</span>
+      </button>
+    </div>
   {/if}
 </div>
 
@@ -373,5 +389,43 @@
     margin-left: 6px;
     vertical-align: middle;
     color: #1e1e2e;
+  }
+  .entries-footer {
+    display: flex;
+    gap: 6px;
+    padding: 10px 0 4px;
+    border-top: 1px solid var(--border);
+    margin-top: 8px;
+  }
+  .footer-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 5px 18px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.12s;
+  }
+  .footer-btn:hover:not(:disabled) {
+    background: var(--surface2);
+  }
+  .footer-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+    pointer-events: none;
+  }
+  .fb-label {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.3;
+  }
+  .fb-hint {
+    font-size: 9px;
+    color: var(--text-dim);
+    line-height: 1.1;
   }
 </style>
