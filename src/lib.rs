@@ -9,5 +9,7 @@ pub mod git_web;
 pub mod html_gen;
 pub mod init;
 pub mod main_helpers;
+pub mod push;
 pub mod recent;
+pub mod serve;
 pub mod timeline;

@@ -9,12 +9,28 @@ export async function initProject(path: string): Promise<MetaConfig> {
   return invoke<MetaConfig>('init_project', { path })
 }
 
-export async function commit(path: string, message: string, tag?: string | null, noPreview?: boolean): Promise<string> {
-  return invoke<string>('commit', { path, message, tag: tag ?? null, noPreview: noPreview ?? false })
+export async function record(path: string, message: string, tag?: string | null, noPreview?: boolean): Promise<string> {
+  return invoke<string>('record', { path, message, tag: tag ?? null, noPreview: noPreview ?? false })
 }
 
 export async function push(path: string): Promise<void> {
   return invoke<void>('push', { path })
+}
+
+export async function deploy(path: string): Promise<void> {
+  return invoke<void>('deploy', { path })
+}
+
+export async function testConnection(serverUrl: string, deployToken?: string | null): Promise<boolean> {
+  return invoke<boolean>('test_connection', { serverUrl, deployToken: deployToken ?? null })
+}
+
+export async function getDeployToken(): Promise<string> {
+  return invoke<string>('get_deploy_token')
+}
+
+export async function setDeployToken(token: string): Promise<void> {
+  return invoke<void>('set_deploy_token', { token })
 }
 
 export async function pull(path: string): Promise<void> {
@@ -111,4 +127,12 @@ export async function setBlenderPath(path: string): Promise<void> {
 
 export async function openWebTimeline(path: string): Promise<void> {
   return invoke<void>('open_web_timeline', { path })
+}
+
+export async function getDeployServerUrl(): Promise<string> {
+  return invoke<string>('get_deploy_server_url')
+}
+
+export async function setDeployServerUrl(url: string): Promise<void> {
+  return invoke<void>('set_deploy_server_url', { url })
 }

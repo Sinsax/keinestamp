@@ -5,6 +5,17 @@ export interface MetaConfig {
   web_root: string
   web_remote: string | null
   web_push_enabled: boolean
+  access_token: string | null
+  auto_connect: boolean
+}
+
+export interface AppConfig {
+  blender_path: string | null
+  blender_version: string | null
+  blender_versions: string | null
+  deploy_server_url: string | null
+  deploy_token: string | null
+  auto_connect: boolean
 }
 
 export interface TimelineEntry {

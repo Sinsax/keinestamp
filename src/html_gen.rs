@@ -325,7 +325,7 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1e1e2e; color: #cdd6f4; line-height: 1.6; }
 .page { display: flex; min-height: 100vh; }
-.left-col { width: 230px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; padding: 16px 12px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.left-col { width: 270px; flex-shrink: 0; background: #181825; border-right: 1px solid #313244; display: flex; flex-direction: column; padding: 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .right-col { flex: 1; min-width: 0; max-width: 800px; margin: 0 auto; padding: 40px 24px; }
 h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
 .subtitle { color: #6c7086; margin-bottom: 32px; }
@@ -367,23 +367,20 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
 .dl.mod { background: rgba(100, 140, 255, 0.12); color: #648cff; }
 .dl.mod .dl-num { color: #648cff; }
 .cal { }
-.cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
-.cal-title { font-size: 13px; font-weight: 700; color: #cdd6f4; }
-.cal-nav { display: flex; gap: 4px; }
-.cal-nav button { width: 20px; height: 20px; background: rgba(69,71,90,0.4); border: 1px solid #45475a; border-radius: 3px; color: #a6adc8; cursor: pointer; font-size: 10px; line-height: 1; display: flex; align-items: center; justify-content: center; }
-.cal-nav button:hover { background: rgba(69,71,90,0.8); }
-.cal-month { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
-.cal-mlabel { font-size: 9px; color: #585b70; width: 14px; flex-shrink: 0; text-align: right; }
-.cal-days { display: flex; gap: 2px; flex-wrap: wrap; }
-.cal-cday { width: 6px; height: 6px; border-radius: 1px; background: #313244; cursor: pointer; }
-.cal-cday:hover { outline: 1px solid #89b4fa; outline-offset: 0; }
+.cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.cal-title { font-size: 14px; font-weight: 700; color: #cdd6f4; }
+.cal-month { margin-bottom: 14px; }
+.cal-mlabel { font-size: 13px; font-weight: 600; color: #a6adc8; display: block; margin-bottom: 6px; }
+.cal-days { display: flex; gap: 4px; flex-wrap: wrap; }
+.cal-cday { width: 15px; height: 15px; border-radius: 3px; background: #313244; cursor: pointer; }
+.cal-cday:hover { outline: 2px solid #89b4fa; outline-offset: -1px; }
 .cal-cday.h1 { background: #1a6d3c; }
 .cal-cday.h2 { background: #238a4a; }
 .cal-cday.h3 { background: #30a758; }
 .cal-cday.h4 { background: #40c468; }
-.cal-cday.today { outline: 1px solid #f9e2af; outline-offset: 0; }
-.cal-legend { display: flex; align-items: center; gap: 2px; margin-top: 6px; font-size: 8px; color: #585b70; }
-.cal-legend .s { width: 8px; height: 8px; border-radius: 1px; background: #313244; display: inline-block; }
+.cal-cday.today { outline: 2px solid #f9e2af; outline-offset: -1px; }
+.cal-legend { display: flex; align-items: center; gap: 4px; margin-top: 12px; font-size: 11px; color: #585b70; }
+.cal-legend .s { width: 14px; height: 14px; border-radius: 3px; background: #313244; display: inline-block; }
 .cal-legend .s.s1 { background: #1a6d3c; }
 .cal-legend .s.s2 { background: #238a4a; }
 .cal-legend .s.s3 { background: #30a758; }
@@ -415,6 +412,7 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
   <div class="left-col">
     <div id="cal-sidebar"></div>
     <div class="left-footer">
+      <button class="left-footer-btn" id="toggle3d" onclick="toggleAll3D()">隐藏 3D 预览</button>
       <span style="font-size:10px;color:#6c7086;text-align:center">SakiStep</span>
     </div>
   </div>
@@ -597,43 +595,64 @@ function renderCalendar() {
   var dates = Object.keys(calData || {}).sort();
   if (dates.length === 0) { el.style.display = 'none'; return; }
 
-  var calYear = parseInt(new Date().getFullYear());
-
-  function buildYear(year) {
-    var h = '<div class="cal-header"><span class="cal-title">' + year + '</span><div class="cal-nav"><button onclick="calNav(-1)">&#x25C0;</button><button onclick="calNav(1)">&#x25B6;</button></div></div>';
-    for (var m = 0; m < 12; m++) {
-      var daysInMonth = new Date(year, m + 1, 0).getDate();
-      h += '<div class="cal-month">';
-      h += '<span class="cal-mlabel">' + (m + 1) + '</span>';
-      h += '<span class="cal-days">';
-      for (var d = 1; d <= daysInMonth; d++) {
-        var ds = year + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-        var ids = calData[ds];
-        var cls = 'cal-cday';
-        if (ids) cls += ids.length > 3 ? ' h4' : ids.length > 2 ? ' h3' : ids.length > 1 ? ' h2' : ' h1';
-        var today = new Date();
-        var isToday = ds === today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
-        if (isToday) cls += ' today';
-        h += '<span class="' + cls + '" title="' + ds + (ids ? ' (' + ids.length + ')' : '') + '" onclick="calScroll(\'' + ds + '\')"></span>';
-      }
-      h += '</span></div>';
-    }
-    h += '<div class="cal-legend">少<span class="s"></span><span class="s s1"></span><span class="s s2"></span><span class="s s3"></span><span class="s s4"></span>多</div>';
-    el.innerHTML = h;
-    calYear = year;
+  var dateMsgs = {};
+  if (data && data.entries) {
+    data.entries.forEach(function(e) {
+      var ds = e.timestamp ? e.timestamp.substring(0,10) : '';
+      if (!ds) return;
+      if (!dateMsgs[ds]) dateMsgs[ds] = [];
+      if (dateMsgs[ds].indexOf(e.message) === -1) dateMsgs[ds].push(e.message);
+    });
   }
 
-  window.calNav = function(dir) {
-    buildYear(calYear + dir);
-  };
+  var first = dates[0].split('-').map(Number);
+  var startY = first[0], startM = first[1];
+  var endM = startM + 5, endY = startY;
+  if (endM > 12) { endM -= 12; endY += 1; }
 
-  window.calScroll = function(ds) {
-    var target = document.getElementById('d-' + ds);
-    if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  };
+  var title = startY + '-' + String(startM).padStart(2, '0') + ' ~ ' +
+              endY + '-' + String(endM).padStart(2, '0');
+  var h = '<div class="cal-header"><span class="cal-title">' + title + '</span></div>';
 
-  buildYear(calYear);
+  for (var i = 0; i < 6; i++) {
+    var cur = startY * 12 + (startM - 1) + i;
+    var y = Math.floor(cur / 12);
+    var m = cur % 12 + 1;
+    var daysInMonth = new Date(y, m, 0).getDate();
+    h += '<div class="cal-month">';
+    h += '<span class="cal-mlabel">' + m + '月</span>';
+    h += '<span class="cal-days">';
+    for (var d = 1; d <= daysInMonth; d++) {
+      var ds = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      var ids = calData[ds];
+      var cls = 'cal-cday';
+      if (ids) cls += ids.length > 3 ? ' h4' : ids.length > 2 ? ' h3' : ids.length > 1 ? ' h2' : ' h1';
+      var today = new Date();
+      var isToday = ds === today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+      if (isToday) cls += ' today';
+      var tipLines = [ds];
+      if (ids) tipLines.push('(' + ids.length + ' 条)');
+      var msgs = dateMsgs[ds] || [];
+      msgs.slice(0, 3).forEach(function(m) { tipLines.push('• ' + m); });
+      if (msgs.length > 3) tipLines.push('… 还有 ' + (msgs.length - 3) + ' 条');
+      var tip = tipLines.join(' &#10; ');
+      h += '<span class="' + cls + '" title="' + tip + '" onclick="calScroll(\'' + ds + '\')"></span>';
+    }
+    h += '</span></div>';
+  }
+  h += '<div class="cal-legend"><span title="较少">少</span><span class="s" title="0 条"></span><span class="s s1" title="1 条"></span><span class="s s2" title="2 条"></span><span class="s s3" title="3 条"></span><span class="s s4" title="4+ 条"></span><span title="较多">多</span></div>';
+  el.innerHTML = h;
 }
+
+window.calScroll = function(ds) {
+  var target = document.getElementById('d-' + ds);
+  if (target) {
+    target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    target.style.transition = 'background 0.3s';
+    target.style.background = 'rgba(137,180,250,0.12)';
+    setTimeout(function() { target.style.background = ''; }, 2000);
+  }
+};
 
 function createViewer(container, w, h, b64, isOverlay) {
   var scene = new THREE.Scene();
@@ -868,37 +887,103 @@ function createViewer(container, w, h, b64, isOverlay) {
   return { scene: scene, renderer: renderer, camera: camera, controls: controls, makeToolbar: makeToolbar, grid: grid, modelObj: modelObj, perspCam: camera };
 }
 
-function initModels() {
-  if (!document.querySelector('.model-box[data-base64]')) return;
+var ACTIVE_VIEWERS = [];
+var VIEWER_QUEUE = [];
+var OBSERVER = null;
+var ALL_MODELS_DISABLED = false;
+var VIEWER_ID = 0;
+
+function initModelsLazy() {
+  var boxes = document.querySelectorAll('.model-box[data-base64]');
+  if (boxes.length === 0) return;
   if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) {
-    console.error('Three.js not loaded');
     document.querySelectorAll('.model-placeholder').forEach(function(el) {
       el.textContent = '3D 预览不可用';
     });
     return;
   }
-
-  document.querySelectorAll('.model-box[data-base64]').forEach(function(el) {
-    var b64 = el.getAttribute('data-base64');
-    if (!b64) return;
-    if (el.getAttribute('data-initialized')) return;
-    el.setAttribute('data-initialized', '1');
-    var w = el.clientWidth || 600;
-    var h = 450;
-    el.style.height = h + 'px';
-
-    var v = createViewer(el, w, h, b64, false);
-    el.innerHTML = '';
-    el.appendChild(v.makeToolbar(function() { openFullscreen(el); }));
-    el.appendChild(v.renderer.domElement);
-
-    function anim() {
-      requestAnimationFrame(anim);
-      v.controls.update();
-      v.renderer.render(v.scene, v.camera);
-    }
-    anim();
+  OBSERVER = new IntersectionObserver(function(entries) {
+    if (ALL_MODELS_DISABLED) return;
+    entries.forEach(function(e) {
+      var el = e.target;
+      if (e.isIntersecting && !el.getAttribute('data-viewer-id')) {
+        enqueueViewer(el);
+      } else if (!e.isIntersecting && el.getAttribute('data-viewer-id')) {
+        disposeViewer(el);
+      }
+    });
+  }, { rootMargin: '200px' });
+  boxes.forEach(function(el) {
+    el.style.height = '450px';
+    el.innerHTML = '<div class="model-placeholder">等待加载...</div>';
+    OBSERVER.observe(el);
   });
+}
+
+function enqueueViewer(el) {
+  if (ACTIVE_VIEWERS.length < 5) {
+    createViewerFor(el);
+  } else {
+    VIEWER_QUEUE.push(el);
+    el.innerHTML = '<div class="model-placeholder">排队中 (' + VIEWER_QUEUE.length + ')...</div>';
+  }
+}
+
+function createViewerFor(el) {
+  var id = ++VIEWER_ID;
+  el.setAttribute('data-viewer-id', '' + id);
+  var b64 = el.getAttribute('data-base64');
+  var w = el.clientWidth || 600;
+  var v = createViewer(el, w, 450, b64, false);
+  el.innerHTML = '';
+  el.appendChild(v.makeToolbar(function() { openFullscreen(el); }));
+  el.appendChild(v.renderer.domElement);
+  var entry = { id: id, el: el, viewer: v, animId: null };
+  ACTIVE_VIEWERS.push(entry);
+  function anim() {
+    var found = ACTIVE_VIEWERS.findIndex(function(x) { return x.id === id; });
+    if (found === -1 || !entry.el.isConnected) return;
+    entry.animId = requestAnimationFrame(anim);
+    v.controls.update();
+    v.renderer.render(v.scene, v.camera);
+  }
+  anim();
+}
+
+function disposeViewer(el) {
+  var id = el.getAttribute('data-viewer-id');
+  if (!id) return;
+  el.removeAttribute('data-viewer-id');
+  var idx = ACTIVE_VIEWERS.findIndex(function(v) { return v.id === +id; });
+  if (idx !== -1) {
+    var entry = ACTIVE_VIEWERS[idx];
+    cancelAnimationFrame(entry.animId);
+    entry.viewer.renderer.dispose();
+    ACTIVE_VIEWERS.splice(idx, 1);
+  }
+  el.innerHTML = '<div class="model-placeholder">3D 已暂停，滚动回来看</div>';
+  if (VIEWER_QUEUE.length > 0 && !ALL_MODELS_DISABLED) {
+    var next = VIEWER_QUEUE.shift();
+    if (next && next.isConnected && !next.getAttribute('data-viewer-id')) {
+      createViewerFor(next);
+    }
+  }
+}
+
+function toggleAll3D() {
+  ALL_MODELS_DISABLED = !ALL_MODELS_DISABLED;
+  var btn = document.getElementById('toggle3d');
+  if (ALL_MODELS_DISABLED) {
+    btn.textContent = '显示 3D 预览';
+    ACTIVE_VIEWERS.slice().forEach(function(v) { disposeViewer(v.el); });
+    VIEWER_QUEUE = [];
+  } else {
+    btn.textContent = '隐藏 3D 预览';
+    document.querySelectorAll('.model-box[data-base64]').forEach(function(el) {
+      if (el.getAttribute('data-viewer-id')) return;
+      el.innerHTML = '<div class="model-placeholder">等待加载...</div>';
+    });
+  }
 }
 
 function openFullscreen(el) {
@@ -942,7 +1027,7 @@ function openFullscreen(el) {
 }
 render();
 renderCalendar();
-initModels();
+initModelsLazy();
 </script>
 </body>
 </html>"#;

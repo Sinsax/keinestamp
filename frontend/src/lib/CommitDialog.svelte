@@ -38,17 +38,17 @@
 
 <div class="dialog-overlay" onclick={onCancel} role="dialog">
   <div class="dialog commit-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
-    <h3>Commit Progress</h3>
+    <h3>记录进度</h3>
     <div class="field">
-      <label>Commit message</label>
+      <label>记录说明</label>
       <textarea
         bind:value={message}
         rows={3}
-        placeholder="Describe what changed..."
+        placeholder="描述本次修改..."
       ></textarea>
     </div>
     <div class="field">
-      <label>Tag (optional)</label>
+      <label>标签（可选）</label>
       <div class="tag-row">
         {#each TAG_PRESETS as p}
           <button
@@ -61,14 +61,14 @@
           class="tag-btn custom-btn"
           class:active={useCustom}
           onclick={() => { useCustom = true; tag = ''; }}
-        >Custom</button>
+        >自定义</button>
       </div>
       {#if useCustom}
         <input
           class="custom-input"
           type="text"
           bind:value={customTag}
-          placeholder="Enter custom tag..."
+          placeholder="输入自定义标签..."
         />
       {/if}
     </div>
@@ -77,9 +77,9 @@
       <input type="checkbox" bind:checked={previewEnabled} />
     </div>
     <div class="actions">
-      <button onclick={onCancel}>Cancel</button>
+      <button onclick={onCancel}>取消</button>
       <button onclick={handleConfirm} class="accent" disabled={!message.trim()}>
-        Commit (Ctrl+Enter)
+        记录 (Ctrl+Enter)
       </button>
     </div>
   </div>

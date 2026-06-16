@@ -58,9 +58,9 @@ fn test_init_then_commit_and_log() {
 
     std::fs::write(dir.join("test.blend"), b"hello").unwrap();
 
-    let (out, ok) = run(&["commit", &dir.to_string_lossy(), "-m", "first commit"]);
-    assert!(ok, "commit failed: {}", out);
-    assert!(out.contains("已提交"));
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "first commit"]);
+    assert!(ok, "record failed: {}", out);
+    assert!(out.contains("已记录"));
 
     let (out, ok) = run(&["log", &dir.to_string_lossy(), "--count", "5"]);
     assert!(ok, "log failed: {}", out);

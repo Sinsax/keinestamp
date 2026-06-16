@@ -63,20 +63,20 @@ struct CommitProgress {
 }
 
 #[tauri::command]
-async fn commit(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>) -> Result<String, String> {
-    eprintln!("[debug] commit({}, message={:?}, tag={:?}, no_preview={})", path, message, tag, no_preview.unwrap_or(false));
+async fn record(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>) -> Result<String, String> {
+    eprintln!("[debug] record({}, message={:?}, tag={:?}, no_preview={})", path, message, tag, no_preview.unwrap_or(false));
     use tauri::Emitter;
     let app_clone = app.clone();
     let handle = tokio::task::spawn_blocking(move || {
         let emit = |phase: &str, msg: &str| {
-            eprintln!("[debug] commit-phase: {} — {}", phase, msg);
+            eprintln!("[debug] record-phase: {} — {}", phase, msg);
             let _ = app_clone.emit("commit-progress", CommitProgress {
                 phase: phase.to_string(),
                 message: msg.to_string(),
             });
         };
 
-        emit("git_commit", "提交中...");
+        emit("git_commit", "记录中...");
 
         let p = PathBuf::from(&path);
         let meta_path = saki_step::config::meta_path(&p);
@@ -166,20 +166,13 @@ async fn commit(app: tauri::AppHandle, path: String, message: String, tag: Optio
             &project_name,
         ))?;
 
-        emit("web_push", "推送网页...");
-        let _ = saki_step::git_web::web_commit_and_push(
-            &meta.web_root,
-            &format!("update timeline: {}", short_hash),
-            meta.web_push_enabled,
-        );
-
         saki_step::recent::RecentProjects::add_path(&p);
-        eprintln!("[debug] commit → {}", short_hash);
+        eprintln!("[debug] record → {}", short_hash);
         emit("done", "完成");
         Ok::<String, String>(short_hash)
     });
     let result: Result<String, String> = handle.await.map_err(|e| e.to_string())?;
-    eprintln!("[debug] commit result: {:?}", result);
+    eprintln!("[debug] record result: {:?}", result);
     result
 }
 
@@ -190,13 +183,77 @@ fn push(path: String) -> Result<(), String> {
     let meta_path = saki_step::config::meta_path(&p);
     let meta = map_err(saki_step::config::read_meta(&meta_path))?;
     eprintln!("[debug] push: project_root={}", meta.project_root.display());
-    map_err(saki_step::git_project::push(&meta.project_root))?;
-    if meta.web_push_enabled {
-        eprintln!("[debug] push: pushing web repo");
-        let _ = saki_step::git_web::web_commit_and_push(&meta.web_root, "push", true);
+
+    if saki_step::git_project::has_remote(&meta.project_root) {
+        map_err(saki_step::git_project::push(&meta.project_root))?;
+    } else {
+        eprintln!("[debug] push: no git remote, skipping git push");
     }
+
     eprintln!("[debug] push → ok");
     Ok(())
+}
+
+#[tauri::command]
+fn deploy(path: String) -> Result<(), String> {
+    eprintln!("[debug] deploy({})", path);
+    let p = PathBuf::from(&path);
+    let meta_p = saki_step::config::meta_path(&p);
+    let mut meta = map_err(saki_step::config::read_meta(&meta_p))?;
+
+    if meta.project_id.is_none() {
+        meta.project_id = Some(saki_step::config::generate_project_id());
+        map_err(saki_step::config::write_meta(&meta_p, &meta))?;
+    }
+
+    let server = saki_step::app_config::get_deploy_server_url()
+        .or_else(|| meta.web_remote.clone())
+        .filter(|s| !s.is_empty());
+
+    if let Some(ref server) = server {
+        eprintln!("[debug] deploy: server={}", server);
+        let deploy_token = saki_step::app_config::get_deploy_token();
+        let project_name = meta.project_root.file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let project_id = meta.project_id.as_deref().unwrap_or("");
+        map_err(saki_step::push::deploy_to_server(
+            &meta.web_root, server, deploy_token.as_deref(), meta.access_token.as_deref(), &project_name, project_id,
+        ))?;
+        eprintln!("[debug] deploy → ok");
+        Ok(())
+    } else {
+        Err("未设置服务器地址".to_string())
+    }
+}
+
+#[tauri::command]
+fn test_connection(server_url: String, deploy_token: Option<String>) -> Result<bool, String> {
+    eprintln!("[debug] test_connection(server_url={:?})", server_url);
+    if server_url.is_empty() {
+        return Ok(false);
+    }
+    let health_url = format!("{}/health", server_url.trim_end_matches('/'));
+    eprintln!("[debug] test_connection: GET {}", health_url);
+
+    let mut req = ureq::get(&health_url);
+    if let Some(ref token) = deploy_token {
+        if !token.is_empty() {
+            req = req.set("Authorization", &format!("Bearer {}", token));
+        }
+    }
+
+    match req.call() {
+        Ok(resp) => {
+            let ok = resp.status() == 200;
+            eprintln!("[debug] test_connection → {}", if ok { "connected" } else { "failed" });
+            Ok(ok)
+        }
+        Err(e) => {
+            eprintln!("[debug] test_connection → error: {}", e);
+            Ok(false)
+        }
+    }
 }
 
 #[tauri::command]
@@ -206,7 +263,13 @@ fn pull(path: String) -> Result<(), String> {
     let meta_path = saki_step::config::meta_path(&p);
     let meta = map_err(saki_step::config::read_meta(&meta_path))?;
     eprintln!("[debug] pull: project_root={}", meta.project_root.display());
-    map_err(saki_step::git_project::pull(&meta.project_root))?;
+
+    if saki_step::git_project::has_remote(&meta.project_root) {
+        map_err(saki_step::git_project::pull(&meta.project_root))?;
+    } else {
+        eprintln!("[debug] pull: no git remote, skipping");
+    }
+
     eprintln!("[debug] pull → ok");
     Ok(())
 }
@@ -218,10 +281,7 @@ fn has_remote(path: String) -> bool {
     let meta_path = saki_step::config::meta_path(&p);
     let result = match saki_step::config::read_meta(&meta_path) {
         Ok(meta) => {
-            let has_git_remote = saki_step::git_project::has_remote(&meta.project_root);
-            let has_web_remote = meta.web_remote.as_ref().map_or(false, |r| !r.is_empty());
-            eprintln!("[debug] has_remote: git={} web={}", has_git_remote, has_web_remote);
-            has_git_remote || has_web_remote
+            saki_step::git_project::has_remote(&meta.project_root)
         }
         Err(_) => false,
     };
@@ -259,44 +319,33 @@ fn revert(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     let meta_path = saki_step::config::meta_path(&p);
     let meta = map_err(saki_step::config::read_meta(&meta_path))?;
-    match saki_step::git_project::revert(&meta.project_root) {
-        Ok(_) => {
-            eprintln!("[debug] revert: git reset --soft HEAD~1 ok");
-            let timeline_path = meta.web_root.join("timeline.json");
-            let timeline = saki_step::timeline::read_timeline(&timeline_path).ok();
-            if let Some(mut tl) = timeline {
-                if let Some(removed) = tl.entries.pop() {
-                    eprintln!("[debug] revert: removed entry {}", &removed.id[..7.min(removed.id.len())]);
-                    let _ = saki_step::timeline::write_timeline(&timeline_path, &tl);
-                    let project_name = meta
-                        .project_root
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    let _ = saki_step::html_gen::generate_index_html(
-                        &meta.web_root,
-                        &meta.project_root,
-                        &tl,
-                        &project_name,
-                    );
-                    let _ = saki_step::git_web::web_commit_and_push(
-                        &meta.web_root,
-                        &format!("revert {}", &removed.id[..7.min(removed.id.len())]),
-                        meta.web_push_enabled,
-                    );
-                }
-            }
-            Ok(())
-        }
-        Err(e) => {
-            let msg = e.to_string();
-            if msg.contains("HEAD~1") {
-                Err("no commits to revert".to_string())
-            } else {
-                Err(msg)
-            }
+    map_err(saki_step::git_project::revert(&meta.project_root))?;
+    eprintln!("[debug] revert: git reset --soft HEAD~1 ok");
+    let timeline_path = meta.web_root.join("timeline.json");
+    let timeline = saki_step::timeline::read_timeline(&timeline_path).ok();
+    if let Some(mut tl) = timeline {
+        if let Some(removed) = tl.entries.pop() {
+            eprintln!("[debug] revert: removed entry {}", &removed.id[..7.min(removed.id.len())]);
+            let _ = saki_step::timeline::write_timeline(&timeline_path, &tl);
+            let project_name = meta
+                .project_root
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let _ = saki_step::html_gen::generate_index_html(
+                &meta.web_root,
+                &meta.project_root,
+                &tl,
+                &project_name,
+            );
+            let _ = saki_step::git_web::web_commit_and_push(
+                &meta.web_root,
+                &format!("revert {}", &removed.id[..7.min(removed.id.len())]),
+                false,
+            );
         }
     }
+    Ok(())
 }
 
 #[tauri::command]
@@ -356,16 +405,16 @@ fn update_config(
 
     match key.as_str() {
         "web_remote" => {
-            meta.web_remote = value;
-            if meta.web_remote.is_some() && !meta.web_push_enabled {
-                meta.web_push_enabled = true;
-            }
+            meta.web_remote = value.filter(|s| !s.is_empty());
         }
-        "web_push_enabled" => {
+        "access_token" => {
+            meta.access_token = value;
+        }
+        "auto_connect" => {
             let v = value.as_deref().unwrap_or("false");
-            meta.web_push_enabled = v == "true" || v == "1" || v == "yes";
+            meta.auto_connect = v == "true" || v == "1" || v == "yes";
         }
-        _ => return Err(format!("unknown config key: {key}. Available: web_remote, web_push_enabled")),
+        _ => return Err(format!("unknown config key: {key}. Available: web_remote, access_token, auto_connect")),
     }
 
     map_err(saki_step::config::write_meta(&meta_path, &meta))
@@ -477,7 +526,7 @@ fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
     let _ = saki_step::git_web::web_commit_and_push(
         &meta.web_root,
         &format!("delete entry {}", &entry_id[..7.min(entry_id.len())]),
-        meta.web_push_enabled,
+        false,
     );
 
     Ok(())
@@ -628,8 +677,8 @@ async fn list_blender_versions() -> Vec<String> {
     eprintln!("[debug] list_blender_versions()");
     let cached = saki_step::app_config::get_blender_versions();
     if !cached.is_empty() {
-        eprintln!("[debug] list_blender_versions: returning {} cached versions immediately", cached.len());
-        tokio::task::spawn_blocking(move || {
+        eprintln!("[debug] list_blender_versions: returning {} cached versions", cached.len());
+        tokio::task::spawn_blocking(|| {
             let fetched = saki_step::blender_download::fetch_blender_versions().unwrap_or_default();
             if !fetched.is_empty() {
                 saki_step::app_config::set_blender_versions(&fetched);
@@ -675,6 +724,30 @@ fn set_blender_path(path: String) {
 }
 
 #[tauri::command]
+fn get_deploy_token() -> String {
+    eprintln!("[debug] get_deploy_token()");
+    saki_step::app_config::get_deploy_token().unwrap_or_default()
+}
+
+#[tauri::command]
+fn set_deploy_token(token: String) {
+    eprintln!("[debug] set_deploy_token()");
+    saki_step::app_config::set_deploy_token(&token);
+}
+
+#[tauri::command]
+fn get_deploy_server_url() -> String {
+    eprintln!("[debug] get_deploy_server_url()");
+    saki_step::app_config::get_deploy_server_url().unwrap_or_default()
+}
+
+#[tauri::command]
+fn set_deploy_server_url(url: String) {
+    eprintln!("[debug] set_deploy_server_url()");
+    saki_step::app_config::set_deploy_server_url(&url);
+}
+
+#[tauri::command]
 fn open_web_timeline(path: String) -> Result<(), String> {
     eprintln!("[debug] open_web_timeline({})", path);
     let p = PathBuf::from(&path);
@@ -708,8 +781,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             detect,
             init_project,
-            commit,
+            record,
             push,
+            deploy,
+            test_connection,
             pull,
             has_remote,
             revert,
@@ -734,6 +809,10 @@ pub fn run() {
             list_installed_blender_versions,
             get_blender_path,
             set_blender_path,
+            get_deploy_token,
+            set_deploy_token,
+            get_deploy_server_url,
+            set_deploy_server_url,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

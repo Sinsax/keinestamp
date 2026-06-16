@@ -7,10 +7,14 @@ pub fn init_project(project_root: &Path) -> Result<()> {
     let project_type = detect::detect_project(project_root)?;
 
     match project_type {
-        detect::ProjectType::Initialized(meta) => {
+        detect::ProjectType::Initialized(mut meta) => {
             ensure_project_gitignore(project_root)?;
             ensure_project_gitattributes(project_root)?;
             ensure_web_structure(&meta.web_root)?;
+            if meta.project_id.is_none() {
+                meta.project_id = Some(config::generate_project_id());
+                config::write_meta(&config::meta_path(project_root), &meta)?;
+            }
             eprintln!("Project already initialized at {:?}", project_root);
             return Ok(());
         }

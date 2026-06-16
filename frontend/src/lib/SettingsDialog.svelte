@@ -14,7 +14,8 @@
   } = $props()
 
   let webRemote = $state('')
-  let webPushEnabled = $state(false)
+  let deployToken = $state('')
+  let autoConnect = $state(false)
   let selectedVersion = $state('')
   let versions = $state<string[]>([])
   let installedVersions = $state<string[]>([])
@@ -24,6 +25,9 @@
   let dlPhase = $state('')
   let dlMessage = $state('')
   let dlPercent = $state(0)
+  let testing = $state(false)
+  let connectStatus = $state<'none' | 'ok' | 'fail'>('none')
+  let savedFeedback = $state(false)
   let hasProject = $derived(!!path)
 
   $effect(() => {
@@ -34,12 +38,17 @@
   })
 
   onMount(() => {
+    (async () => {
+      try {
+        deployToken = await api.getDeployToken()
+        webRemote = await api.getDeployServerUrl()
+      } catch { /* ignore */ }
+    })()
     if (hasProject) {
       (async () => {
         try {
           const cfg = await api.readConfig(path)
-          webRemote = cfg.web_remote || ''
-          webPushEnabled = cfg.web_push_enabled
+          autoConnect = cfg.auto_connect
         } catch { /* ignore */ }
       })()
     }
@@ -47,7 +56,7 @@
     if (versions.length > 0 && !selectedVersion) {
       selectedVersion = versions[0]
     }
-    if (versions.length === 0) {
+    if (versions.length === 0 && cachedVersions.length === 0) {
       loadVersions()
     }
     loadInstalled()
@@ -98,23 +107,35 @@
     downloading = false
   }
 
+  async function testConnection() {
+    if (!webRemote) {
+      connectStatus = 'fail'
+      return
+    }
+    testing = true
+    connectStatus = 'none'
+    try {
+      const ok = await api.testConnection(webRemote, deployToken || null)
+      connectStatus = ok ? 'ok' : 'fail'
+    } catch {
+      connectStatus = 'fail'
+    }
+    testing = false
+  }
+
   async function save() {
     saving = true
     try {
+      await api.setDeployToken(deployToken)
+      await api.setDeployServerUrl(webRemote)
       if (hasProject) {
-        await api.updateConfig(path, 'web_remote', webRemote || null)
-        await api.updateConfig(path, 'web_push_enabled', webPushEnabled ? 'true' : 'false')
+        await api.updateConfig(path, 'auto_connect', autoConnect ? 'true' : 'false')
       }
-      onClose()
+      savedFeedback = true
+      setTimeout(() => savedFeedback = false, 2000)
     } catch { /* ignore */ }
     saving = false
   }
-
-  $effect(() => {
-    if (webRemote && !webPushEnabled) {
-      webPushEnabled = true
-    }
-  })
 
   interface BlenderProgress {
     phase: string
@@ -172,26 +193,41 @@
       </div>
     </div>
 
-    {#if hasProject}
       <div class="section">
-        <div class="section-title">网页推送</div>
+        <div class="section-title">服务器连接</div>
         <div class="field">
-          <label>网页仓库地址</label>
-          <input type="text" bind:value={webRemote} placeholder="https://gitea.example.com/user/project-web.git" />
-          <span class="hint">建议：推送时间线页面到 Gitea 远端仓库，Caddy 代理提供访问</span>
+          <label>服务器地址</label>
+          <div class="input-row">
+            <input type="text" bind:value={webRemote} placeholder="http://192.168.0.100:7799" />
+            <button class="connect-btn" onclick={testConnection} disabled={testing || !webRemote}>
+              {testing ? '测试中...' : '测试连接'}
+            </button>
+          </div>
+          <span class="hint">SakiStep Server 监听地址（全局设置，跟随软件）</span>
+          {#if connectStatus === 'ok'}
+            <span class="conn-result ok">✅ 连接成功</span>
+          {:else if connectStatus === 'fail'}
+            <span class="conn-result fail">❌ 连接失败</span>
+          {/if}
         </div>
+        <div class="field">
+          <label>部署令牌（Deploy Token）</label>
+          <input type="password" bind:value={deployToken} placeholder="可选" />
+          <span class="hint">用于 App 上传认证（Bearer Token），保存在本机</span>
+        </div>
+        {#if hasProject}
         <div class="field toggle-field">
           <label>
-            <input type="checkbox" bind:checked={webPushEnabled} />
-            提交后自动推送网页
+            <input type="checkbox" bind:checked={autoConnect} />
+            下次自动连接
           </label>
         </div>
+        {/if}
       </div>
-    {/if}
 
     <div class="actions">
       <button onclick={onClose}>取消</button>
-      <button class="accent" onclick={save} disabled={saving}>{saving ? '保存中…' : '保存'}</button>
+      <button class="accent" onclick={save} disabled={saving}>{saving ? '保存中…' : savedFeedback ? '已保存 ✓' : '保存'}</button>
     </div>
   </div>
 </div>
@@ -222,7 +258,7 @@
   .field { margin-bottom: 14px; }
   .field:last-child { margin-bottom: 0; }
   .field label { display: block; font-size: 12px; color: var(--text-dim); margin-bottom: 4px; }
-  .field input[type="text"] { width: 100%; }
+  .field input[type="text"], .field input[type="password"] { width: 100%; }
   .hint { display: block; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
   .dl-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .dl-row button { font-size: 12px; padding: 5px 14px; }
@@ -261,5 +297,13 @@
   .dl-status.error { color: #f87171; }
   .toggle-field label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
   .toggle-field input[type="checkbox"] { width: auto; }
+  .input-row { display: flex; align-items: center; gap: 8px; }
+  .input-row input { flex: 1; }
+  .connect-btn { font-size: 11px; padding: 5px 12px; border-radius: 6px; cursor: pointer; background: var(--surface); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+  .connect-btn:hover:not(:disabled) { background: var(--surface2); }
+  .connect-btn:disabled { opacity: 0.4; cursor: default; }
+  .conn-result { display: block; font-size: 11px; margin-top: 4px; }
+  .conn-result.ok { color: #4ade80; }
+  .conn-result.fail { color: #f87171; }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 </style>

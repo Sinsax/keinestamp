@@ -14,9 +14,14 @@ pub struct MetaConfig {
     pub project_root: PathBuf,
     #[serde(default, skip_serializing_if = "is_default_path")]
     pub web_root: PathBuf,
+    #[serde(default)]
     pub web_remote: Option<String>,
     #[serde(default)]
-    pub web_push_enabled: bool,
+    pub access_token: Option<String>,
+    #[serde(default)]
+    pub auto_connect: bool,
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 impl MetaConfig {
@@ -28,7 +33,9 @@ impl MetaConfig {
             project_root,
             web_root,
             web_remote: None,
-            web_push_enabled: false,
+            access_token: Some(generate_access_token()),
+            auto_connect: false,
+            project_id: Some(generate_project_id()),
         }
     }
 }
@@ -41,9 +48,33 @@ impl Default for MetaConfig {
             project_root: PathBuf::new(),
             web_root: PathBuf::new(),
             web_remote: None,
-            web_push_enabled: false,
+            access_token: None,
+            auto_connect: false,
+            project_id: None,
         }
     }
+}
+
+pub fn generate_project_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let n = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let pid = std::process::id();
+    format!("{:016x}{:08x}", n, pid)
+}
+
+pub fn generate_access_token() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let nanos = now.subsec_nanos();
+    let pid = std::process::id();
+    let mix = secs.wrapping_mul(u64::from(nanos)) ^ u64::from(pid);
+    format!("{:016x}{:08x}{:08x}{:016x}", secs, nanos, pid, mix)
 }
 
 pub fn meta_path(project_root: &Path) -> PathBuf {
@@ -116,8 +147,8 @@ mod tests {
         assert_eq!(read_back.init_time, config.init_time);
         assert_eq!(read_back.project_root, config.project_root);
         assert_eq!(read_back.web_root, config.web_root);
-        assert_eq!(read_back.web_remote, None);
-        assert!(!read_back.web_push_enabled);
+        assert!(read_back.access_token.is_some());
+        assert!(!read_back.access_token.as_deref().unwrap().is_empty());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -145,6 +176,47 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_project_id_unique() {
+        let id1 = generate_project_id();
+        let id2 = generate_project_id();
+        assert_ne!(id1, id2);
+        assert_eq!(id1.len(), 24);
+        assert!(id1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_project_id_in_new_meta() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("saki_test_pid_{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let config = MetaConfig::new(dir.clone());
+        assert!(config.project_id.is_some());
+        assert_eq!(config.project_id.as_ref().unwrap().len(), 24);
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_access_token_length() {
+        let t1 = generate_access_token();
+        let t2 = generate_access_token();
+        assert_eq!(t1.len(), 48);
+        assert_eq!(t2.len(), 48);
+        assert_ne!(t1, t2);
+        assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn test_access_token_in_new_meta() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("saki_test_at_{}", std::process::id()));
+        std::fs::create_dir_all(&dir)?;
+        let config = MetaConfig::new(dir.clone());
+        assert!(config.access_token.is_some());
+        assert_eq!(config.access_token.as_ref().unwrap().len(), 48);
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
     fn test_backward_compat_old_fields() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("saki_test_compat_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
@@ -160,8 +232,7 @@ blender_path = "C:\\Blender\\blender.exe"
         std::fs::write(&path, old_toml)?;
 
         let config = read_meta(&path)?;
-        assert!(config.web_remote.is_none());
-        assert!(!config.web_push_enabled);
+        assert_eq!(config.access_token, None);
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())

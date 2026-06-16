@@ -1,17 +1,15 @@
 # SakiStep
 
-Single-binary CLI + Tauri GUI Blender Git Progress Board. Rust, Edition 2024.
+Single-binary CLI + Tauri GUI Blender Git Progress Board. Rust Edition 2024.
 
 ## Commands
 
 ```powershell
-cargo build
-cargo test                          # 52 unit + 7 integration tests
-cargo test --lib <module>           # Single module (config/detect/init/timeline/app_config/git_helpers/...)
-cargo test --test cli_tests         # Integration tests only
-cargo run -- init <path>
-cargo run -- commit <path> -m "msg"
-cd frontend; npm run check          # svelte-check + tsc (no other lint/format config exists)
+cargo test                          # 70 unit + 7 integration (was 74+7, removed url_prefix tests)
+cargo test --lib <module>           # Single module (config/detect/init/timeline/...)
+cargo test --test cli_tests         # Integration only
+cargo run -- init <path>            # CLI entry
+cd frontend; npm run check          # svelte-check + tsc (no other lint/format)
 ```
 
 ## Architecture
@@ -20,140 +18,150 @@ cd frontend; npm run check          # svelte-check + tsc (no other lint/format c
 main ──→ init ──→ detect ──→ config
   └──→ git_project ──→ blender_render, timeline, html_gen, git_web
 main_helpers ──→ config, timeline
-recent ──→ independent (app-level config dir)
-app_config ──→ independent (app-level config dir, blender_path)
-git_helpers ──→ shared (get_changed_files, get_changed_files_status, has_blend_files, get_git_author)
+recent, app_config ──→ independent (app-level config dir)
+git_helpers ──→ shared by CLI and Tauri
 ```
 
-Build order: config → detect → init → git_project → git_web → blender_render → timeline → html_gen → git_helpers → app_config → main → main_helpers → recent
+Build order (crate): config → detect → init → git_project → git_web → blender_render → timeline → html_gen → git_helpers → app_config → main → main_helpers → recent
 
 ## Constraints
 
 - **Git safety**: Only `add/commit/push/pull/reset --soft`. No checkout/branch/merge/rebase/reset --hard.
+- **revert guard**: Checks commit count >= 2 before `reset --soft HEAD~1`. `get_commit_count()` in git_project.
+- **pull**: Always `git pull --rebase` to avoid merge commits.
 - **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.
-- **Config**: `.saki-step.toml` (TOML). `meta_path()` joins project root.
-- **MetaConfig fields**: `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `web_push_enabled`. Old fields (`project_remote`, `page_password`, `blender_path`) are backward-compatible (ignored on read via `#[serde(default)]`).
-- **AppConfig**: `%APPDATA%/SakiStep/app-config.toml` (Win) or `~/.local/share/saki-step/app-config.toml` (Linux/Mac). Stores `blender_path`.
-- **Atomic writes**: Temp file + rename. Temp name includes PID + target filename.
+- **MetaConfig** (`.saki-step.toml`): `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `access_token`, `auto_connect`, `project_id`. Old fields silently ignored via `#[serde(default)]`. `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server.
+- **AppConfig** (`%APPDATA%/SakiStep/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. `deploy_token` is used by the app to authenticate with the server for upload/health.
+- **auto_connect**: When true, app tests server connection on project load.
+- **Atomic writes**: Temp file + rename (name includes PID + target filename).
 - **init idempotent**: Re-init fills gaps, does not overwrite `init_time`.
+- **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands.
+- **Export**: `git ls-tree --name-only` + per-file `git show` (not checkout).
+- **Web-timeline/**: Separate git repo, excluded via `.gitignore`.
+- **Git user**: `ensure_git_user()` sets fallback name/email before commit if not configured globally.
 - **Chinese filenames**: `git -c core.quotepath=false` in `get_changed_files`.
-- **Blender**: Not in PATH on dev machine. `render_preview` fails gracefully — commit proceeds.
-- **Export**: Uses `git ls-tree --name-only` + per-file `git show` (not checkout).
-- **Recent projects**: `%APPDATA%/SakiStep/recent.json` (Win) or `~/.local/share/saki-step/recent.json` (Linux/Mac). Max 20.
-- **Web-timeline/**: Separate git repo, excluded from project via `.gitignore`. Pushed to Gitea via `git_web::web_commit_and_push`.
-- **Git user**: `ensure_git_user()` sets fallback `user.name`/`user.email` before commit if not configured globally.
-- **Decorations**: `"decorations": false` in `tauri.conf.json` — custom window chrome via `TitleBar.svelte`.
-- **No duplicated code**: `get_changed_files()`, `get_changed_files_status()`, `has_blend_files()`, `get_git_author()` are in `src/git_helpers.rs` — used by both CLI and Tauri.
-- **CLI output**: Chinese labels (`已提交`, `已更新`, `已撤回`, `已推送到远端`). Log format: `  {short_hash}  {date}  {author}  ({file_count} 文件)`.
-- **HTML output**: Static HTML in `web-timeline/index.html`. Diff data in separate `web-timeline/diffs.json` (fetched at load time). Three.js from CDN via importmap.
+- **CLI output**: Chinese labels (`已提交`, `已撤回`, `已推送到远端`). Log format: `  {short_hash}  {date}  {author}  ({file_count} 文件)`.
+
+## serve.rs
+
+Multi-tenant HTTP with two-token auth (deploy_token + access_token). Dynamic project name routing — project name comes from `X-Project-Name` deploy header, becomes URL prefix automatically. Config via `serve.toml`:
+
+```toml
+host = "0.0.0.0"
+port = 7799
+deploy_token = "hex-token"      # app → server upload/health auth
+web_root = "C:/Projects/Alice/web-timeline"
+```
+
+- No `serve.toml` → auto-generates one with random `deploy_token` on first run (no `url_prefix` — project names are dynamic)
+- All endpoints require valid deploy_token.
+- **Dynamic project names**: Deploy sends `X-Project-Name` header. Server creates `web_root/<project_name>/` directory and stores access_token in `HashMap<project_name, token>`.
+- **Token separation**: `/upload` and `/health` accept only `deploy_token` (Bearer). Browser endpoints (`/<project>/...`) accept `access_token` (cookie or Bearer).
+- **URL prefix routing**: Each project is accessible at `/<project_name>/`. Cookie `saki_token` is scoped to `Path=/<project_name>/` for multi-project isolation.
+- Login page at `GET /<project>/login`. On success, sets `saki_token` cookie with `Path=/<project>/` and saves token to `localStorage` for auto-fill.
+- Static files: try Bearer → Cookie auth (checks both config access_tokens and stored project tokens via `HashMap`), fallback to login page for browser requests
+- Per-user `last_update` timestamps (not global)
+- Rate limiter: 10 failures / 60s per IP → 120s block. `retain()` cleanup on each `check()`.
+- Bearer deploy_token only for `/upload` and `/health`; Bearer access_token or Cookie for browser endpoints (access_token stored per-project during deploy). No Basic auth support.
+- Path traversal: `..` string check + `canonicalize()` prefix check (defense-in-depth) + project name sanitization
+- Zip Slip: `canonicalize()` check before extraction
+- 100MB upload limit
+- Upload response: `{"status":"ok","prefix":"/<project_name>"}`
+- HTTP warning printed when no HTTPS
 
 ## detect.rs
 
 | Condition | Result |
 |---|---|
-| Path missing/not a dir | `Fresh` |
+| Path not a dir | `Fresh` |
 | No `.saki-step.toml`, has `.blend` | `Existing` |
 | Has `.saki-step.toml` | `Initialized(MetaConfig)` |
 
-Non-recursive scan for `*.blend` in current dir only. Non-directory path returns error.
+Non-recursive `*.blend` scan. File path → error.
 
-## Integration tests
+## serve.toml auto-detect
 
-At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/cuke_int_*`. Require `user.email` and `user.name` git config (configured in `git_project` tests). Binary path via `CARGO_BIN_EXE_cuke_timeline`.
+`serve` command auto-detects `serve.toml` in project root before falling back to `--config` flag.
 
-## Lib public API surface
+## has_remote()
 
-- **config**: `meta_path`, `read_meta`, `write_meta`
-- **detect**: `detect_project`
-- **init**: `init_project`
-- **git_project**: `add_and_commit`, `stage_files_and_commit`, `push`, `pull`, `revert`, `status`, `log`, `tracked_files`, `lfs_auto_configure`, `is_git_repo`, `ensure_git_user`, `get_current_commit_hash`, `is_lfs_available`
-- **git_helpers**: `get_changed_files`, `get_changed_files_status`, `has_blend_files`, `get_git_author`
-- **git_web**: `web_commit_and_push`, `is_web_repo`
-- **blender_render**: `render_preview`, `export_to_glb`, `clean_old_previews`
-- **timeline**: `read_timeline`, `write_timeline`, `append_entry`, `get_entry`, `remove_entry`
-- **html_gen**: `generate_index_html`
-- **main_helpers**: `export_entry`
-- **recent**: `RecentProjects::load`, `RecentProjects::load_from`, `add_path`, `remove_path`, `paths`, `save`
-- **app_config**: `AppConfig`, `default_app_config_path`, `get_blender_path`, `set_blender_path`
+Checks for git remote named `origin` specifically (not any remote). Consistent with `push()` which requires `origin`. Tauri command does NOT include `web_remote` in this check.
 
 ## Tauri GUI (src-tauri/)
 
-`frontend/` — Svelte 5 + Vite + TypeScript (port 1420).  
-`src-tauri/` — Tauri v2 Rust crate (`saki-step-tauri`) wrapping lib via `#[tauri::command]`.
-
-### Commands
+`frontend/` — Svelte 5 + Vite + TypeScript (port 1420). `src-tauri/` — Tauri v2 crate wrapping lib.
 
 ```powershell
-cargo install tauri-cli           # Install Tauri CLI (once)
-cargo tauri dev                   # Run Tauri dev (port 1420)
-cargo tauri build                 # Production build
-cd frontend; npm run tauri dev    # Same as cargo tauri dev
-cd frontend; npm install          # Install JS deps (three.js for 3D viewer)
-cd src-tauri; cargo build         # Build Rust backend only
-cargo build                       # Root crate CLI only
+cargo tauri dev                   # Run dev (port 1420)
+cargo tauri build                 # Production
+cd frontend; npm install          # Install JS deps (three.js)
+cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (23)
+### Tauri commands (27)
 
-Functions in `src-tauri/src/lib.rs` wrap lib fns:
+All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
-| Command | Returns | Wraps |
+| Command | Returns | Notes |
 |---|---|---|
-| `detect` | `"fresh"\|"existing"\|"initialized"` | `detect_project` |
-| `init_project` | `MetaConfig` | `init_project` + `add_path` + `ensure_git_user` + initial commit |
-| `commit` | short hash (7 chars) | full flow (add, commit, render, timeline, html, web push) |
-| `push` / `pull` | `()` | `git_project::push` / `pull` |
-| `revert` | `()` | `git_project::revert` |
-| `status` | `{clean, output}` | `git_project::status` |
-| `log` | `LogEntry[]` | `timeline::read_timeline` |
-| `read_config` / `update_config` | `MetaConfig` / `()` | `config::read_meta` / `write_meta` |
-| `export_entry` | `()` | `main_helpers::export_entry` |
-| `get_timeline` | `Timeline` | `timeline::read_timeline` (resolves preview paths to absolute) |
-| `get_recent` / `add_recent` / `remove_recent` | `RecentEntry[]` / `()` / `()` | `RecentProjects::load` / `add_path` / `remove_path` |
-| `open_folder` | `()` | `explorer` (Win), `open` (Mac), `xdg-open` (Linux) |
-| `delete_entry` | `()` | `remove_entry` + regenerate html + web commit |
-| `get_project_log` | `String[]` | `git_project::log` (returns lines as array) |
-| `get_tracked_files` | `String[]` | walks project dir (skips hidden/node_modules/target/web-timeline) |
-| `get_file_diff` | `String` | `git show <entry_id> -- <file>` (returns diff text) |
-| `get_glb_preview` | `String` | extracts .blend from git + Blender `export_to_glb` (returns path to .glb) |
-| `download_blender` | `String` | downloads Blender to app data dir, saves path to AppConfig |
-| `get_blender_path` | `String` | reads `blender_path` from AppConfig |
-| `set_blender_path` | `()` | writes `blender_path` to AppConfig |
-
-Note: `delete_entry` removes from `timeline.json` only — does not touch project git or files.
+| `detect` | `"fresh"\|"existing"\|"initialized"` | |
+| `init_project` | `MetaConfig` | + init commit + add_recent |
+| `record` | short hash (7) | async, emits `commit-progress` events (5 phases). No auto-deploy. |
+| `push` / `pull` | `()` | push only does git push, no deploy |
+| `deploy` | `()` | manual deploy to server (zip upload) |
+| `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
+| `has_remote` | `bool` | checks git `origin` only |
+| `revert` | `()` | error `"no commits to revert"` < 2 commits |
+| `status` | `{clean, output}` | |
+| `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching |
+| `get_timeline` | `Timeline` | resolves preview paths to absolute |
+| `get_recent` / `add_recent` / `remove_recent` | recent mgmt | |
+| `open_folder` / `open_web_timeline` | `()` | platform-specific shell cmds |
+| `delete_entry` | `()` | timeline.json only, not git |
+| `get_project_log` | `String[]` | git log lines |
+| `get_tracked_files` | `String[]` | walks dir (skips hidden/node_modules/target/web-timeline) |
+| `get_file_diff` | `String` | `git show <entry> -- <file>` |
+| `get_glb_preview` | `String` path | extracts .blend from git + Blender export |
+| `download_blender` | `String` path | emits `blender-download-progress` |
+| `list_blender_versions` / `list_installed_blender_versions` | `String[]` | |
+| `get_blender_path` / `set_blender_path` | `String` / `()` | AppConfig |
+| `get_deploy_token` / `set_deploy_token` | `String` / `()` | AppConfig deploy_token |
 
 ### Frontend components
 
-All in `frontend/src/`:
+All in `frontend/src/`. Key files:
 
-```
-App.svelte        — Main layout, state mgmt, keyboard shortcuts, tabs (Changes/Timeline)
-lib/TitleBar      — Custom title bar (drag region, min/max/close, SVG cucumber logo)
-lib/ProjectTabs   — Open-project tab bar (no X button)
-lib/Sidebar       — Recent projects list + file tree
-lib/EntryList     — Timeline entry cards with collapsible sections (files/diff/3D)
-lib/StatusPanel   — Working tree file changes (gitnuro-style)
-lib/DetailPanel   — Entry detail overlay
-lib/ActionBar     — Bottom action buttons (commit/export/revert/push/pull)
-lib/StatusBar     — Status text bar
-lib/InitDialog    — Init project dialog
-lib/CommitDialog  — Commit message dialog
-lib/SettingsDialog — Blender path + download, web_remote, web_push_enabled
-lib/Toast         — Notification toasts (auto-dismiss after 3s)
-lib/DirTree       — Collapsible file tree (dirs collapsed by default)
-lib/DirTreeNode   — Single file/folder tree node
-lib/ModelViewer   — Three.js GLB viewer (OrbitControls)
-lib/fileTree.ts   — Tree data structures: buildTree, collectDirPaths
-api.ts            — Tauri invoke wrappers (23 fns)
-types.ts          — TS interfaces (MetaConfig has web_remote, web_push_enabled only)
-app.scss          — Global styles (CSS variables, layout, theme)
-```
+- `App.svelte` — Main layout, state, 3s status polling
+- `SettingsDialog.svelte` — web_remote/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle. Save does not close dialog.
+- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. Access token section at bottom.
+- `StatusBar.svelte` — Connection indicator (green/red dot) only.
+- `api.ts` — 27 Tauri invoke wrappers
+- `types.ts` — Interfaces
+
+**Dead code (don't use)**: `InitDialog.svelte` (replaced by native `@tauri-apps/plugin-dialog`), `ModelViewer.svelte` (3D preview via browser `openWebTimeline` instead).
 
 ### Key design decisions
 
-- **Config split**: Project-level `MetaConfig` (web_remote, web_push_enabled) vs app-level `AppConfig` (blender_path)
-- **No project_remote**: Push/pull use git remote configured in project repo directly. No remote URL stored in config.
-- **No page_password**: Caddy basicauth handles web access protection.
-- **web_push_enabled auto-enable**: Setting `web_remote` automatically sets `web_push_enabled = true`.
-- **Diff data externalized**: `web-timeline/diffs.json` loaded via fetch() to keep HTML small.
-- **ActionBar**: Push/pull always enabled (no gated by remote config). Git errors shown as toasts.
+- **Config split**: Project-level MetaConfig vs app-level AppConfig (blender_path, deploy_token)
+- **Token separation**: `deploy_token` (app-level, for upload/health) vs `access_token` (per-project, for browser login). Server routes enforce which token is accepted per endpoint.
+- **URL prefix routing**: Each project served at `/<project_name>/` based on `X-Project-Name` deploy header. Cookie scoped to `Path=/<project_name>/`, localStorage key scoped to project name. Multiple projects coexist in one browser.
+- **No page_password**: Auth handled by serve.rs Bearer + Cookie. HTTPS via Caddy/nginx.
+- **Diff data externalized**: `web-timeline/diffs.json` loaded via fetch()
+- **push/pull gated by `has_remote()`**: Buttons only enabled when git `origin` remote exists
+- **Notifications**: Toast auto-dismiss after 3s. No manual dismiss.
+
+## Integration tests
+
+At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/cuke_int_*`. Require `user.email`/`user.name` git config. Binary via `CARGO_BIN_EXE_saki_step`.
+
+## Test gaps (high-risk)
+
+- `push.rs` — 0 tests (zip creation, auth header)
+- `main_helpers.rs` — 0 unit tests
+- `serve.rs` — HTTP handlers untested
+- `git_helpers.rs` — core functions only integration-tested
+- `git_project.rs` — push/pull/remote/has_remote untested
+
+## Known dead code
+
+- `blender_render::render_preview` — never called (only `export_to_glb` is used)

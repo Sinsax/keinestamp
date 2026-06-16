@@ -57,12 +57,12 @@
       <div class="meta">{entry.id.slice(0, 7)} &mdash; {entry.author}</div>
 
       <div class="field">
-        <label>Timestamp</label>
+        <label>时间戳</label>
         <div class="value">{entry.timestamp.slice(0, 19).replace('T', ' ')}</div>
       </div>
 
       <div class="field">
-        <label>Files ({entry.files.length})</label>
+        <label>文件 ({entry.files.length})</label>
         <div class="value ft">
           <DirTree paths={entry.files} />
         </div>
@@ -70,13 +70,13 @@
 
       {#if blendFiles.length > 0}
         <div class="field">
-          <label>3D Model</label>
+          <label>3D 模型</label>
           <div class="value" style="margin-top:4px">
             {#each blendFiles as f}
               <div class="blend-item">{f}</div>
             {/each}
             <button class="open-web-btn" onclick={handleOpenWeb}>
-              Open in Browser — 3D Preview
+              在浏览器中打开 — 3D 预览
             </button>
             {#if openError}
               <div class="open-err">{openError}</div>
@@ -86,7 +86,7 @@
       {/if}
 
       <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px">
-        <button onclick={onClose}>Close</button>
+        <button onclick={onClose}>关闭</button>
       </div>
     </div>
   </div>

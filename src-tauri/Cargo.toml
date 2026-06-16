@@ -21,3 +21,4 @@ anyhow = "1"
 chrono = { version = "0.4", features = ["serde"] }
 toml = "0.8"
 tokio = { version = "1", features = ["rt"] }
+ureq = "2"

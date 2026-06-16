@@ -1,7 +1,7 @@
 <script lang="ts">
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
-  import { getFileDiff, openWebTimeline } from '../api'
+  import { getFileDiff, openWebTimeline, updateConfig } from '../api'
 
   let {
     entries,
@@ -9,19 +9,66 @@
     activePath = '',
     onSelect,
     onDblClick,
-    onPush,
-    onPull,
-    hasRemote = false,
+    accessToken = '',
+    onTokenChange,
   }: {
     entries: TimelineEntry[]
     selectedId: string
     activePath?: string
     onSelect: (id: string) => void
     onDblClick: (entry: TimelineEntry) => void
-    onPush: () => void
-    onPull: () => void
-    hasRemote?: boolean
+    accessToken?: string
+    onTokenChange?: (val: string) => void
   } = $props()
+
+  let editingToken = $state(false)
+  let tokenInput = $state(accessToken)
+  let tokenSaving = $state(false)
+  let copyFeedback = $state(false)
+
+  $effect(() => { tokenInput = accessToken })
+
+  let isDirty = $derived(tokenInput !== accessToken)
+
+  let editTimer: ReturnType<typeof setTimeout> | undefined
+
+  $effect(() => {
+    if (!editingToken) return
+    tokenInput
+    if (editTimer) clearTimeout(editTimer)
+    editTimer = setTimeout(() => { editingToken = false }, 5000)
+    return () => { if (editTimer) clearTimeout(editTimer) }
+  })
+
+  function generateToken(): string {
+    const bytes = new Uint8Array(16)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')
+  }
+
+  async function saveToken() {
+    if (!activePath || !isDirty) return
+    tokenSaving = true
+    try {
+      await updateConfig(activePath, 'access_token', tokenInput || null)
+      if (onTokenChange) onTokenChange(tokenInput)
+      editingToken = false
+    } catch { /* ignore */ }
+    tokenSaving = false
+  }
+
+  function handleGenToken() {
+    tokenInput = generateToken()
+  }
+
+  async function copyToken() {
+    if (!accessToken) return
+    try {
+      await navigator.clipboard.writeText(accessToken)
+      copyFeedback = true
+      setTimeout(() => copyFeedback = false, 1500)
+    } catch { /* ignore */ }
+  }
 
   let expandedSections = $state<Record<string, Record<string, boolean>>>({})
   let diffs = $state<Record<string, Record<string, string>>>({})
@@ -184,8 +231,8 @@
   {#if entries.length === 0}
     <div class="empty-state">
       <div class="big">~</div>
-      <div>No commits yet</div>
-      <div style="font-size:12px">Use commit to record progress</div>
+<div>暂无记录</div>
+              <div style="font-size:12px">使用记录按钮记录进度</div>
     </div>
   {:else}
     {#each grouped as g (g.entry.id)}
@@ -280,24 +327,59 @@
                 <div class="diff-path" style="margin-bottom:4px">{f}</div>
               {/each}
               <button class="open-web-btn" onclick={(e) => { e.stopPropagation(); if (activePath) openWebTimeline(activePath) }}>
-                Open in Browser — 3D Preview
+                在浏览器中打开 — 3D 预览
               </button>
             </div>
           {/if}
         {/if}
       </div>
     {/each}
-    <div class="entries-footer">
-      <button class="footer-btn" onclick={() => onPush()} disabled={!hasRemote}>
-        <span class="fb-label">推送</span>
-        <span class="fb-hint">push</span>
-      </button>
-      <button class="footer-btn" onclick={() => onPull()} disabled={!hasRemote}>
-        <span class="fb-label">拉取</span>
-        <span class="fb-hint">pull</span>
-      </button>
-    </div>
   {/if}
+  <div class="entries-footer">
+    <div class="at-section">
+      <label>网页访问令牌</label>
+      <div class="at-row">
+        {#if editingToken}
+          <input
+            type="text"
+            class="at-input"
+            bind:value={tokenInput}
+            placeholder="访问令牌"
+            autofocus
+          />
+          {#if !tokenInput}
+            <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
+          {/if}
+          <button
+            class="at-save-btn"
+            class:saved={!isDirty}
+            onclick={saveToken}
+            disabled={tokenSaving || !isDirty}
+          >
+            {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
+          </button>
+        {:else if accessToken}
+          <div
+            class="at-masked"
+            class:copied={copyFeedback}
+            onclick={copyToken}
+            ondblclick={() => { editingToken = true; tokenInput = accessToken }}
+            title="单击复制，双击编辑"
+          >
+            {#if copyFeedback}
+              已复制!
+            {:else}
+              {'*'.repeat(Math.min(accessToken.length, 16))}
+            {/if}
+          </div>
+        {:else}
+          <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
+            - 未设置 -
+          </div>
+        {/if}
+      </div>
+    </div>
+  </div>
 </div>
 
 <style>
@@ -391,41 +473,106 @@
     color: #1e1e2e;
   }
   .entries-footer {
-    display: flex;
-    gap: 6px;
     padding: 10px 0 4px;
     border-top: 1px solid var(--border);
     margin-top: 8px;
   }
-  .footer-btn {
+  .at-section label {
+    display: block;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .at-row {
     display: flex;
-    flex-direction: column;
+    gap: 4px;
     align-items: center;
-    padding: 5px 18px;
+  }
+  .at-input {
+    flex: 1;
+    font-size: 11px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text);
+    font-family: monospace;
+  }
+  .at-masked {
+    flex: 1;
+    font-size: 11px;
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.12s, border-color 0.12s;
+    font-family: monospace;
+  }
+  .at-masked:hover {
+    background: var(--surface2);
+    border-color: var(--accent, #cba6f7);
+  }
+  .at-masked.copied {
+    color: #4ade80;
+    border-color: #4ade80;
+  }
+  .at-empty {
+    flex: 1;
+    font-size: 11px;
+    padding: 4px 8px;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+    text-align: center;
+    transition: background 0.12s, border-color 0.12s;
+  }
+  .at-empty:hover {
+    background: var(--surface);
+    border-color: var(--accent, #cba6f7);
+    color: var(--accent, #cba6f7);
+  }
+  .at-gen-btn {
+    font-size: 10px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px dashed var(--accent, #cba6f7);
+    color: var(--accent, #cba6f7);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.12s;
+  }
+  .at-gen-btn:hover {
+    background: rgba(203, 166, 247, 0.12);
+  }
+  .at-save-btn {
+    font-size: 10px;
+    padding: 3px 10px;
     border-radius: 6px;
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text);
     cursor: pointer;
-    font-family: inherit;
+    white-space: nowrap;
     transition: background 0.12s;
   }
-  .footer-btn:hover:not(:disabled) {
+  .at-save-btn:hover:not(:disabled) {
     background: var(--surface2);
   }
-  .footer-btn:disabled {
-    opacity: 0.3;
+  .at-save-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+  .at-save-btn.saved {
+    opacity: 0.5;
     cursor: default;
     pointer-events: none;
   }
-  .fb-label {
-    font-size: 13px;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-  .fb-hint {
-    font-size: 9px;
-    color: var(--text-dim);
-    line-height: 1.1;
-  }
+
 </style>

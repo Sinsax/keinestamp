@@ -21,6 +21,10 @@
     return p.replace(/^\\\\\?\\/, '')
   }
 
+  function normalizePath(p: string): string {
+    return cleanPath(p)
+  }
+
   let recentProjects = $state<RecentEntry[]>([])
   let activePath = $state('')
   let projectType = $state<ProjectType | null>(null)
@@ -36,6 +40,9 @@
   let showSettings = $state(false)
   let cachedVersions = $state<string[]>([])
   let hasRemote = $state(false)
+  let connected = $state(false)
+  let accessToken = $state('')
+  let deploying = $state(false)
 
   async function loadCachedVersions() {
     if (cachedVersions.length === 0) {
@@ -81,16 +88,30 @@
     }
   }
 
+  async function testConnection() {
+    try {
+      const [serverUrl, deployToken] = await Promise.all([api.getDeployServerUrl(), api.getDeployToken()])
+      if (!serverUrl) { connected = false; return }
+      connected = await api.testConnection(serverUrl, deployToken)
+    } catch {
+      connected = false
+    }
+  }
+
   async function loadProject(path: string) {
-    activePath = path
+    activePath = normalizePath(path)
     try {
       const pt = await api.detect(path)
       projectType = pt
       if (pt === 'initialized') {
-        const timeline = await api.getTimeline(path)
+        const [timeline, cfg] = await Promise.all([api.getTimeline(path), api.readConfig(path)])
         entries = timeline.entries.toReversed()
         hasRemote = await api.hasRemote(path)
+        accessToken = cfg.access_token || ''
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
+        if (cfg.auto_connect) {
+          testConnection()
+        }
       } else {
         entries = []
         statusOutput = ''
@@ -114,8 +135,9 @@
     try {
       const selected = await open({ directory: true, multiple: false, title: 'Select project folder' })
       if (!selected) return
-      statusText = `Initializing ${selected}...`
-      await api.initProject(selected)
+      const normPath = normalizePath(selected)
+      statusText = `Initializing ${normPath}...`
+      await api.initProject(normPath)
       pushToast('Project initialized', 'success')
       await loadRecent()
       await loadProject(selected)
@@ -125,21 +147,48 @@
     }
   }
 
-  async function handleCommit(msg: string, tag: string | null, noPreview: boolean = false) {
+  async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false) {
     showCommit = false
-    statusText = 'Committing...'
+    statusText = '记录中...'
     const unlisten = await listen<CommitProgress>('commit-progress', (event) => {
       statusText = event.payload.message
     })
     try {
-      const hash = await api.commit(activePath, msg, tag, noPreview)
-      pushToast(`Committed ${hash}`, 'success')
+      const hash = await api.record(activePath, msg, tag, noPreview)
+      pushToast(`已记录 ${hash}`, 'success')
       await loadProject(activePath)
     } catch (e: any) {
-      pushToast(`Commit failed: ${e}`, 'error')
-      statusText = 'Commit failed'
+      pushToast(`记录失败: ${e}`, 'error')
+      statusText = '记录失败'
     } finally {
       unlisten()
+    }
+  }
+
+  async function handleDeploy() {
+    if (!activePath) return
+    deploying = true
+    statusText = '部署中...'
+    try {
+      await api.deploy(activePath)
+      pushToast('部署成功', 'success')
+      await testConnection()
+      statusText = '部署完成'
+    } catch (e: any) {
+      pushToast(`部署失败: ${e}`, 'error')
+      statusText = '部署失败'
+    } finally {
+      deploying = false
+    }
+  }
+
+  async function handleTokenChange(val: string) {
+    try {
+      await api.updateConfig(activePath, 'access_token', val || null)
+      accessToken = val
+      pushToast('Token 已保存', 'success')
+    } catch (e: any) {
+      pushToast(`Token 保存失败: ${e}`, 'error')
     }
   }
 
@@ -147,7 +196,7 @@
     statusText = 'Reverting...'
     try {
       await api.revert(activePath)
-      pushToast('Last commit reverted (files preserved)', 'success')
+      pushToast('已撤回上次记录（文件保留在工作区）', 'success')
       await loadProject(activePath)
     } catch (e: any) {
       pushToast(`Revert: ${e}`, 'info')
@@ -162,30 +211,6 @@
       pushToast(s.output.trim() ? 'Changes detected' : 'Working tree clean', 'info')
     } catch (e: any) {
       pushToast(`Status failed: ${e}`, 'error')
-    }
-  }
-
-  async function handlePush() {
-    statusText = 'Pushing...'
-    try {
-      await api.push(activePath)
-      pushToast('Pushed to remote', 'success')
-      statusText = 'Push complete'
-    } catch (e: any) {
-      pushToast(`Push failed: ${e}`, 'error')
-      statusText = 'Push failed'
-    }
-  }
-
-  async function handlePull() {
-    statusText = 'Pulling...'
-    try {
-      await api.pull(activePath)
-      pushToast('Pulled from remote', 'success')
-      await loadProject(activePath)
-    } catch (e: any) {
-      pushToast(`Pull failed: ${e}`, 'error')
-      statusText = 'Pull failed'
     }
   }
 
@@ -234,30 +259,6 @@
     }
   }
 
-  function handleKeydown(e: KeyboardEvent) {
-    if (showCommit || detailEntry) return
-    switch (e.key) {
-      case 'c':
-        if (projectType === 'initialized') showCommit = true
-        break
-      case 'e':
-        if (projectType === 'initialized') handleExport()
-        break
-      case 'r':
-        if (projectType === 'initialized') handleRevert()
-        break
-      case 's':
-        if (projectType === 'initialized') handleStatus()
-        break
-      case 'p':
-        if (projectType === 'initialized') handlePush()
-        break
-      case 'l':
-        if (projectType === 'initialized') handlePull()
-        break
-    }
-  }
-
   onMount(() => {
     loadRecent()
     loadCachedVersions()
@@ -270,8 +271,6 @@
     return () => clearInterval(timer)
   })
 </script>
-
-<svelte:window onkeydown={handleKeydown} />
 
 <div class="app-layout">
   <TitleBar />
@@ -307,14 +306,14 @@
           {#if !activePath}
             <div class="empty-state">
               <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M2 6a2 2 0 012-2h5.757a2 2 0 011.414.586l1.12 1.12A2 2 0 0013.757 6H20a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg></div>
-              <div>Open a project from the tabs above</div>
-              <div style="font-size:12px">or create a new one with +</div>
+              <div>从上方标签页选择一个项目</div>
+              <div style="font-size:12px">或点击 + 创建新项目</div>
             </div>
           {:else if projectType !== 'initialized'}
             <div class="empty-state">
               <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.5"><path d="M12 2a1 1 0 01.894.553l9 18A1 1 0 0121 22H3a1 1 0 01-.894-1.447l9-18A1 1 0 0112 2zm0 3.236L4.472 20h15.056L12 5.236z"/><path d="M12 9a.5.5 0 01.5.5v5a.5.5 0 01-1 0v-5A.5.5 0 0112 9z"/><circle cx="12" cy="16.5" r=".5"/></svg></div>
-              <div>Not initialized</div>
-              <div style="font-size:12px">Press &quot;i&quot; to init</div>
+              <div>未初始化</div>
+              <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
             <StatusPanel {statusOutput} onRefresh={refreshStatus} />
@@ -329,9 +328,8 @@
               activePath={activePath}
               onSelect={(id) => selectedEntryId = id}
               onDblClick={(e) => detailEntry = e}
-              onPush={handlePush}
-              onPull={handlePull}
-              {hasRemote}
+              accessToken={accessToken}
+              onTokenChange={handleTokenChange}
             />
           </div>
         {/if}
@@ -339,12 +337,17 @@
 
       <ActionBar
         {projectType}
-        onCommit={() => showCommit = true}
+        onRecord={() => showCommit = true}
         onExport={handleExport}
         onRevert={handleRevert}
+        onDeploy={handleDeploy}
+        {connected}
       />
 
-      <StatusBar text={statusText} />
+      <StatusBar
+        text={statusText}
+        {connected}
+      />
     </div>
   </div>
 </div>
@@ -352,11 +355,11 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleCommit} onCancel={() => showCommit = false} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} />
 {/if}
 
 {#if showSettings}
-  <SettingsDialog path={activePath || ''} onClose={() => { showSettings = false; cachedVersions = []; if (activePath) loadProject(activePath) }} cachedVersions={cachedVersions} />
+  <SettingsDialog path={activePath || ''} onClose={() => { showSettings = false; cachedVersions = []; if (activePath) { loadProject(activePath); testConnection() } }} cachedVersions={cachedVersions} />
 {/if}
 
 <Toast {toasts} />

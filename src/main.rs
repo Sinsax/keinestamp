@@ -15,7 +15,8 @@ enum Commands {
         path: PathBuf,
     },
 
-    Commit {
+    #[command(name = "record", alias = "commit")]
+    Record {
         #[arg(default_value = ".")]
         path: PathBuf,
 
@@ -76,6 +77,31 @@ enum Commands {
         output: PathBuf,
     },
 
+    Serve {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        #[arg(short, long, default_value = "7799", help = "Port to listen on")]
+        port: u16,
+
+        #[arg(long, default_value = "0.0.0.0", help = "Host to bind to")]
+        host: String,
+
+        #[arg(long, help = "Path to serve.toml config file")]
+        config: Option<PathBuf>,
+    },
+
+    Deploy {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+
+        #[arg(long, required = true, help = "Server URL (e.g. http://192.168.0.100:7799)")]
+        server: String,
+
+        #[arg(long, help = "Deploy token (Bearer auth)")]
+        deploy_token: Option<String>,
+    },
+
     DownloadBlender {
         #[arg(short, long)]
         version: Option<String>,
@@ -94,8 +120,8 @@ fn main() -> anyhow::Result<()> {
             }
             result
         }
-        Some(Commands::Commit { path, message, tag, no_preview }) => {
-            let result = cmd_commit(&path, &message, tag.as_deref(), no_preview);
+        Some(Commands::Record { path, message, tag, no_preview }) => {
+            let result = cmd_record(&path, &message, tag.as_deref(), no_preview);
             if result.is_ok() {
                 saki_step::recent::RecentProjects::add_path(&path);
             }
@@ -108,6 +134,9 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Log { path, count }) => cmd_log(&path, count),
         Some(Commands::Config { path, set }) => cmd_config(&path, set.as_deref()),
         Some(Commands::Export { path, entry, output }) => cmd_export(&path, &entry, &output),
+        Some(Commands::Serve { path, port, host, config }) => cmd_serve(&path, port, &host, config.as_deref()),
+        Some(Commands::Deploy { path, server, deploy_token }) => cmd_deploy(&path, &server, deploy_token.as_deref()),
+
         Some(Commands::DownloadBlender { version }) => {
             cmd_download_blender(version.as_deref())
         }
@@ -124,7 +153,7 @@ fn main() -> anyhow::Result<()> {
         None => {
             println!("SakiStep - Blender Git Progress Board");
             println!("用法: saki-step <子命令> [选项]");
-            println!("子命令: init, commit, push, pull, revert, status, log, config, export, download-blender, list-blender-versions");
+            println!("子命令: init, record, push, pull, revert, status, log, config, export, serve, deploy, download-blender, list-blender-versions");
             println!("GUI 模式: 运行 `cargo tauri dev` 或使用编译后的 Tauri 应用");
             println!("查看详细帮助: saki-step --help");
             Ok(())
@@ -137,7 +166,7 @@ fn load_meta(path: &Path) -> anyhow::Result<saki_step::config::MetaConfig> {
     saki_step::config::read_meta(&meta_path)
 }
 
-fn cmd_commit(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -> anyhow::Result<()> {
+fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
     saki_step::git_project::ensure_git_user(&meta.project_root)?;
@@ -221,25 +250,21 @@ fn cmd_commit(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
     let _ = saki_step::git_web::web_commit_and_push(
         &meta.web_root,
         &format!("update timeline: {}", message),
-        meta.web_push_enabled,
+        false,
     );
 
-    println!("已提交 {} — {}", short_hash, message);
+    println!("已记录 {} — {}", short_hash, message);
     Ok(())
 }
 
 fn cmd_push(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    saki_step::git_project::push(&meta.project_root)?;
-    println!("已推送到远端");
-
-    if meta.web_push_enabled {
-        let _ = saki_step::git_web::web_commit_and_push(
-            &meta.web_root,
-            "push",
-            true,
-        );
+    if saki_step::git_project::has_remote(&meta.project_root) {
+        saki_step::git_project::push(&meta.project_root)?;
+        println!("已推送到远端");
+    } else {
+        eprintln!("[debug] cmd_push: no git remote, skipping git push");
     }
 
     Ok(())
@@ -248,8 +273,12 @@ fn cmd_push(path: &Path) -> anyhow::Result<()> {
 fn cmd_pull(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    saki_step::git_project::pull(&meta.project_root)?;
-    println!("已从远端拉取");
+    if saki_step::git_project::has_remote(&meta.project_root) {
+        saki_step::git_project::pull(&meta.project_root)?;
+        println!("已从远端拉取");
+    } else {
+        println!("没有配置 git 远端，跳过拉取");
+    }
 
     Ok(())
 }
@@ -268,7 +297,7 @@ fn cmd_revert(path: &Path) -> anyhow::Result<()> {
                     let _ = saki_step::git_web::web_commit_and_push(
                         &meta.web_root,
                         &format!("revert {}", &removed.id[..7.min(removed.id.len())]),
-                        meta.web_push_enabled,
+                        false,
                     );
                 }
             }
@@ -277,7 +306,7 @@ fn cmd_revert(path: &Path) -> anyhow::Result<()> {
         }
         Err(e) => {
             let msg = format!("{}", e);
-            if msg.contains("HEAD~1") {
+            if msg.contains("no commits to revert") {
                 println!("没有可撤回的提交");
                 Ok(())
             } else {
@@ -348,6 +377,55 @@ fn cmd_export(path: &Path, entry_id: &str, output_dir: &Path) -> anyhow::Result<
     saki_step::main_helpers::export_entry(path, entry_id, output_dir)
 }
 
+fn cmd_serve(path: &Path, port: u16, host: &str, config_path: Option<&Path>) -> anyhow::Result<()> {
+    let config = if let Some(cp) = config_path {
+        saki_step::serve::load_config(cp)?
+    } else {
+        let serve_toml = path.join("serve.toml");
+        if serve_toml.exists() {
+            saki_step::serve::load_config(&serve_toml)?
+        } else {
+            let meta_path = saki_step::config::meta_path(path);
+            let web_root = if meta_path.exists() {
+                saki_step::config::read_meta(&meta_path)?.web_root
+            } else {
+                path.to_path_buf()
+            };
+            saki_step::serve::auto_generate_config(&serve_toml, port, host, &web_root)?
+        }
+    };
+    saki_step::serve::start(config)
+}
+
+fn cmd_deploy(path: &Path, server: &str, deploy_token: Option<&str>) -> anyhow::Result<()> {
+    let mut meta = load_meta(path)?;
+    let app_token = saki_step::app_config::get_deploy_token();
+    let token = deploy_token.or(app_token.as_deref());
+    let app_server = saki_step::app_config::get_deploy_server_url();
+    let server_url = if server.is_empty() || server == "." {
+        app_server.as_deref().unwrap_or("")
+    } else {
+        server
+    };
+    if server_url.is_empty() {
+        anyhow::bail!("未设置服务器地址，请通过 --server 参数或软件设置中配置");
+    }
+    if meta.project_id.is_none() {
+        meta.project_id = Some(saki_step::config::generate_project_id());
+        saki_step::config::write_meta(&saki_step::config::meta_path(path), &meta)?;
+    }
+    let project_id = meta.project_id.as_deref().unwrap_or("");
+    let project_name = path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
+    let prefix = saki_step::push::deploy_to_server(&meta.web_root, server_url, token, meta.access_token.as_deref(), &project_name, project_id)?;
+    let url = if prefix.is_empty() {
+        server_url.to_string()
+    } else {
+        format!("{}{}", server_url.trim_end_matches('/'), prefix)
+    };
+    println!("已部署到 {}", url);
+    Ok(())
+}
+
 fn cmd_download_blender(version: Option<&str>) -> anyhow::Result<()> {
     match saki_step::blender_download::download_blender(version) {
         Ok(path) => {
@@ -380,7 +458,13 @@ fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
         println!("  网页远端:       (未设置)");
     }
 
-    println!("  自动推送网页:   {}", if meta.web_push_enabled { "是" } else { "否" });
+    println!("  自动连接:       {}", if meta.auto_connect { "是" } else { "否" });
+
+    if let Some(ref token) = meta.access_token {
+        println!("  访问令牌:       {}****", &token[..4.min(token.len())]);
+    } else {
+        println!("  访问令牌:       (未设置)");
+    }
 
     Ok(())
 }
@@ -399,18 +483,18 @@ fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
 
     match key {
         "web_remote" => {
-            meta.web_remote = value.map(|s| s.to_string());
-            if meta.web_remote.is_some() && !meta.web_push_enabled {
-                meta.web_push_enabled = true;
-            }
+            meta.web_remote = value.filter(|s| !s.is_empty()).map(|s| s.to_string());
         }
-        "web_push_enabled" => {
+        "access_token" => {
+            meta.access_token = value.map(|s| s.to_string());
+        }
+        "auto_connect" => {
             let v = value.unwrap_or("false");
-            meta.web_push_enabled = v == "true" || v == "1" || v == "yes";
+            meta.auto_connect = v == "true" || v == "1" || v == "yes";
         }
         _ => {
             anyhow::bail!(
-                "未知配置项: {}。可用项: web_remote, web_push_enabled",
+                "未知配置项: {}。可用项: web_remote, access_token, auto_connect",
                 key
             );
         }

@@ -3,23 +3,27 @@
 
   let {
     projectType,
-    onCommit,
+    onRecord,
     onExport,
     onRevert,
+    onDeploy,
+    connected = false,
   }: {
     projectType: ProjectType | null
-    onCommit: () => void
+    onRecord: () => void
     onExport: () => void
     onRevert: () => void
+    onDeploy: () => void
+    connected?: boolean
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
 </script>
 
 <div class="action-bar">
-  <button onclick={onCommit} disabled={!initialized}>
-    <span class="ab-label">保存</span>
-    <span class="ab-hint">commit</span>
+  <button onclick={onRecord} disabled={!initialized}>
+    <span class="ab-label">记录</span>
+    <span class="ab-hint">record</span>
   </button>
 
   <button onclick={onExport} disabled={!initialized}>
@@ -30,6 +34,13 @@
   <button onclick={onRevert} disabled={!initialized}>
     <span class="ab-label">撤回</span>
     <span class="ab-hint">revert</span>
+  </button>
+
+  <div class="spacer"></div>
+
+  <button class="deploy-btn" onclick={onDeploy} disabled={!initialized || !connected}>
+    <span class="ab-label">部署</span>
+    <span class="ab-hint">deploy</span>
   </button>
 </div>
 
@@ -78,4 +89,6 @@
     line-height: 1.1;
   }
   .spacer { flex: 1; }
+  .deploy-btn { border-color: var(--accent, #7c3aed) !important; }
+  .deploy-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 </style>

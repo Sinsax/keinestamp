@@ -9,6 +9,12 @@ pub struct AppConfig {
     pub blender_version: Option<String>,
     #[serde(default)]
     pub blender_versions: Option<String>,
+    #[serde(default)]
+    pub deploy_server_url: Option<String>,
+    #[serde(default)]
+    pub deploy_token: Option<String>,
+    #[serde(default)]
+    pub auto_connect: bool,
 }
 
 impl AppConfig {
@@ -20,11 +26,7 @@ impl AppConfig {
         std::fs::read_to_string(path)
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
-            .unwrap_or(Self {
-                blender_path: None,
-                blender_version: None,
-                blender_versions: None,
-            })
+            .unwrap_or_default()
     }
 
     pub fn save(&self) {
@@ -46,6 +48,19 @@ impl AppConfig {
             if std::fs::write(&tmp, &content).is_ok() {
                 let _ = std::fs::rename(&tmp, path);
             }
+        }
+    }
+}
+
+impl Default for AppConfig {
+    fn default() -> Self {
+        Self {
+            blender_path: None,
+            blender_version: None,
+            blender_versions: None,
+            deploy_server_url: None,
+            deploy_token: None,
+            auto_connect: false,
         }
     }
 }
@@ -72,6 +87,36 @@ pub fn get_blender_versions() -> Vec<String> {
 pub fn set_blender_versions(versions: &[String]) {
     let mut cfg = AppConfig::load();
     cfg.blender_versions = Some(versions.join(","));
+    cfg.save();
+}
+
+pub fn get_deploy_server_url() -> Option<String> {
+    AppConfig::load().deploy_server_url
+}
+
+pub fn set_deploy_server_url(url: &str) {
+    let mut cfg = AppConfig::load();
+    cfg.deploy_server_url = if url.is_empty() { None } else { Some(url.to_string()) };
+    cfg.save();
+}
+
+pub fn get_deploy_token() -> Option<String> {
+    AppConfig::load().deploy_token
+}
+
+pub fn set_deploy_token(token: &str) {
+    let mut cfg = AppConfig::load();
+    cfg.deploy_token = if token.is_empty() { None } else { Some(token.to_string()) };
+    cfg.save();
+}
+
+pub fn get_auto_connect() -> bool {
+    AppConfig::load().auto_connect
+}
+
+pub fn set_auto_connect(v: bool) {
+    let mut cfg = AppConfig::load();
+    cfg.auto_connect = v;
     cfg.save();
 }
 
@@ -117,13 +162,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);
 assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
     assert_eq!(loaded.blender_version, None);
     assert_eq!(loaded.blender_versions, None);
+    assert_eq!(loaded.deploy_server_url, None);
+    assert_eq!(loaded.deploy_token, None);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -142,7 +189,7 @@ assert_eq!(loaded.blender_path, None);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let mut cfg = AppConfig { blender_path: None, blender_version: None, blender_versions: None };
+        let mut cfg = AppConfig::default();
         cfg.blender_path = Some("/usr/bin/blender".to_string());
         cfg.save_to(&path);
 

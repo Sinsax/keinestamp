@@ -33,11 +33,11 @@
   </div>
   <div class="sidebar-list">
     {#if !activePath}
-      <div class="sidebar-empty">No project selected</div>
+      <div class="sidebar-empty">未选择项目</div>
     {:else if trackedFiles.length === 0}
       <div class="sidebar-empty">
         <div class="sidebar-empty-icon"><svg viewBox="0 0 20 20" width="24" height="24" fill="currentColor" opacity="0.4"><path d="M2 4.5A1.5 1.5 0 013.5 3h5.757a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 0112 4.62V6h2.5A1.5 1.5 0 0116 7.5v6a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 012 13.5v-9z"/></svg></div>
-        <div>No files</div>
+        <div>无文件</div>
       </div>
     {:else}
       <DirTree paths={trackedFiles} />

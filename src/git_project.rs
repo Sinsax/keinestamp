@@ -15,7 +15,7 @@ pub fn add_and_commit(project_root: &Path, message: &str) -> Result<String> {
 
 pub fn stage_files_and_commit(project_root: &Path, files: &[&str], message: &str) -> Result<String> {
     eprintln!("[debug] stage_files_and_commit: root={:?}, files={:?}, message={:?}", project_root, files, message);
-    let mut args = vec!["add"];
+    let mut args = vec!["add", "--force"];
     args.extend_from_slice(files);
     run_git(project_root, &args)?;
     run_git(project_root, &["commit", "-m", message])?;
@@ -28,6 +28,14 @@ pub fn push(project_root: &Path) -> Result<()> {
     eprintln!("[debug] push: root={:?}", project_root);
     let branch = get_current_branch(project_root)?;
     eprintln!("[debug] push: branch={}", branch);
+
+    let has_origin = run_git_output(project_root, &["remote"])
+        .map(|s| s.lines().any(|l| l.trim() == "origin"))
+        .unwrap_or(false);
+    if !has_origin {
+        anyhow::bail!("没有名为 origin 的 git 远端。请先用 `git remote add origin <url>` 添加。");
+    }
+
     run_git(project_root, &["push", "-u", "origin", &branch])?;
     eprintln!("[debug] push → ok");
     Ok(())
@@ -35,7 +43,7 @@ pub fn push(project_root: &Path) -> Result<()> {
 
 pub fn pull(project_root: &Path) -> Result<()> {
     eprintln!("[debug] pull: root={:?}", project_root);
-    run_git(project_root, &["pull"])?;
+    run_git(project_root, &["pull", "--rebase"])?;
     eprintln!("[debug] pull → ok");
     Ok(())
 }
@@ -43,16 +51,25 @@ pub fn pull(project_root: &Path) -> Result<()> {
 pub fn has_remote(project_root: &Path) -> bool {
     let output = run_git_output(project_root, &["remote"]);
     match output {
-        Ok(s) => !s.trim().is_empty(),
+        Ok(s) => s.lines().any(|l| l.trim() == "origin"),
         Err(_) => false,
     }
 }
 
 pub fn revert(project_root: &Path) -> Result<()> {
     eprintln!("[debug] revert: root={:?}", project_root);
+    let count = get_commit_count(project_root)?;
+    if count < 2 {
+        anyhow::bail!("no commits to revert");
+    }
     run_git(project_root, &["reset", "--soft", "HEAD~1"])?;
     eprintln!("[debug] revert → ok");
     Ok(())
+}
+
+fn get_commit_count(project_root: &Path) -> Result<usize> {
+    let output = run_git_output(project_root, &["rev-list", "--count", "HEAD"])?;
+    Ok(output.trim().parse().unwrap_or(0))
 }
 
 pub fn status(project_root: &Path) -> Result<String> {
@@ -161,6 +178,7 @@ fn run_git(path: &Path, args: &[&str]) -> Result<()> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[debug] git {:?} failed at {:?}: {}", args, path, stderr.trim());
         anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
     }
 
@@ -176,6 +194,7 @@ fn run_git_output(path: &Path, args: &[&str]) -> Result<String> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[debug] git {:?} failed at {:?}: {}", args, path, stderr.trim());
         anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
     }
 
