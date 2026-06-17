@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { onConfirm, onCancel }: { onConfirm: (msg: string, tag: string | null, noPreview: boolean) => void; onCancel: () => void } = $props()
+  let { onConfirm, onCancel, lastTag = '' }: { onConfirm: (msg: string, tag: string | null, noPreview: boolean) => void; onCancel: () => void; lastTag?: string } = $props()
 
   const TAG_PRESETS = ['建模', 'UV拆分', '绑定', '贴图', '修复']
 
@@ -18,6 +18,17 @@
   function handleConfirm() {
     if (message.trim()) onConfirm(message.trim(), effectiveTag(), !previewEnabled)
   }
+
+  $effect(() => {
+    if (lastTag) {
+      if (TAG_PRESETS.includes(lastTag)) {
+        tag = lastTag
+      } else {
+        customTag = lastTag
+        useCustom = true
+      }
+    }
+  })
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleConfirm()

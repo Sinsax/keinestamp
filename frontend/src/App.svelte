@@ -283,7 +283,7 @@
     onSettings={() => showSettings = true}
   />
 
-  <div class="body">
+  <div class="body" onclick={() => selectedEntryId = ''}>
     <Sidebar {trackedFiles} {activePath} onCloseProject={handleCloseAndRemove} />
 
     <div class="main-area">
@@ -355,7 +355,7 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} />
 {/if}
 
 {#if showSettings}

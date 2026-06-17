@@ -2,7 +2,7 @@
   import DirTreeNode from './DirTreeNode.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
 
-  let { paths = [] }: { paths?: string[] } = $props()
+  let { paths = [], activePath = '' }: { paths?: string[]; activePath?: string } = $props()
 
   const tree = $derived(buildFileTree(paths))
 
@@ -37,6 +37,6 @@
 
 {#if tree.length > 0}
   {#each tree as node (node.path)}
-    <DirTreeNode {node} {collapsed} {toggle} depth={0} />
+    <DirTreeNode {node} {collapsed} {toggle} depth={0} {activePath} />
   {/each}
 {/if}

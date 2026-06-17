@@ -674,30 +674,11 @@ async fn download_blender(app: tauri::AppHandle, version: Option<String>) -> Res
 
 #[tauri::command]
 async fn list_blender_versions() -> Vec<String> {
-    eprintln!("[debug] list_blender_versions()");
     let cached = saki_step::app_config::get_blender_versions();
     if !cached.is_empty() {
-        eprintln!("[debug] list_blender_versions: returning {} cached versions", cached.len());
-        tokio::task::spawn_blocking(|| {
-            let fetched = saki_step::blender_download::fetch_blender_versions().unwrap_or_default();
-            if !fetched.is_empty() {
-                saki_step::app_config::set_blender_versions(&fetched);
-            }
-        });
         cached
     } else {
-        eprintln!("[debug] list_blender_versions: no cache, fetching from network");
-        tokio::task::spawn_blocking(|| {
-            let fetched = saki_step::blender_download::fetch_blender_versions().unwrap_or_default();
-            if !fetched.is_empty() {
-                saki_step::app_config::set_blender_versions(&fetched);
-                fetched
-            } else {
-                saki_step::blender_download::list_blender_versions()
-            }
-        })
-        .await
-        .unwrap_or_else(|_| saki_step::blender_download::list_blender_versions())
+        saki_step::blender_download::list_blender_versions()
     }
 }
 
@@ -778,6 +759,15 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .setup(|_app| {
+            std::thread::spawn(|| {
+                let fetched = saki_step::blender_download::fetch_blender_versions().unwrap_or_default();
+                if !fetched.is_empty() {
+                    saki_step::app_config::set_blender_versions(&fetched);
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             detect,
             init_project,

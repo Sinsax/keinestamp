@@ -227,7 +227,7 @@
   }
 </script>
 
-<div class="entries" onclick={() => onSelect('')}>
+<div class="entries">
   {#if entries.length === 0}
     <div class="empty-state">
       <div class="big">~</div>

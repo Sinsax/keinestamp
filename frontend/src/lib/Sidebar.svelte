@@ -40,7 +40,7 @@
         <div>无文件</div>
       </div>
     {:else}
-      <DirTree paths={trackedFiles} />
+      <DirTree paths={trackedFiles} {activePath} />
     {/if}
   </div>
   {#if activePath}

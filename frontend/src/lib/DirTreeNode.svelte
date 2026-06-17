@@ -1,18 +1,28 @@
 <script lang="ts">
   import DirTreeNode from './DirTreeNode.svelte'
   import type { FileTreeNode } from './fileTree'
+  import { openFolder } from '../api'
 
   let {
     node,
     collapsed,
     toggle,
     depth = 0,
+    activePath = '',
   }: {
     node: FileTreeNode
     collapsed: Set<string>
     toggle: (path: string) => void
     depth?: number
+    activePath?: string
   } = $props()
+
+  function handleFileDblClick() {
+    if (isDir) return
+    const relDir = node.path.includes('/') ? node.path.substring(0, node.path.lastIndexOf('/')) : ''
+    const fullDir = relDir ? `${activePath}/${relDir}` : activePath
+    openFolder(fullDir)
+  }
 
   const isDir = $derived(node.children.length > 0)
   const isCollapsed = $derived(collapsed.has(node.path))
@@ -39,7 +49,7 @@
     <span class="arr-placeholder"></span>
     <span class="ico"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" opacity="0.5"><path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-5.586a1 1 0 01-.707-.293L9.293 3.293A1 1 0 008.586 3H4z"/></svg></span>
   {/if}
-  <span class="nm" class:dir={isDir} onclick={() => isDir && toggle(node.path)}>{node.name}</span>
+  <span class="nm" class:dir={isDir} onclick={() => isDir && toggle(node.path)} ondblclick={!isDir ? handleFileDblClick : undefined}>{node.name}</span>
 </div>
 
 {#if isDir && !isCollapsed}
