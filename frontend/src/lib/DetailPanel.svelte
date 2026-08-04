@@ -93,7 +93,7 @@
     border-radius: 999px;
     margin-left: 8px;
     vertical-align: middle;
-    color: color-mix(in srgb, var(--tag-c) 45%, white);
+    color: color-mix(in srgb, var(--tag-c) 45%, var(--text));
     background: color-mix(in srgb, var(--tag-c) 14%, transparent);
   }
   .blend-item { font-family: var(--mono); font-size: 11px; color: var(--blue); margin-bottom: 4px; }

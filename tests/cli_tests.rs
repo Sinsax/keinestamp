@@ -197,6 +197,8 @@ fn html_gen_contains_daynight_theme() {
     assert!(html.contains("keinestamp_web_theme"), "missing theme storage key");
     assert!(html.contains("theme-toggle"), "missing toggle button id");
     assert!(html.contains("color-mix"), "missing color-mix badge styles");
+    assert!(html.contains("--bg: #141d18"), "night palette drifted");
+    assert!(html.contains("localStorage.getItem('keinestamp_web_theme')"), "missing pre-read script");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

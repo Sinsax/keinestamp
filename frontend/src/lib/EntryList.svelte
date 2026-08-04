@@ -461,7 +461,7 @@
     border-radius: 999px;
     margin-left: 6px;
     vertical-align: middle;
-    color: color-mix(in srgb, var(--tag-c) 45%, white);
+    color: color-mix(in srgb, var(--tag-c) 45%, var(--text));
     background: color-mix(in srgb, var(--tag-c) 14%, transparent);
   }
   .entries-footer {
