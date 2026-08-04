@@ -116,19 +116,27 @@
   })
 
   const TAG_COLORS: Record<string, string> = {
-    '建模': '#89b4fa',
-    'UV拆分': '#a6e3a1',
-    '绑定': '#cba6f7',
-    '贴图': '#fab387',
-    '修复': '#f38ba8',
+    '建模': '#3d6fa8',
+    'UV拆分': '#3e6b52',
+    '绑定': '#7a5fa8',
+    '贴图': '#a8722e',
+    '修复': '#c03535',
   }
-  const FALLBACK_COLORS = ['#89b4fa', '#a6e3a1', '#cba6f7', '#fab387', '#f38ba8', '#94e2d5']
+  const FALLBACK_COLORS = ['#3d6fa8', '#3e6b52', '#7a5fa8', '#a8722e', '#c03535', '#4e8a8a']
 
   function tagColor(tag: string): string {
     if (TAG_COLORS[tag]) return TAG_COLORS[tag]
     let hash = 0
     for (let i = 0; i < tag.length; i++) hash = ((hash << 5) - hash) + tag.charCodeAt(i)
     return FALLBACK_COLORS[Math.abs(hash) % FALLBACK_COLORS.length]
+  }
+
+  function tagSoft(tag: string): string {
+    const c = tagColor(tag)
+    const r = parseInt(c.slice(1, 3), 16)
+    const g = parseInt(c.slice(3, 5), 16)
+    const b = parseInt(c.slice(5, 7), 16)
+    return `rgba(${r},${g},${b},0.12)`
   }
 
   interface GroupedEntry {
@@ -262,7 +270,7 @@
         <div class="msg">
           {entry.message}
           {#if entryTag}
-            <span class="tag-badge" style="background:{tagColor(entryTag)}">{entryTag}</span>
+            <span class="tag-badge" style="color:{tagColor(entryTag)};background:{tagSoft(entryTag)}">{entryTag}</span>
           {/if}
         </div>
 
@@ -388,42 +396,48 @@
     align-items: center;
     gap: 5px;
     margin-top: 6px;
-    padding: 4px 0;
+    padding: 5px 0;
     font-size: 11px;
     font-weight: 600;
     color: var(--text-dim);
     cursor: pointer;
     user-select: none;
     border-top: 1px solid var(--border);
-    padding-top: 5px;
+    transition: color 0.12s;
   }
-  .section-header:hover { color: var(--text); }
+  .section-header:hover { color: var(--accent); }
   .section-header .arr { font-size: 9px; width: 10px; flex-shrink: 0; }
   .section-body { padding: 4px 0 2px 15px; font-size: 12px; }
   .section-loading { color: var(--text-dim); font-size: 11px; padding: 4px 0; }
-  .file-status-line { display: flex; align-items: center; gap: 6px; padding: 1px 0; font-family: monospace; font-size: 12px; }
-  .status-badge { width: 18px; text-align: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
+  .file-status-line { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-family: var(--mono); font-size: 12px; }
+  .status-badge {
+    width: 18px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px;
+    font-weight: 700; font-size: 12px;
+    flex-shrink: 0;
+  }
   .status-path { color: var(--text); }
-  .st-add { color: #4caf88; }
-  .st-del { color: #e06c75; }
-  .st-mod { color: #e5c07b; }
+  .st-add { color: var(--ze); background: var(--ze-soft); }
+  .st-del { color: var(--error); background: var(--accent-soft); }
+  .st-mod { color: var(--warning); background: rgba(176, 128, 58, 0.12); }
 
   .diff-entry, .model-entry { margin-bottom: 6px; }
   .diff-path {
-    font-size: 11px; font-family: monospace;
-    color: var(--accent); padding: 2px 6px;
-    background: rgba(0,0,0,0.06); border-radius: 3px; margin-bottom: 3px;
+    font-size: 11px; font-family: var(--mono);
+    color: var(--blue); padding: 2px 6px;
+    background: var(--blue-soft); border-radius: 4px; margin-bottom: 3px;
   }
   .diff-empty { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
 
   .dl {
     display: flex;
     gap: 8px;
-    font-family: monospace;
+    font-family: var(--mono);
     font-size: 11px;
     line-height: 1.6;
     padding: 0 4px;
-    border-radius: 2px;
+    border-radius: 3px;
   }
   .dl-num {
     width: 32px;
@@ -434,43 +448,42 @@
     user-select: none;
   }
   .dl-text { white-space: pre; flex: 1; }
-  .dl.add { background: rgba(76, 175, 136, 0.12); color: #4caf88; }
-  .dl.add .dl-num { color: #4caf88; }
-  .dl.del { background: rgba(224, 108, 117, 0.12); color: #e06c75; }
-  .dl.del .dl-num { color: #e06c75; }
-  .dl.mod { background: rgba(100, 140, 255, 0.12); color: #648cff; }
-  .dl.mod .dl-num { color: #648cff; }
+  .dl.add { background: var(--ze-soft); color: var(--ze); }
+  .dl.add .dl-num { color: var(--ze); }
+  .dl.del { background: var(--accent-soft); color: var(--error); }
+  .dl.del .dl-num { color: var(--error); }
+  .dl.mod { background: var(--blue-soft); color: var(--blue); }
+  .dl.mod .dl-num { color: var(--blue); }
 
-  .model-err { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; background: var(--surface); border-radius: 6px; }
+  .model-err { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; background: var(--surface2); border-radius: 6px; }
   .open-web-btn {
     margin-top: 6px;
     padding: 5px 14px;
-    border-radius: 6px;
-    border: 1px solid var(--accent, #cba6f7);
+    border-radius: 8px;
+    border: 1px solid var(--accent);
     background: transparent;
-    color: var(--accent, #cba6f7);
+    color: var(--accent);
     font-size: 11px;
     font-weight: 500;
     cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
   .open-web-btn:hover {
-    background: var(--accent, #cba6f7);
-    color: #1e1e2e;
+    background: var(--accent);
+    color: #fff;
   }
-  .tag-group { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; }
-  .tag-group-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .tag-group { display: flex; align-items: center; gap: 8px; margin: 12px 0 6px; }
+  .tag-group-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 3px var(--surface); }
   .tag-group-label { font-size: 12px; font-weight: 700; }
   .tag-group-line { flex: 1; height: 1px; background: var(--border); }
   .tag-badge {
     display: inline-block;
     font-size: 10px;
     font-weight: 600;
-    padding: 1px 6px;
-    border-radius: 8px;
+    padding: 2px 8px;
+    border-radius: 999px;
     margin-left: 6px;
     vertical-align: middle;
-    color: #1e1e2e;
   }
   .entries-footer {
     padding: 10px 0 4px;
@@ -496,7 +509,7 @@
     border-radius: 6px;
     background: var(--surface);
     color: var(--text);
-    font-family: monospace;
+    font-family: var(--mono);
   }
   .at-masked {
     flex: 1;
@@ -509,15 +522,15 @@
     cursor: pointer;
     user-select: none;
     transition: background 0.12s, border-color 0.12s;
-    font-family: monospace;
+    font-family: var(--mono);
   }
   .at-masked:hover {
     background: var(--surface2);
-    border-color: var(--accent, #cba6f7);
+    border-color: var(--accent);
   }
   .at-masked.copied {
-    color: #4ade80;
-    border-color: #4ade80;
+    color: var(--ze);
+    border-color: var(--ze);
   }
   .at-empty {
     flex: 1;
@@ -530,26 +543,26 @@
     cursor: pointer;
     user-select: none;
     text-align: center;
-    transition: background 0.12s, border-color 0.12s;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
   }
   .at-empty:hover {
-    background: var(--surface);
-    border-color: var(--accent, #cba6f7);
-    color: var(--accent, #cba6f7);
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .at-gen-btn {
     font-size: 10px;
     padding: 3px 10px;
     border-radius: 6px;
     background: var(--surface);
-    border: 1px dashed var(--accent, #cba6f7);
-    color: var(--accent, #cba6f7);
+    border: 1px dashed var(--accent);
+    color: var(--accent);
     cursor: pointer;
     white-space: nowrap;
     transition: background 0.12s;
   }
   .at-gen-btn:hover {
-    background: rgba(203, 166, 247, 0.12);
+    background: var(--accent-soft);
   }
   .at-save-btn {
     font-size: 10px;
@@ -574,5 +587,4 @@
     cursor: default;
     pointer-events: none;
   }
-
 </style>
