@@ -53,65 +53,57 @@
   .project-tabs {
     display: flex;
     align-items: center;
-    gap: 2px;
-    padding: 4px 8px;
+    gap: 4px;
+    padding: 6px 10px;
     background: var(--bg);
     border-bottom: 1px solid var(--border);
-    min-height: 32px;
+    min-height: 36px;
   }
   .project-tab {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 3px 10px;
+    padding: 4px 12px;
     font-size: 11px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 5px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 999px;
     cursor: pointer;
     color: var(--text-dim);
     white-space: nowrap;
     max-width: 160px;
-    transition: background 0.1s, color 0.1s, border-color 0.1s;
+    transition: background 0.15s var(--ease), color 0.15s var(--ease),
+      border-color 0.15s var(--ease), transform 0.15s var(--ease);
   }
   .project-tab:hover {
-    background: var(--surface2);
+    background: var(--surface);
+    border-color: var(--border);
     color: var(--text);
-    border-color: var(--surface3);
+    transform: translateY(-1px);
   }
   .project-tab.active {
-    background: var(--surface2);
-    color: var(--text);
-    border-color: var(--accent);
-    border-bottom-color: var(--surface2);
+    background: var(--surface);
+    border-color: var(--border);
+    color: var(--accent);
+    font-weight: 600;
+    box-shadow: var(--shadow-sm);
   }
   .tab-name {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .add-tab {
-    padding: 3px 6px;
+  .add-tab, .settings-tab {
+    padding: 4px 8px;
     background: transparent;
     border-color: transparent;
     color: var(--text-dim);
   }
-  .add-tab:hover {
+  .add-tab:hover, .settings-tab:hover {
     background: var(--surface);
     border-color: var(--border);
-    color: var(--text);
+    color: var(--accent);
+    transform: none;
   }
   .tabs-spacer { flex: 1; }
-  .settings-tab {
-    padding: 3px 6px;
-    background: transparent;
-    border-color: transparent;
-    color: var(--text-dim);
-    margin-left: 2px;
-  }
-  .settings-tab:hover {
-    background: var(--surface);
-    border-color: var(--border);
-    color: var(--text);
-  }
 </style>
