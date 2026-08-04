@@ -45,7 +45,7 @@
   let deploying = $state(false)
 
   let sidebarCollapsed = $state(localStorage.getItem('keinestamp_sidebar_collapsed') === '1')
-  let timelineWidth = $state(parseInt(localStorage.getItem('keinestamp_timeline_width') || '320', 10))
+  let timelineWidth = $state(Math.min(480, Math.max(240, parseInt(localStorage.getItem('keinestamp_timeline_width') || '320', 10) || 320)))
 
   $effect(() => {
     localStorage.setItem('keinestamp_sidebar_collapsed', sidebarCollapsed ? '1' : '0')
@@ -65,9 +65,11 @@
     const onUp = () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onUp)
   }
 
   async function loadCachedVersions() {
@@ -364,7 +366,7 @@
         </div>
 
         {#if projectType === 'initialized'}
-          <div class="tl-resize" onpointerdown={startTimelineDrag}></div>
+          <div class="tl-resize" onpointerdown={startTimelineDrag} onclick={(e) => e.stopPropagation()}></div>
           <div class="timeline-panel" style="width: {timelineWidth}px">
             <EntryList
               entries={entries}

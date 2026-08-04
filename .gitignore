@@ -7,4 +7,5 @@ src-tauri/gen
 *.ico
 *.icns
 *.svg
+!frontend/public/keinestamp.svg
 /test

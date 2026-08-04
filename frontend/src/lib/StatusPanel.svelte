@@ -38,9 +38,9 @@
 
   function statusColor(x: string, y: string): string {
     if (x !== ' ') {
-      if (x === 'M') return '--accent'
-      if (x === 'A') return '--success'
-      if (x === 'D') return '--error'
+      if (x === 'M') return 'var(--accent)'
+      if (x === 'A') return 'var(--success)'
+      if (x === 'D') return 'var(--error)'
     }
     if (y === 'M') return 'var(--warning)'
     if (y === 'A') return 'var(--success)'
