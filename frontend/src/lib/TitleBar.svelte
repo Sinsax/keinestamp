@@ -33,19 +33,19 @@
 <div class="titlebar">
   <div class="tb-brand">
     <svg class="tb-icon" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M28 22 C44 14, 56 14, 72 22 C84 34, 84 66, 72 78 C56 86, 44 86, 28 78 C16 66, 16 34, 28 22Z" fill="#4CAF50"/>
-      <path d="M33 28 C22 40, 22 60, 33 72" stroke="#388E3C" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <path d="M44 24 C32 40, 32 60, 44 76" stroke="#388E3C" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <path d="M56 24 C44 40, 44 60, 56 76" stroke="#388E3C" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <path d="M67 28 C56 40, 56 60, 67 72" stroke="#388E3C" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <circle cx="40" cy="40" r="3" fill="#66BB6A"/>
-      <circle cx="44" cy="55" r="3.5" fill="#66BB6A"/>
-      <circle cx="50" cy="70" r="3" fill="#66BB6A"/>
-      <circle cx="52" cy="38" r="3.5" fill="#66BB6A"/>
-      <circle cx="58" cy="53" r="3" fill="#66BB6A"/>
-      <circle cx="62" cy="68" r="3.5" fill="#66BB6A"/>
-      <path d="M46 16 C48 10, 52 6, 58 8" stroke="#8BC34A" stroke-width="3" fill="none" stroke-linecap="round"/>
-      <path d="M58 8 C62 6, 64 8, 66 7" stroke="#8BC34A" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      <path d="M28 22 C44 14, 56 14, 72 22 C84 34, 84 66, 72 78 C56 86, 44 86, 28 78 C16 66, 16 34, 28 22Z" fill="#D94747"/>
+      <path d="M33 28 C22 40, 22 60, 33 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <path d="M44 24 C32 40, 32 60, 44 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <path d="M56 24 C44 40, 44 60, 56 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <path d="M67 28 C56 40, 56 60, 67 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <circle cx="40" cy="40" r="3" fill="#FFE3E3"/>
+      <circle cx="44" cy="55" r="3.5" fill="#9FC3E3"/>
+      <circle cx="50" cy="70" r="3" fill="#FFE3E3"/>
+      <circle cx="52" cy="38" r="3.5" fill="#9FC3E3"/>
+      <circle cx="58" cy="53" r="3" fill="#FFE3E3"/>
+      <circle cx="62" cy="68" r="3.5" fill="#9FC3E3"/>
+      <path d="M46 16 C48 10, 52 6, 58 8" stroke="#E8B4B4" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M58 8 C62 6, 64 8, 66 7" stroke="#E8B4B4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
     </svg>
     <span class="tb-title">Keinestamp</span>
     </div>
@@ -117,7 +117,7 @@
     color: var(--text-dim);
     cursor: pointer;
     padding: 4px 8px;
-    border-radius: 4px;
+    border-radius: 6px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -126,8 +126,8 @@
     transition: background 0.1s, color 0.1s;
   }
   .tb-btn:hover {
-    background: var(--surface2);
-    color: var(--text);
+    background: var(--accent-soft);
+    color: var(--accent);
   }
   .tb-close:hover {
     background: var(--error);
