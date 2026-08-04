@@ -43,6 +43,12 @@
   let connected = $state(false)
   let accessToken = $state('')
   let deploying = $state(false)
+  let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
+
+  $effect(() => {
+    document.documentElement.dataset.theme = theme
+    localStorage.setItem('keinestamp_theme', theme)
+  })
 
   let sidebarCollapsed = $state(localStorage.getItem('keinestamp_sidebar_collapsed') === '1')
   let timelineWidth = $state(Math.min(480, Math.max(240, parseInt(localStorage.getItem('keinestamp_timeline_width') || '320', 10) || 320)))
@@ -301,7 +307,7 @@
 </script>
 
 <div class="app-layout">
-  <TitleBar />
+  <TitleBar theme={theme} onToggleTheme={() => theme = theme === 'day' ? 'night' : 'day'} />
 
   <ProjectTabs
     entries={recentProjects.toReversed()}

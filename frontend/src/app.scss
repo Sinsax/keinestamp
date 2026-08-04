@@ -27,6 +27,8 @@
   --shadow-sm: 0 1px 2px rgba(30, 40, 51, 0.06);
   --shadow-md: 0 4px 12px rgba(30, 40, 51, 0.10);
   --shadow-lg: 0 16px 48px rgba(30, 40, 51, 0.18);
+  --card-active: #fffdfd;
+  --warning-soft: rgba(176, 128, 58, 0.12);
   --mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
   /* 布局 */
   --sidebar-w: 240px;
@@ -162,7 +164,7 @@ input:focus, textarea:focus, select:focus {
     transform 0.15s var(--ease);
 }
 .entry-card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
-.entry-card.active { border-color: var(--accent); background: #fffdfd; }
+.entry-card.active { border-color: var(--accent); background: var(--card-active); }
 .entry-card.tagged { border-left: 3px solid var(--tag-color, var(--border)); }
 .entry-card .top {
   display: flex; justify-content: space-between; align-items: baseline;
@@ -296,4 +298,33 @@ input:focus, textarea:focus, select:focus {
   justify-content: center;
   background: var(--ice-soft);
   border-radius: 50%;
+}
+
+/* ---- 夜间模式（白泽形态） ---- */
+[data-theme="night"] {
+  --accent: #e05555;
+  --accent-hover: #c94545;
+  --accent-soft: #3a2424;
+  --blue: #4a7a5c;
+  --blue-soft: #1e2e26;
+  --ze: #57a07f;
+  --ze-hover: #4a8f70;
+  --ze-soft: #1e2e26;
+  --ice: #b8e6c8;
+  --ice-soft: #1f2d26;
+  --bg: #141d18;
+  --surface: #1b2620;
+  --surface2: #22302a;
+  --surface3: #2c3d35;
+  --border: #2e3f37;
+  --text: #e8f2ec;
+  --text-dim: #93a8a0;
+  --success: #57a07f;
+  --warning: #d4a04d;
+  --error: #e05c5c;
+  --card-active: #1f2c25;
+  --warning-soft: rgba(212, 160, 77, 0.14);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
 }

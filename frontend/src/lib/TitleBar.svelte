@@ -1,6 +1,14 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window'
 
+  let {
+    theme = 'day',
+    onToggleTheme = () => {},
+  }: {
+    theme?: string
+    onToggleTheme?: () => void
+  } = $props()
+
   let win: any = undefined
   try {
     win = getCurrentWindow()
@@ -51,6 +59,13 @@
     </div>
     <div class="tb-subtitle">Blender Git Progress Board</div>
   <div class="tb-spacer"></div>
+  <button class="tb-btn" onclick={onToggleTheme} title={theme === 'night' ? '切换到日间模式' : '切换到夜间模式'}>
+    {#if theme === 'night'}
+      <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor"><path d="M6 1a5 5 0 100 10A5 5 0 016 1z"/></svg>
+    {:else}
+      <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor"><path d="M6 3a3 3 0 100 6 3 3 0 000-6zm0-2a.5.5 0 01.5.5v1a.5.5 0 01-1 0v-1A.5.5 0 016 1zm0 7a.5.5 0 01.5.5v1a.5.5 0 01-1 0v-1A.5.5 0 016 8zm4-2a.5.5 0 010 1H9a.5.5 0 010-1h1zM2 6a.5.5 0 01.5-.5H4a.5.5 0 010 1H2.5A.5.5 0 012 6zm3.646-3.354a.5.5 0 01.708 0l.707.707a.5.5 0 01-.707.708l-.708-.707a.5.5 0 010-.708zm3.354 3.354a.5.5 0 01.708 0l.707.707a.5.5 0 01-.708.708l-.707-.708a.5.5 0 010-.707z"/></svg>
+    {/if}
+  </button>
   <div class="tb-controls">
     <button class="tb-btn" onclick={doMinimize} title="Minimize">
       <svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor"><path d="M2 6h8v1H2z"/></svg>
