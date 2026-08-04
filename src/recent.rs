@@ -106,7 +106,7 @@ fn default_recent_path() -> PathBuf {
                 .ok()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(".")),
-            "SakiStep",
+            "Keinestamp",
         )
     } else {
         (
@@ -119,7 +119,7 @@ fn default_recent_path() -> PathBuf {
                         .map(|h| PathBuf::from(h).join(".local").join("share"))
                 })
                 .unwrap_or_else(|| PathBuf::from(".")),
-            "saki-step",
+            "keinestamp",
         )
     };
     base.join(dir_name).join("recent.json")
@@ -134,7 +134,7 @@ mod tests {
 
     fn temp_recent_path() -> PathBuf {
         let n = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("saki_recent_test_{}_{}.json", std::process::id(), n))
+        std::env::temp_dir().join(format!("keinestamp_recent_test_{}_{}.json", std::process::id(), n))
     }
 
     #[test]

@@ -1883,6 +1883,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "keinestamp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "clap",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "toml 0.8.2",
+ "ureq",
+ "zip",
+]
+
+[[package]]
+name = "keinestamp-tauri"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "keinestamp",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-shell",
+ "tokio",
+ "toml 0.8.2",
+ "ureq",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2875,39 +2908,6 @@ name = "rustversion"
 version = "1.0.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b39cdef0fa800fc44525c84ccb54a029961a8215f9619753635a9c0d2538d46d"
-
-[[package]]
-name = "saki-step"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "clap",
- "serde",
- "serde_json",
- "tiny_http",
- "toml 0.8.2",
- "ureq",
- "zip",
-]
-
-[[package]]
-name = "saki-step-tauri"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chrono",
- "saki-step",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-shell",
- "tokio",
- "toml 0.8.2",
- "ureq",
-]
 
 [[package]]
 name = "same-file"

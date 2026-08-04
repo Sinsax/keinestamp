@@ -47,7 +47,7 @@
       <path d="M46 16 C48 10, 52 6, 58 8" stroke="#8BC34A" stroke-width="3" fill="none" stroke-linecap="round"/>
       <path d="M58 8 C62 6, 64 8, 66 7" stroke="#8BC34A" stroke-width="2.5" fill="none" stroke-linecap="round"/>
     </svg>
-    <span class="tb-title">SakiStep</span>
+    <span class="tb-title">Keinestamp</span>
     </div>
     <div class="tb-subtitle">Blender Git Progress Board</div>
   <div class="tb-spacer"></div>

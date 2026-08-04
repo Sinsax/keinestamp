@@ -49,7 +49,7 @@ mod tests {
     use super::*;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("saki_detect_{}", name));
+        let dir = std::env::temp_dir().join(format!("keinestamp_detect_{}", name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn test_detect_fresh_nonexistent() -> Result<()> {
-        let dir = Path::new("/tmp/cuke_nonexistent_dir_for_test");
+        let dir = Path::new("/tmp/keinestamp_nonexistent_dir_for_test");
         let _ = std::fs::remove_dir_all(dir);
         let pt = detect_project(dir)?;
         assert!(matches!(pt, ProjectType::Fresh));

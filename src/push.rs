@@ -87,7 +87,7 @@ fn add_dir_to_zip(
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
 
-        if name_str == ".git" {
+        if name_str == ".git" || name_str == "three" {
             continue;
         }
 

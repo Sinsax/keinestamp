@@ -153,7 +153,7 @@
     <div class="section">
       <div class="section-title">Blender</div>
       <div class="field">
-        <span class="hint">SakiStep 自带独立 Blender，不影响系统已安装的版本，无插件冲突风险</span>
+        <span class="hint">Keinestamp 自带独立 Blender，不影响系统已安装的版本，无插件冲突风险</span>
         <div class="dl-row">
           {#if versionsLoading}
             <span class="versions-loading">加载版本列表...</span>
@@ -203,7 +203,7 @@
               {testing ? '测试中...' : '测试连接'}
             </button>
           </div>
-          <span class="hint">SakiStep Server 监听地址（全局设置，跟随软件）</span>
+          <span class="hint">Keinestamp Server 监听地址（全局设置，跟随软件）</span>
           {#if connectStatus === 'ok'}
             <span class="conn-result ok">✅ 连接成功</span>
           {:else if connectStatus === 'fail'}

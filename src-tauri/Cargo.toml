@@ -1,17 +1,17 @@
 [package]
-name = "saki-step-tauri"
+name = "keinestamp-tauri"
 version = "0.1.0"
 edition = "2024"
 
 [lib]
-name = "saki_step_tauri_lib"
+name = "keinestamp_tauri_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-saki-step = { path = "../" }
+keinestamp = { path = "../" }
 tauri = { version = "2", features = ["devtools"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-shell = "2"

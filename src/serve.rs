@@ -1,3 +1,4 @@
+use crate::three_assets;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -257,7 +258,7 @@ fn check_browser_static_auth(
         }
     }
 
-    if let Some(cookie_token) = get_cookie(request, "saki_token") {
+    if let Some(cookie_token) = get_cookie(request, "keinestamp_token") {
         if project_tokens.read().unwrap().get(project_name).map_or(false, |t| t == cookie_token) {
             rate_limiter.record_success(&ip);
             return AuthResult::Authenticated;
@@ -276,7 +277,7 @@ fn login_page_html(project_name: &str) -> String {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>SakiStep 登录</title>
+<title>Keinestamp 登录</title>
 <style>
 *{{box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a2e;color:#eee}}
@@ -292,7 +293,7 @@ button:hover{{background:#6d28d9}}
 </head>
 <body>
 <div class="card">
-  <h1>SakiStep</h1>
+  <h1>Keinestamp</h1>
   <p>输入访问令牌以查看时间线</p>
   <form method="post" action="/{project}/login">
     <input type="password" name="token" placeholder="访问令牌" required autofocus id="token-input" />
@@ -302,7 +303,7 @@ button:hover{{background:#6d28d9}}
 </div>
 <script>
 (function(){{
-  var key = 'saki_token_{project}';
+  var key = 'keinestamp_token_{project}';
   var saved = localStorage.getItem(key);
   if (saved) {{
     document.getElementById('token-input').value = saved;
@@ -372,7 +373,7 @@ fn handle_login_post(
 
     if is_valid {
         log_info("LOGIN", &format!("{} project={} → success", ip, project_name));
-        let set_cookie = format!("saki_token={}; Path=/{}/; HttpOnly; SameSite=Lax", decoded, project_name);
+        let set_cookie = format!("keinestamp_token={}; Path=/{}/; HttpOnly; SameSite=Lax", decoded, project_name);
         let redirect = Response::from_string("")
             .with_status_code(302)
             .with_header(Header::from_bytes(&b"Location"[..], format!("/{}/", project_name).as_bytes().to_vec()).unwrap())
@@ -438,7 +439,14 @@ pub fn start(config: ServeConfig) -> Result<()> {
     let web_root = config.web_root.clone();
     let deploy_token = config.deploy_token.clone();
 
-    log_info("STARTUP", &format!("SakiStep serve listening on http://{}", addr));
+    let three_dir = web_root.join("_three");
+    if let Err(e) = three_assets::ensure_threejs(&three_dir) {
+        log_error("STARTUP", &format!("failed to generate shared three.js: {}", e));
+    } else {
+        log_info("STARTUP", "shared three.js assets ready");
+    }
+
+    log_info("STARTUP", &format!("Keinestamp serve listening on http://{}", addr));
     log_warn("STARTUP", "HTTP mode — data is sent in plaintext.");
     log_warn("STARTUP", "For production, put behind Caddy/nginx with HTTPS.");
     log_info("STARTUP", &format!("  {} (deploy token)", web_root.display()));
@@ -660,8 +668,8 @@ fn handle_upload(
     let tmp_parent = deploy_dir
         .parent()
         .unwrap_or(Path::new("."));
-    let tmp_dir = tmp_parent.join(format!(".saki-step-tmp.{}", std::process::id()));
-    let bak_dir = tmp_parent.join(format!(".saki-step-bak.{}", std::process::id()));
+    let tmp_dir = tmp_parent.join(format!(".keinestamp-tmp.{}", std::process::id()));
+    let bak_dir = tmp_parent.join(format!(".keinestamp-bak.{}", std::process::id()));
 
     let _ = std::fs::remove_dir_all(&tmp_dir);
     std::fs::create_dir_all(&tmp_dir).context("failed to create temp dir")?;
@@ -759,7 +767,7 @@ fn handle_upload(
     Ok(())
 }
 
-fn mime_type(path: &Path) -> &'static str {
+pub(crate) fn mime_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()) {
         Some("html") => "text/html; charset=utf-8",
         Some("js") => "application/javascript; charset=utf-8",
@@ -791,12 +799,18 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
     };
 
     let serve_dir = web_root.join(project_name);
-    let file_path = serve_dir.join(&clean_path);
+    let shared_three = web_root.join("_three");
     let access_msg = format!("{} {} {} → ", ip, method, raw_path);
 
-    let canonical_web_root = serve_dir
+    let (file_path, canonical_base) = if let Some(three_rel) = clean_path.strip_prefix("three/") {
+        (shared_three.join(three_rel), shared_three)
+    } else {
+        (serve_dir.join(&clean_path), serve_dir.clone())
+    };
+
+    let canonical_web_root = canonical_base
         .canonicalize()
-        .unwrap_or_else(|_| serve_dir.to_path_buf());
+        .unwrap_or_else(|_| canonical_base.to_path_buf());
     if file_path.exists() {
         if let Ok(canonical_file) = file_path.canonicalize() {
             if !canonical_file.starts_with(&canonical_web_root) {
@@ -852,13 +866,54 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
     Ok(())
 }
 
+pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Result<()> {
+    let canonical_web = web_root.canonicalize().unwrap_or_else(|_| web_root.to_path_buf());
+    for port in 47799u16..47810 {
+        let addr = format!("127.0.0.1:{}", port);
+        let Ok(server) = Server::http(&addr) else { continue };
+        let _ = port_tx.send(port);
+        for request in server.incoming_requests() {
+            let url = request.url().to_string();
+            let clean_path = if url == "/" || url.is_empty() {
+                "index.html".to_string()
+            } else {
+                url.trim_start_matches('/').to_string()
+            };
+            let file_path = web_root.join(&clean_path);
+            if file_path.exists() && file_path.is_file() {
+                if let Ok(canonical_file) = file_path.canonicalize() {
+                    if !canonical_file.starts_with(&canonical_web) {
+                        let _ = request.respond(Response::from_string("403").with_status_code(403));
+                        continue;
+                    }
+                }
+                match std::fs::read(&file_path) {
+                    Ok(content) => {
+                        let mime = mime_type(&file_path);
+                        let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
+                        let response = Response::from_data(content).with_header(hdr);
+                        let _ = request.respond(response);
+                    }
+                    Err(_) => {
+                        let _ = request.respond(Response::from_string("500").with_status_code(500));
+                    }
+                }
+            } else {
+                let _ = request.respond(Response::from_string("404").with_status_code(404));
+            }
+        }
+        return Ok(());
+    }
+    anyhow::bail!("no available port for local server")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_load_config() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("saki_test_serve_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_serve_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let config_path = dir.join("serve.toml");
         std::fs::write(&config_path, r#"
@@ -878,7 +933,7 @@ web_root = "/tmp/web"
 
     #[test]
     fn test_load_config_no_token_fails() {
-        let dir = std::env::temp_dir().join(format!("saki_test_serve_notok_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_serve_notok_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let config_path = dir.join("serve.toml");
         std::fs::write(&config_path, r#"

@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 use std::process::Command;
 
-fn cuke_bin() -> PathBuf {
-    let var_name = "CARGO_BIN_EXE_saki_step";
+fn keinestamp_bin() -> PathBuf {
+    let var_name = "CARGO_BIN_EXE_keinestamp";
     if let Ok(path) = std::env::var(var_name) {
         return PathBuf::from(path);
     }
@@ -12,25 +12,25 @@ fn cuke_bin() -> PathBuf {
         path.pop();
     }
     if cfg!(windows) {
-        path.push("saki-step.exe");
+        path.push("keinestamp.exe");
     } else {
-        path.push("saki-step");
+        path.push("keinestamp");
     }
     path
 }
 
 fn tmp_dir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("saki_int_{}", name));
+    let dir = std::env::temp_dir().join(format!("keinestamp_int_{}", name));
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     dir
 }
 
 fn run(args: &[&str]) -> (String, bool) {
-    let output = Command::new(cuke_bin())
+    let output = Command::new(keinestamp_bin())
         .args(args)
         .output()
-        .expect("failed to run saki-step");
+        .expect("failed to run keinestamp");
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let success = output.status.success();
     (stdout, success)
@@ -41,7 +41,7 @@ fn test_init_creates_structure() {
     let dir = tmp_dir("init_structure");
     let (out, ok) = run(&["init", &dir.to_string_lossy()]);
     assert!(ok, "init failed: {}", out);
-    assert!(dir.join(".saki-step.toml").exists());
+    assert!(dir.join(".keinestamp.toml").exists());
     assert!(dir.join(".git").exists());
     assert!(dir.join("web-timeline").exists());
     assert!(dir.join("web-timeline/.git").exists());

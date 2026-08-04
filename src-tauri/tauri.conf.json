@@ -1,17 +1,17 @@
 {
-  "productName": "SakiStep",
+  "productName": "Keinestamp",
   "version": "0.1.0",
-  "identifier": "com.sakistep.app",
+  "identifier": "com.keinestamp.app",
   "build": {
     "frontendDist": "../frontend/dist",
-    "devUrl": "http://localhost:1420",
+    "devUrl": "http://localhost:5173",
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build"
   },
   "app": {
     "windows": [
       {
-        "title": "SakiStep",
+        "title": "Keinestamp",
         "width": 1200,
         "height": 800,
         "minWidth": 900,

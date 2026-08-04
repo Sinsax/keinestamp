@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn test_clean_old_previews_empty_dir() -> Result<()> {
-        let dir = std::env::temp_dir().join("saki_clean_empty");
+        let dir = std::env::temp_dir().join("keinestamp_clean_empty");
         std::fs::create_dir_all(&dir)?;
         clean_old_previews(&dir, 5)?;
         std::fs::remove_dir_all(&dir)?;
@@ -281,7 +281,7 @@ mod tests {
 
     #[test]
     fn test_clean_old_previews_under_limit() -> Result<()> {
-        let dir = std::env::temp_dir().join("saki_clean_under");
+        let dir = std::env::temp_dir().join("keinestamp_clean_under");
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join("a.png"), b"")?;
         std::fs::write(dir.join("b.png"), b"")?;
@@ -294,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_clean_old_previews_over_limit() -> Result<()> {
-        let dir = std::env::temp_dir().join("saki_clean_over");
+        let dir = std::env::temp_dir().join("keinestamp_clean_over");
         std::fs::create_dir_all(&dir)?;
         std::fs::write(dir.join("old.png"), b"")?;
         std::thread::sleep(std::time::Duration::from_millis(10));

@@ -78,7 +78,7 @@ pub fn generate_access_token() -> String {
 }
 
 pub fn meta_path(project_root: &Path) -> PathBuf {
-    project_root.join(".saki-step.toml")
+    project_root.join(".keinestamp.toml")
 }
 
 pub fn write_meta(path: &Path, config: &MetaConfig) -> Result<()> {
@@ -93,7 +93,7 @@ pub fn write_meta(path: &Path, config: &MetaConfig) -> Result<()> {
     let content = toml::to_string_pretty(&stripped)?;
 
     let tmp_path = parent.join(format!(
-        ".saki-step.tmp.{}.toml",
+        ".keinestamp.tmp.{}.toml",
         std::process::id()
     ));
     std::fs::write(&tmp_path, &content)
@@ -128,13 +128,13 @@ mod tests {
         let root = Path::new("/some/project");
         assert_eq!(
             meta_path(root),
-            Path::new("/some/project/.saki-step.toml")
+            Path::new("/some/project/.keinestamp.toml")
         )
     }
 
     #[test]
     fn test_write_and_read_meta() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("saki_test_config_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_config_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
 
         let path = meta_path(&dir);
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn test_read_meta_corrupt() {
-        let dir = std::env::temp_dir().join(format!("cuke_test_corrupt_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_corrupt_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
 
         let path = meta_path(&dir);
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn test_read_meta_not_found() {
-        let path = Path::new("/nonexistent/path/.saki-step.toml");
+        let path = Path::new("/nonexistent/path/.keinestamp.toml");
         let result = read_meta(path);
         assert!(result.is_err());
     }
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_project_id_in_new_meta() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("saki_test_pid_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_pid_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let config = MetaConfig::new(dir.clone());
         assert!(config.project_id.is_some());
@@ -207,7 +207,7 @@ mod tests {
 
     #[test]
     fn test_access_token_in_new_meta() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("saki_test_at_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_at_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let config = MetaConfig::new(dir.clone());
         assert!(config.access_token.is_some());
@@ -218,7 +218,7 @@ mod tests {
 
     #[test]
     fn test_backward_compat_old_fields() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("saki_test_compat_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_test_compat_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
 
         let path = meta_path(&dir);

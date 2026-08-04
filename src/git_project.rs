@@ -154,13 +154,13 @@ pub fn ensure_git_user(project_root: &Path) -> Result<()> {
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
     if !name_ok {
-        run_git(project_root, &["config", "user.name", "SakiStep User"])?;
+        run_git(project_root, &["config", "user.name", "Keinestamp User"])?;
     }
     let email_ok = run_git_output(project_root, &["config", "user.email"])
         .map(|s| !s.trim().is_empty())
         .unwrap_or(false);
     if !email_ok {
-        run_git(project_root, &["config", "user.email", "user@sakistep"])?;
+        run_git(project_root, &["config", "user.email", "user@keinestamp"])?;
     }
     Ok(())
 }
@@ -207,7 +207,7 @@ mod tests {
     use super::*;
 
     fn tmp_repo(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("saki_git_project_{}", name));
+        let dir = std::env::temp_dir().join(format!("keinestamp_git_project_{}", name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Command::new("git")

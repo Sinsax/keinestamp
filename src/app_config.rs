@@ -127,7 +127,7 @@ pub fn default_app_config_path() -> PathBuf {
                 .ok()
                 .map(PathBuf::from)
                 .unwrap_or_else(|| PathBuf::from(".")),
-            "SakiStep",
+            "Keinestamp",
         )
     } else {
         (
@@ -140,7 +140,7 @@ pub fn default_app_config_path() -> PathBuf {
                         .map(|h| PathBuf::from(h).join(".local").join("share"))
                 })
                 .unwrap_or_else(|| PathBuf::from(".")),
-            "saki-step",
+            "keinestamp",
         )
     };
     base.join(dir_name).join("app-config.toml")
@@ -158,7 +158,7 @@ mod tests {
 
     #[test]
     fn test_load_save_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("saki_app_config_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_app_config_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
@@ -185,7 +185,7 @@ assert_eq!(loaded.blender_path, None);
 
     #[test]
     fn test_set_blender_path() {
-        let dir = std::env::temp_dir().join(format!("saki_app_set_test_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("keinestamp_app_set_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 

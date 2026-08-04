@@ -21,39 +21,39 @@ pub struct LogEntry {
 #[tauri::command]
 fn detect(path: String) -> Result<String, String> {
     eprintln!("[debug] detect({})", path);
-    let pt = map_err(saki_step::detect::detect_project(Path::new(&path)))?;
+    let pt = map_err(keinestamp::detect::detect_project(Path::new(&path)))?;
     let result = match pt {
-        saki_step::detect::ProjectType::Fresh => "fresh".to_string(),
-        saki_step::detect::ProjectType::Existing => "existing".to_string(),
-        saki_step::detect::ProjectType::Initialized(_) => "initialized".to_string(),
+        keinestamp::detect::ProjectType::Fresh => "fresh".to_string(),
+        keinestamp::detect::ProjectType::Existing => "existing".to_string(),
+        keinestamp::detect::ProjectType::Initialized(_) => "initialized".to_string(),
     };
     eprintln!("[debug] detect → {}", result);
     Ok(result)
 }
 
 #[tauri::command]
-fn init_project(path: String) -> Result<saki_step::config::MetaConfig, String> {
+fn init_project(path: String) -> Result<keinestamp::config::MetaConfig, String> {
     eprintln!("[debug] init_project({})", path);
     let p = PathBuf::from(&path);
     let is_already_init = matches!(
-        saki_step::detect::detect_project(&p),
-        Ok(saki_step::detect::ProjectType::Initialized(_))
+        keinestamp::detect::detect_project(&p),
+        Ok(keinestamp::detect::ProjectType::Initialized(_))
     );
-    map_err(saki_step::init::init_project(&p))?;
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    map_err(keinestamp::init::init_project(&p))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     if !is_already_init {
         eprintln!("[debug] init_project: first init, committing config files");
-        map_err(saki_step::git_project::ensure_git_user(&meta.project_root))?;
-        map_err(saki_step::git_project::stage_files_and_commit(
+        map_err(keinestamp::git_project::ensure_git_user(&meta.project_root))?;
+        map_err(keinestamp::git_project::stage_files_and_commit(
             &meta.project_root,
-            &[".saki-step.toml", ".gitignore", ".gitattributes"],
+            &[".keinestamp.toml", ".gitignore", ".gitattributes"],
             "init",
         ))?;
     }
-    saki_step::recent::RecentProjects::add_path(&p);
+    keinestamp::recent::RecentProjects::add_path(&p);
     eprintln!("[debug] init_project → ok, project_root={}", meta.project_root.display());
-    map_err(saki_step::config::read_meta(&meta_path))
+    map_err(keinestamp::config::read_meta(&meta_path))
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -79,36 +79,36 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
         emit("git_commit", "记录中...");
 
         let p = PathBuf::from(&path);
-        let meta_path = saki_step::config::meta_path(&p);
-        let meta: saki_step::config::MetaConfig = map_err(saki_step::config::read_meta(&meta_path))?;
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta: keinestamp::config::MetaConfig = map_err(keinestamp::config::read_meta(&meta_path))?;
         let skip_preview = no_preview.unwrap_or(false);
 
-        map_err(saki_step::git_project::ensure_git_user(&meta.project_root))?;
-        map_err(saki_step::git_project::lfs_auto_configure(&meta.project_root))?;
-        let hash: String = map_err(saki_step::git_project::add_and_commit(&meta.project_root, &message))?;
+        map_err(keinestamp::git_project::ensure_git_user(&meta.project_root))?;
+        map_err(keinestamp::git_project::lfs_auto_configure(&meta.project_root))?;
+        let hash: String = map_err(keinestamp::git_project::add_and_commit(&meta.project_root, &message))?;
         let short_hash = hash[..7].to_string();
 
-        let changed_files: Vec<String> = map_err(saki_step::git_helpers::get_changed_files(&meta.project_root, &hash))?;
-        let file_status: Vec<String> = map_err(saki_step::git_helpers::get_changed_files_status(&meta.project_root, &hash))?;
+        let changed_files: Vec<String> = map_err(keinestamp::git_helpers::get_changed_files(&meta.project_root, &hash))?;
+        let file_status: Vec<String> = map_err(keinestamp::git_helpers::get_changed_files_status(&meta.project_root, &hash))?;
 
         let timeline_path = meta.web_root.join("timeline.json");
 
-        let blender_path_buf = if !skip_preview && saki_step::git_helpers::has_blend_files(&changed_files) {
+        let blender_path_buf = if !skip_preview && keinestamp::git_helpers::has_blend_files(&changed_files) {
             emit("blender_prepare", "准备 Blender...");
-            match saki_step::blender_download::ensure_blender() {
+            match keinestamp::blender_download::ensure_blender() {
                 Ok(path) => Some(path),
                 Err(e) => {
                     eprintln!("[debug] commit: Blender auto-download failed: {}, trying PATH", e);
-                    saki_step::app_config::get_blender_path()
+                    keinestamp::app_config::get_blender_path()
                 }
             }
         } else {
-            saki_step::app_config::get_blender_path()
+            keinestamp::app_config::get_blender_path()
         };
         let blender_path: Option<&Path> = blender_path_buf.as_deref();
 
-        let preview_path = if !skip_preview && saki_step::git_helpers::has_blend_files(&changed_files) {
-            let glb_config = saki_step::blender_render::RenderConfig {
+        let preview_path = if !skip_preview && keinestamp::git_helpers::has_blend_files(&changed_files) {
+            let glb_config = keinestamp::blender_render::RenderConfig {
                 output_dir: meta.web_root.join("previews_glb"),
                 ..Default::default()
             };
@@ -118,12 +118,12 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                     let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
                     let bpath = meta.project_root.join(bf);
                     emit("blender_export", &format!("导出 GLB: {}", bf));
-                    if let Err(e) = saki_step::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
+                    if let Err(e) = keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
                         eprintln!("[debug] commit: GLB export skipped: {e}");
                     }
                 }
             }
-            let _ = saki_step::blender_render::clean_old_glb_previews(
+            let _ = keinestamp::blender_render::clean_old_glb_previews(
                 &meta.web_root.join("previews_glb"),
                 glb_config.max_previews,
             );
@@ -134,8 +134,8 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
 
         emit("timeline", "更新时间线...");
 
-        let author = saki_step::git_helpers::get_git_author(&meta.project_root);
-        let entry = saki_step::timeline::TimelineEntry {
+        let author = keinestamp::git_helpers::get_git_author(&meta.project_root);
+        let entry = keinestamp::timeline::TimelineEntry {
             id: hash,
             timestamp: chrono::Utc::now().to_rfc3339(),
             author,
@@ -146,7 +146,7 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             tag,
         };
 
-        map_err(saki_step::timeline::append_entry(&timeline_path, entry))?;
+        map_err(keinestamp::timeline::append_entry(&timeline_path, entry))?;
 
         let project_name = meta
             .project_root
@@ -154,19 +154,19 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        let mut timeline: saki_step::timeline::Timeline = map_err(saki_step::timeline::read_timeline(&timeline_path))?;
+        let mut timeline: keinestamp::timeline::Timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
         timeline.project = project_name.clone();
-        map_err(saki_step::timeline::write_timeline(&timeline_path, &timeline))?;
+        map_err(keinestamp::timeline::write_timeline(&timeline_path, &timeline))?;
 
         emit("html", "生成页面...");
-        map_err(saki_step::html_gen::generate_index_html(
+        map_err(keinestamp::html_gen::generate_index_html(
             &meta.web_root,
             &meta.project_root,
             &timeline,
             &project_name,
         ))?;
 
-        saki_step::recent::RecentProjects::add_path(&p);
+        keinestamp::recent::RecentProjects::add_path(&p);
         eprintln!("[debug] record → {}", short_hash);
         emit("done", "完成");
         Ok::<String, String>(short_hash)
@@ -180,12 +180,12 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
 fn push(path: String) -> Result<(), String> {
     eprintln!("[debug] push({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     eprintln!("[debug] push: project_root={}", meta.project_root.display());
 
-    if saki_step::git_project::has_remote(&meta.project_root) {
-        map_err(saki_step::git_project::push(&meta.project_root))?;
+    if keinestamp::git_project::has_remote(&meta.project_root) {
+        map_err(keinestamp::git_project::push(&meta.project_root))?;
     } else {
         eprintln!("[debug] push: no git remote, skipping git push");
     }
@@ -198,26 +198,26 @@ fn push(path: String) -> Result<(), String> {
 fn deploy(path: String) -> Result<(), String> {
     eprintln!("[debug] deploy({})", path);
     let p = PathBuf::from(&path);
-    let meta_p = saki_step::config::meta_path(&p);
-    let mut meta = map_err(saki_step::config::read_meta(&meta_p))?;
+    let meta_p = keinestamp::config::meta_path(&p);
+    let mut meta = map_err(keinestamp::config::read_meta(&meta_p))?;
 
     if meta.project_id.is_none() {
-        meta.project_id = Some(saki_step::config::generate_project_id());
-        map_err(saki_step::config::write_meta(&meta_p, &meta))?;
+        meta.project_id = Some(keinestamp::config::generate_project_id());
+        map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
     }
 
-    let server = saki_step::app_config::get_deploy_server_url()
+    let server = keinestamp::app_config::get_deploy_server_url()
         .or_else(|| meta.web_remote.clone())
         .filter(|s| !s.is_empty());
 
     if let Some(ref server) = server {
         eprintln!("[debug] deploy: server={}", server);
-        let deploy_token = saki_step::app_config::get_deploy_token();
+        let deploy_token = keinestamp::app_config::get_deploy_token();
         let project_name = meta.project_root.file_name()
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
         let project_id = meta.project_id.as_deref().unwrap_or("");
-        map_err(saki_step::push::deploy_to_server(
+        map_err(keinestamp::push::deploy_to_server(
             &meta.web_root, server, deploy_token.as_deref(), meta.access_token.as_deref(), &project_name, project_id,
         ))?;
         eprintln!("[debug] deploy → ok");
@@ -260,12 +260,12 @@ fn test_connection(server_url: String, deploy_token: Option<String>) -> Result<b
 fn pull(path: String) -> Result<(), String> {
     eprintln!("[debug] pull({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     eprintln!("[debug] pull: project_root={}", meta.project_root.display());
 
-    if saki_step::git_project::has_remote(&meta.project_root) {
-        map_err(saki_step::git_project::pull(&meta.project_root))?;
+    if keinestamp::git_project::has_remote(&meta.project_root) {
+        map_err(keinestamp::git_project::pull(&meta.project_root))?;
     } else {
         eprintln!("[debug] pull: no git remote, skipping");
     }
@@ -278,10 +278,10 @@ fn pull(path: String) -> Result<(), String> {
 fn has_remote(path: String) -> bool {
     eprintln!("[debug] has_remote({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let result = match saki_step::config::read_meta(&meta_path) {
+    let meta_path = keinestamp::config::meta_path(&p);
+    let result = match keinestamp::config::read_meta(&meta_path) {
         Ok(meta) => {
-            saki_step::git_project::has_remote(&meta.project_root)
+            keinestamp::git_project::has_remote(&meta.project_root)
         }
         Err(_) => false,
     };
@@ -317,28 +317,28 @@ fn open_folder(path: String) -> Result<(), String> {
 fn revert(path: String) -> Result<(), String> {
     eprintln!("[debug] revert({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
-    map_err(saki_step::git_project::revert(&meta.project_root))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    map_err(keinestamp::git_project::revert(&meta.project_root))?;
     eprintln!("[debug] revert: git reset --soft HEAD~1 ok");
     let timeline_path = meta.web_root.join("timeline.json");
-    let timeline = saki_step::timeline::read_timeline(&timeline_path).ok();
+    let timeline = keinestamp::timeline::read_timeline(&timeline_path).ok();
     if let Some(mut tl) = timeline {
         if let Some(removed) = tl.entries.pop() {
             eprintln!("[debug] revert: removed entry {}", &removed.id[..7.min(removed.id.len())]);
-            let _ = saki_step::timeline::write_timeline(&timeline_path, &tl);
+            let _ = keinestamp::timeline::write_timeline(&timeline_path, &tl);
             let project_name = meta
                 .project_root
                 .file_name()
                 .map(|s| s.to_string_lossy().to_string())
                 .unwrap_or_default();
-            let _ = saki_step::html_gen::generate_index_html(
+            let _ = keinestamp::html_gen::generate_index_html(
                 &meta.web_root,
                 &meta.project_root,
                 &tl,
                 &project_name,
             );
-            let _ = saki_step::git_web::web_commit_and_push(
+            let _ = keinestamp::git_web::web_commit_and_push(
                 &meta.web_root,
                 &format!("revert {}", &removed.id[..7.min(removed.id.len())]),
                 false,
@@ -351,9 +351,9 @@ fn revert(path: String) -> Result<(), String> {
 #[tauri::command]
 fn status(path: String) -> Result<StatusResult, String> {
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
-    let output = map_err(saki_step::git_project::status(&meta.project_root))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    let output = map_err(keinestamp::git_project::status(&meta.project_root))?;
     let clean = output.trim().is_empty();
     Ok(StatusResult { clean, output })
 }
@@ -362,10 +362,10 @@ fn status(path: String) -> Result<StatusResult, String> {
 fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String> {
     eprintln!("[debug] log({}, count={:?})", path, count);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     let timeline_path = meta.web_root.join("timeline.json");
-    let timeline = match saki_step::timeline::read_timeline(&timeline_path) {
+    let timeline = match keinestamp::timeline::read_timeline(&timeline_path) {
         Ok(t) => t,
         Err(_) => return Ok(vec![]),
     };
@@ -385,11 +385,11 @@ fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String> {
 }
 
 #[tauri::command]
-fn read_config(path: String) -> Result<saki_step::config::MetaConfig, String> {
+fn read_config(path: String) -> Result<keinestamp::config::MetaConfig, String> {
     eprintln!("[debug] read_config({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    map_err(saki_step::config::read_meta(&meta_path))
+    let meta_path = keinestamp::config::meta_path(&p);
+    map_err(keinestamp::config::read_meta(&meta_path))
 }
 
 #[tauri::command]
@@ -400,8 +400,8 @@ fn update_config(
 ) -> Result<(), String> {
     eprintln!("[debug] update_config({}, key={:?}, value={:?})", path, key, value);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let mut meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let mut meta = map_err(keinestamp::config::read_meta(&meta_path))?;
 
     match key.as_str() {
         "web_remote" => {
@@ -417,13 +417,13 @@ fn update_config(
         _ => return Err(format!("unknown config key: {key}. Available: web_remote, access_token, auto_connect")),
     }
 
-    map_err(saki_step::config::write_meta(&meta_path, &meta))
+    map_err(keinestamp::config::write_meta(&meta_path, &meta))
 }
 
 #[tauri::command]
 fn export_entry(path: String, entry_id: String, output_dir: String) -> Result<(), String> {
     eprintln!("[debug] export_entry({}, entry_id={}, output_dir={})", path, entry_id, output_dir);
-    map_err(saki_step::main_helpers::export_entry(
+    map_err(keinestamp::main_helpers::export_entry(
         Path::new(&path),
         &entry_id,
         Path::new(&output_dir),
@@ -431,13 +431,13 @@ fn export_entry(path: String, entry_id: String, output_dir: String) -> Result<()
 }
 
 #[tauri::command]
-fn get_timeline(path: String) -> Result<saki_step::timeline::Timeline, String> {
+fn get_timeline(path: String) -> Result<keinestamp::timeline::Timeline, String> {
     eprintln!("[debug] get_timeline({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     let timeline_path = meta.web_root.join("timeline.json");
-    match saki_step::timeline::read_timeline(&timeline_path) {
+    match keinestamp::timeline::read_timeline(&timeline_path) {
         Ok(mut t) => {
             for entry in &mut t.entries {
                 if !entry.preview.is_empty() {
@@ -448,7 +448,7 @@ fn get_timeline(path: String) -> Result<saki_step::timeline::Timeline, String> {
             eprintln!("[debug] get_timeline → {} entries", t.entries.len());
             Ok(t)
         }
-        Err(_) => Ok(saki_step::timeline::Timeline {
+        Err(_) => Ok(keinestamp::timeline::Timeline {
             project: String::new(),
             entries: vec![],
         }),
@@ -475,55 +475,55 @@ fn get_tracked_files(path: String) -> Result<Vec<String>, String> {
         Ok(())
     }
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     let mut files = vec![];
     map_err(walk(&meta.project_root, "", &mut files).map_err(|e| anyhow::anyhow!("{}", e)))?;
     Ok(files)
 }
 
 #[tauri::command]
-fn get_recent() -> Vec<saki_step::recent::RecentEntry> {
-    saki_step::recent::RecentProjects::load().entries
+fn get_recent() -> Vec<keinestamp::recent::RecentEntry> {
+    keinestamp::recent::RecentProjects::load().entries
 }
 
 #[tauri::command]
 fn add_recent(path: String) {
     eprintln!("[debug] add_recent({})", path);
-    saki_step::recent::RecentProjects::add_path(Path::new(&path));
+    keinestamp::recent::RecentProjects::add_path(Path::new(&path));
 }
 
 #[tauri::command]
 fn remove_recent(path: String) {
     eprintln!("[debug] remove_recent({})", path);
-    saki_step::recent::RecentProjects::remove_path(Path::new(&path));
+    keinestamp::recent::RecentProjects::remove_path(Path::new(&path));
 }
 
 #[tauri::command]
 fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
     eprintln!("[debug] delete_entry({}, entry_id={})", path, entry_id);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     let timeline_path = meta.web_root.join("timeline.json");
 
-    map_err(saki_step::timeline::remove_entry(&timeline_path, &entry_id))?;
+    map_err(keinestamp::timeline::remove_entry(&timeline_path, &entry_id))?;
 
-    let timeline = map_err(saki_step::timeline::read_timeline(&timeline_path))?;
+    let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
     let project_name = meta
         .project_root
         .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_default();
 
-    map_err(saki_step::html_gen::generate_index_html(
+    map_err(keinestamp::html_gen::generate_index_html(
         &meta.web_root,
         &meta.project_root,
         &timeline,
         &project_name,
     ))?;
 
-    let _ = saki_step::git_web::web_commit_and_push(
+    let _ = keinestamp::git_web::web_commit_and_push(
         &meta.web_root,
         &format!("delete entry {}", &entry_id[..7.min(entry_id.len())]),
         false,
@@ -537,7 +537,7 @@ fn get_project_log(path: String, count: Option<usize>) -> Result<Vec<String>, St
     eprintln!("[debug] get_project_log({}, count={:?})", path, count);
     let p = PathBuf::from(&path);
     let c = count.unwrap_or(20);
-    let output = map_err(saki_step::git_project::log(&p, c))?;
+    let output = map_err(keinestamp::git_project::log(&p, c))?;
     Ok(output.lines().map(|l| l.to_string()).collect())
 }
 
@@ -545,8 +545,8 @@ fn get_project_log(path: String, count: Option<usize>) -> Result<Vec<String>, St
 fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<String, String> {
     eprintln!("[debug] get_file_diff({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
 
     let output = std::process::Command::new("git")
         .args([
@@ -573,8 +573,8 @@ fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<St
 fn get_glb_preview(path: String, entry_id: String, file_path: String) -> Result<String, String> {
     eprintln!("[debug] get_glb_preview({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
 
     if !file_path.ends_with(".blend") {
         return Err("not a .blend file".to_string());
@@ -591,7 +591,7 @@ fn get_glb_preview(path: String, entry_id: String, file_path: String) -> Result<
         return Ok(glb_path.to_string_lossy().to_string());
     }
 
-    let temp_dir = std::env::temp_dir().join(format!("saki_glb_{}", std::process::id()));
+    let temp_dir = std::env::temp_dir().join(format!("keinestamp_glb_{}", std::process::id()));
     std::fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {e}"))?;
     let temp_blend = temp_dir.join(&safe_name);
 
@@ -618,20 +618,20 @@ fn get_glb_preview(path: String, entry_id: String, file_path: String) -> Result<
 
     std::fs::create_dir_all(&glb_dir).map_err(|e| format!("failed to create glb dir: {e}"))?;
 
-    let render_config = saki_step::blender_render::RenderConfig {
+    let render_config = keinestamp::blender_render::RenderConfig {
         output_dir: glb_dir.clone(),
         ..Default::default()
     };
 
-    let blender_path_buf = match saki_step::blender_download::ensure_blender() {
+    let blender_path_buf = match keinestamp::blender_download::ensure_blender() {
         Ok(path) => Some(path),
         Err(e) => {
             eprintln!("Blender auto-download failed: {}, trying PATH", e);
-            saki_step::app_config::get_blender_path()
+            keinestamp::app_config::get_blender_path()
         }
     };
     let blender_path: Option<&Path> = blender_path_buf.as_deref();
-    let result = saki_step::blender_render::export_to_glb(&temp_blend, &render_config.output_dir, &glb_name, blender_path);
+    let result = keinestamp::blender_render::export_to_glb(&temp_blend, &render_config.output_dir, &glb_name, blender_path);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 
@@ -657,7 +657,7 @@ async fn download_blender(app: tauri::AppHandle, version: Option<String>) -> Res
     let version_clone = version.clone();
     let app_clone = app.clone();
     let handle = tokio::task::spawn_blocking(move || {
-        let mut progress_tx = |p: saki_step::blender_download::DownloadProgress| {
+        let mut progress_tx = |p: keinestamp::blender_download::DownloadProgress| {
             let _ = app_clone.emit("blender-download-progress", BlenderProgress {
                 phase: p.phase.clone(),
                 message: p.message.clone(),
@@ -666,7 +666,7 @@ async fn download_blender(app: tauri::AppHandle, version: Option<String>) -> Res
                 bytes_total: p.bytes_total,
             });
         };
-        saki_step::blender_download::download_blender_with_progress(version_clone.as_deref(), &mut progress_tx)
+        keinestamp::blender_download::download_blender_with_progress(version_clone.as_deref(), &mut progress_tx)
             .map(|p| p.to_string_lossy().to_string())
     });
     handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
@@ -674,24 +674,24 @@ async fn download_blender(app: tauri::AppHandle, version: Option<String>) -> Res
 
 #[tauri::command]
 async fn list_blender_versions() -> Vec<String> {
-    let cached = saki_step::app_config::get_blender_versions();
+    let cached = keinestamp::app_config::get_blender_versions();
     if !cached.is_empty() {
         cached
     } else {
-        saki_step::blender_download::list_blender_versions()
+        keinestamp::blender_download::list_blender_versions()
     }
 }
 
 #[tauri::command]
 fn list_installed_blender_versions() -> Vec<String> {
     eprintln!("[debug] list_installed_blender_versions()");
-    saki_step::blender_download::list_installed_blender_versions()
+    keinestamp::blender_download::list_installed_blender_versions()
 }
 
 #[tauri::command]
 fn get_blender_path() -> String {
     eprintln!("[debug] get_blender_path()");
-    let result = saki_step::app_config::get_blender_path()
+    let result = keinestamp::app_config::get_blender_path()
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_default();
     eprintln!("[debug] get_blender_path → {:?}", result);
@@ -701,49 +701,51 @@ fn get_blender_path() -> String {
 #[tauri::command]
 fn set_blender_path(path: String) {
     eprintln!("[debug] set_blender_path({:?})", path);
-    saki_step::app_config::set_blender_path(&path);
+    keinestamp::app_config::set_blender_path(&path);
 }
 
 #[tauri::command]
 fn get_deploy_token() -> String {
     eprintln!("[debug] get_deploy_token()");
-    saki_step::app_config::get_deploy_token().unwrap_or_default()
+    keinestamp::app_config::get_deploy_token().unwrap_or_default()
 }
 
 #[tauri::command]
 fn set_deploy_token(token: String) {
     eprintln!("[debug] set_deploy_token()");
-    saki_step::app_config::set_deploy_token(&token);
+    keinestamp::app_config::set_deploy_token(&token);
 }
 
 #[tauri::command]
 fn get_deploy_server_url() -> String {
     eprintln!("[debug] get_deploy_server_url()");
-    saki_step::app_config::get_deploy_server_url().unwrap_or_default()
+    keinestamp::app_config::get_deploy_server_url().unwrap_or_default()
 }
 
 #[tauri::command]
 fn set_deploy_server_url(url: String) {
     eprintln!("[debug] set_deploy_server_url()");
-    saki_step::app_config::set_deploy_server_url(&url);
+    keinestamp::app_config::set_deploy_server_url(&url);
 }
 
 #[tauri::command]
 fn open_web_timeline(path: String) -> Result<(), String> {
     eprintln!("[debug] open_web_timeline({})", path);
     let p = PathBuf::from(&path);
-    let meta_path = saki_step::config::meta_path(&p);
-    let meta = map_err(saki_step::config::read_meta(&meta_path))?;
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     let html_path = meta.web_root.join("index.html");
     if !html_path.exists() {
         return Err("index.html not found — commit first to generate the timeline".to_string());
     }
-    let canonical = std::fs::canonicalize(&html_path).unwrap_or(html_path);
-    let mut clean = canonical.to_string_lossy().to_string();
-    if clean.starts_with(r"\\?\") {
-        clean = clean[4..].to_string();
-    }
-    let url = format!("file:///{}", clean.replace('\\', "/"));
+    let (tx, rx) = std::sync::mpsc::channel();
+    let wr = meta.web_root.clone();
+    std::thread::spawn(move || {
+        let _ = keinestamp::serve::serve_local(&wr, tx);
+    });
+    let port = rx.recv_timeout(std::time::Duration::from_secs(5))
+        .map_err(|_| "timeline server failed to start".to_string())?;
+    let url = format!("http://127.0.0.1:{}/", port);
     #[cfg(target_os = "windows")]
     let result = std::process::Command::new("cmd").args(["/c", "start", &url]).spawn();
     #[cfg(target_os = "macos")]
@@ -761,9 +763,9 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|_app| {
             std::thread::spawn(|| {
-                let fetched = saki_step::blender_download::fetch_blender_versions().unwrap_or_default();
+                let fetched = keinestamp::blender_download::fetch_blender_versions().unwrap_or_default();
                 if !fetched.is_empty() {
-                    saki_step::app_config::set_blender_versions(&fetched);
+                    keinestamp::app_config::set_blender_versions(&fetched);
                 }
             });
             Ok(())

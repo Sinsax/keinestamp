@@ -99,7 +99,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn tmp_path(name: &str) -> PathBuf {
-        let path = std::env::temp_dir().join(format!("saki_timeline_{}.json", name));
+        let path = std::env::temp_dir().join(format!("keinestamp_timeline_{}.json", name));
         let _ = std::fs::remove_file(&path);
         path
     }

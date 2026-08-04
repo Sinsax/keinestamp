@@ -1,30 +1,7 @@
 use crate::timeline::Timeline;
+use crate::three_assets;
 use anyhow::{Context, Result};
 use std::path::Path;
-
-fn base64_encode(data: &[u8]) -> String {
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as u32;
-        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
-        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
-        let triple = (b0 << 16) | (b1 << 8) | b2;
-        result.push(CHARS[((triple >> 18) & 0x3F) as usize] as char);
-        result.push(CHARS[((triple >> 12) & 0x3F) as usize] as char);
-        if chunk.len() > 1 {
-            result.push(CHARS[((triple >> 6) & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-        if chunk.len() > 2 {
-            result.push(CHARS[(triple & 0x3F) as usize] as char);
-        } else {
-            result.push('=');
-        }
-    }
-    result
-}
 
 fn compute_diff(project_root: &Path, entry_id: &str, file_path: &str) -> String {
     let output = std::process::Command::new("git")
@@ -75,15 +52,10 @@ pub fn generate_index_html(
                 let short_hash = &entry.id[..7.min(entry.id.len())];
                 let safe_name = file.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
                 let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
-                let glb_path = web_root.join("previews_glb").join(format!("{}.glb", glb_name));
-                if glb_path.exists() {
-                    let b64 = std::fs::read(&glb_path)
-                        .map(|b| base64_encode(&b))
-                        .unwrap_or_default();
-                    glb_map.entry(entry.id.clone())
-                        .or_insert_with(Vec::new)
-                        .push(serde_json::json!({"file": file, "base64": b64}));
-                }
+                let glb_rel = format!("./previews_glb/{}.glb", glb_name);
+                glb_map.entry(entry.id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(serde_json::json!({"file": file, "url": glb_rel}));
             }
         }
     }
@@ -100,7 +72,7 @@ pub fn generate_index_html(
     let calendar_json = serde_json::to_string(&calendar)?;
 
     let three_dir = web_root.join("three");
-    ensure_threejs(&three_dir)?;
+    three_assets::ensure_threejs(&three_dir)?;
 
     let html = TEMPLATE
         .replace("{{TIMELINE_JSON}}", &timeline_json)
@@ -115,206 +87,14 @@ pub fn generate_index_html(
     Ok(())
 }
 
-const THREE_CJS: &[u8] = include_bytes!("three-src/three.cjs");
 
-const ORBIT_CONTROLS_SRC: &[u8] = include_bytes!("three-src/controls/OrbitControls.js");
-
-const GLTF_LOADER_SRC: &[u8] = include_bytes!("three-src/loaders/GLTFLoader.js");
-
-const BUFFER_GEOMETRY_UTILS_SRC: &[u8] = include_bytes!("three-src/utils/BufferGeometryUtils.js");
-
-fn ensure_threejs(three_dir: &Path) -> Result<()> {
-    let old_files = ["three.module.js"];
-    for old in &old_files {
-        let path = three_dir.join(old);
-        if path.exists() {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-
-    let subdirs = ["controls", "loaders", "utils"];
-    for subdir in &subdirs {
-        let dir = three_dir.join(subdir);
-        if !dir.exists() {
-            std::fs::create_dir_all(&dir)
-                .with_context(|| format!("failed to create {:?}/{}", three_dir, subdir))?;
-        }
-    }
-
-    let files: [(&str, &[u8], bool); 4] = [
-        ("three.cjs", THREE_CJS, false),
-        ("controls/OrbitControls.js", ORBIT_CONTROLS_SRC, true),
-        ("loaders/GLTFLoader.js", GLTF_LOADER_SRC, true),
-        ("utils/BufferGeometryUtils.js", BUFFER_GEOMETRY_UTILS_SRC, true),
-    ];
-
-    for (name, data, needs_transform) in &files {
-        let dest = three_dir.join(name);
-
-        let content = std::str::from_utf8(data)
-            .with_context(|| format!("three.js file {} is not valid UTF-8", name))?;
-
-        let expected = if *needs_transform {
-            transform_addon_js(content)
-        } else {
-            content.to_string()
-        };
-
-        if dest.exists() {
-            if let Ok(existing) = std::fs::read_to_string(&dest) {
-                if existing == expected {
-                    continue;
-                }
-            }
-        }
-
-        eprintln!("[debug] ensure_threejs: writing {}", name);
-        std::fs::write(&dest, &expected)
-            .with_context(|| format!("failed to write {:?}", dest))?;
-    }
-
-    Ok(())
-}
-
-fn transform_addon_js(content: &str) -> String {
-    let mut result = String::new();
-    result.push_str("(function(){\nvar THREE = window.THREE;\n");
-
-    let mut in_import_block = false;
-    let mut in_export_block = false;
-    let mut export_names: Vec<String> = Vec::new();
-
-    for line in content.lines() {
-        let trimmed = line.trim();
-
-        if in_export_block {
-            if trimmed.starts_with('}') && trimmed.ends_with(';') {
-                in_export_block = false;
-            } else if trimmed.starts_with('}') && !trimmed.ends_with(',') {
-                in_export_block = false;
-            } else {
-                for name in trimmed.split(',') {
-                    let name = name.trim().trim_end_matches(',').trim();
-                    if name.is_empty() { continue; }
-                    export_names.push(name.to_string());
-                }
-            }
-            continue;
-        }
-
-        // Multi-line export block start
-        if trimmed.starts_with("export {") && !trimmed.ends_with("};") && !trimmed.ends_with("} from") {
-            in_export_block = true;
-            let rest = trimmed.trim_start_matches("export {").trim();
-            if !rest.is_empty() && rest != "}" {
-                for name in rest.split(',') {
-                    let name = name.trim().trim_end_matches(',').trim();
-                    if name.is_empty() { continue; }
-                    export_names.push(name.to_string());
-                }
-            }
-            continue;
-        }
-
-        // Single-line export: export { Foo };
-        if trimmed.starts_with("export {") && trimmed.ends_with("};") {
-            let names_part = trimmed.trim_start_matches("export {")
-                .trim_end_matches("};")
-                .trim();
-            if !names_part.is_empty() {
-                for name in names_part.split(',') {
-                    let name = name.trim();
-                    if !name.is_empty() { export_names.push(name.to_string()); }
-                }
-            }
-            continue;
-        }
-
-        if trimmed == "export {" || trimmed == "export {" {
-            in_export_block = true;
-            continue;
-        }
-
-        if trimmed.starts_with("export default") {
-            continue;
-        }
-
-        // Strip "export " from class/function/const/let/var declarations
-        if trimmed.starts_with("export ") {
-            let after = &trimmed[7..];
-            if after.starts_with("class ") || after.starts_with("function ")
-                || after.starts_with("const ") || after.starts_with("let ")
-                || after.starts_with("var ")
-            {
-                let kw_end = after.find(' ').unwrap_or(after.len());
-                let rest = after[kw_end..].trim();
-                let first_word_end = rest.find(|c: char| c == ' ' || c == '(' || c == '{' || c == '<' || c == '\n').unwrap_or(rest.len());
-                let name = &rest[..first_word_end];
-                if !name.is_empty() && name != "{" && name != "(" {
-                    export_names.push(name.to_string());
-                }
-            }
-            result.push_str(&format!("  {}\n", after));
-            continue;
-        }
-
-        // Import blocks
-        if in_import_block {
-            if trimmed.ends_with("} from 'three';") || trimmed.ends_with("} from \"three\";") {
-                in_import_block = false;
-            } else if trimmed.starts_with('}') && !trimmed.contains("from") {
-                if trimmed == "}" { in_import_block = false; }
-            } else if trimmed.ends_with("} from '../utils/BufferGeometryUtils.js';") {
-                in_import_block = false;
-            }
-            continue;
-        }
-
-        if trimmed.starts_with("import {") && trimmed.contains("} from 'three';") {
-            continue;
-        }
-        if trimmed.starts_with("import ") && trimmed.contains(" from '../utils/") {
-            let content = trimmed.trim_start_matches("import ");
-            let brace_part = content.split("} from").next().unwrap_or(content);
-            let names_clean = brace_part.trim_start_matches('{').trim_end_matches('}').trim();
-            for name in names_clean.split(',') {
-                let name = name.trim();
-                if name.is_empty() { continue; }
-                let parts: Vec<&str> = name.splitn(2, " as ").map(|s| s.trim()).collect();
-                let alias = parts.get(1).unwrap_or(&parts[0]);
-                result.push_str(&format!("  var {} = window.{};\n", alias, parts[0]));
-            }
-            continue;
-        }
-        if trimmed.starts_with("import {") {
-            in_import_block = true;
-            continue;
-        }
-
-        // Skip remaining import/export lines
-        if trimmed.starts_with("import ") { continue; }
-
-        result.push_str("  ");
-        result.push_str(line);
-        result.push('\n');
-    }
-
-    for name in &export_names {
-        let n = name.trim().trim_end_matches(',');
-        if !n.is_empty() {
-            result.push_str(&format!("window.{} = {};\n", n, n));
-        }
-    }
-    result.push_str("})();\n");
-    result
-}
 
 const TEMPLATE: &str = r#"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>{{PAGE_TITLE}} - SakiStep</title>
+<title>{{PAGE_TITLE}} - Keinestamp</title>
 <script>var module = {exports: {}}; var exports = module.exports;</script>
 <script src="./three/three.cjs"></script>
 <script>window.THREE = module.exports;</script>
@@ -412,8 +192,7 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: #f5f5f7; }
   <div class="left-col">
     <div id="cal-sidebar"></div>
     <div class="left-footer">
-      <button class="left-footer-btn" id="toggle3d" onclick="toggleAll3D()">隐藏 3D 预览</button>
-      <span style="font-size:10px;color:#6c7086;text-align:center">SakiStep</span>
+      <span style="font-size:10px;color:#6c7086;text-align:center">Keinestamp</span>
     </div>
   </div>
   <div class="right-col">
@@ -488,7 +267,7 @@ function parseDiff(diffText, fileStatus) {
 }
 
 function render() {
-  var h = '<h1>' + esc(data.project || 'SakiStep') + '</h1>';
+  var h = '<h1>' + esc(data.project || 'Keinestamp') + '</h1>';
   h += '<p class="subtitle">Progress Timeline</p>';
   if (data.entries && data.entries.length > 0) {
     var entries = data.entries.slice().reverse();
@@ -566,7 +345,7 @@ function render() {
         h += '<div class="sec-body" style="">';
         eGlbs.forEach(function(g) {
           h += '<div class="diff-entry"><div class="diff-path">' + esc(g.file) + '</div>';
-          h += '<div class="model-box" data-base64="' + g.base64 + '"><div class="model-placeholder">加载 3D 模型...</div></div>';
+          h += '<div class="model-box" data-url="' + g.url + '"><div class="model-placeholder">加载 3D 模型...</div></div>';
           h += '</div>';
         });
         h += '</div>';
@@ -654,7 +433,7 @@ window.calScroll = function(ds) {
   }
 };
 
-function createViewer(container, w, h, b64, isOverlay) {
+function createViewer(container, w, h, url, isOverlay) {
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1a2e);
   var camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 1000);
@@ -764,14 +543,9 @@ function createViewer(container, w, h, b64, isOverlay) {
     container.appendChild(ph);
   }
 
-  var binary = atob(b64);
-  var bytes = new Uint8Array(binary.length);
-  for (var i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
   var GL = window.GLTFLoader || THREE.GLTFLoader;
   var loader = new GL();
-  loader.parse(bytes.buffer, '', function(gltf) {
+  loader.load(url, function(gltf) {
     modelObj = gltf.scene;
     var box = new THREE.Box3().setFromObject(modelObj);
     var size = box.getSize(new THREE.Vector3());
@@ -788,7 +562,7 @@ function createViewer(container, w, h, b64, isOverlay) {
     } else {
       showError('3D 模型无可见网格');
     }
-  }, function(err) {
+  }, null, function(err) {
     console.error('GLB parse failed:', err);
     showError('3D 模型解析失败');
   });
@@ -890,11 +664,10 @@ function createViewer(container, w, h, b64, isOverlay) {
 var ACTIVE_VIEWERS = [];
 var VIEWER_QUEUE = [];
 var OBSERVER = null;
-var ALL_MODELS_DISABLED = false;
 var VIEWER_ID = 0;
 
 function initModelsLazy() {
-  var boxes = document.querySelectorAll('.model-box[data-base64]');
+  var boxes = document.querySelectorAll('.model-box[data-url]');
   if (boxes.length === 0) return;
   if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) {
     document.querySelectorAll('.model-placeholder').forEach(function(el) {
@@ -903,7 +676,6 @@ function initModelsLazy() {
     return;
   }
   OBSERVER = new IntersectionObserver(function(entries) {
-    if (ALL_MODELS_DISABLED) return;
     entries.forEach(function(e) {
       var el = e.target;
       if (e.isIntersecting && !el.getAttribute('data-viewer-id')) {
@@ -932,9 +704,9 @@ function enqueueViewer(el) {
 function createViewerFor(el) {
   var id = ++VIEWER_ID;
   el.setAttribute('data-viewer-id', '' + id);
-  var b64 = el.getAttribute('data-base64');
+  var url = el.getAttribute('data-url');
   var w = el.clientWidth || 600;
-  var v = createViewer(el, w, 450, b64, false);
+  var v = createViewer(el, w, 450, url, false);
   el.innerHTML = '';
   el.appendChild(v.makeToolbar(function() { openFullscreen(el); }));
   el.appendChild(v.renderer.domElement);
@@ -962,7 +734,7 @@ function disposeViewer(el) {
     ACTIVE_VIEWERS.splice(idx, 1);
   }
   el.innerHTML = '<div class="model-placeholder">3D 已暂停，滚动回来看</div>';
-  if (VIEWER_QUEUE.length > 0 && !ALL_MODELS_DISABLED) {
+  if (VIEWER_QUEUE.length > 0) {
     var next = VIEWER_QUEUE.shift();
     if (next && next.isConnected && !next.getAttribute('data-viewer-id')) {
       createViewerFor(next);
@@ -970,31 +742,15 @@ function disposeViewer(el) {
   }
 }
 
-function toggleAll3D() {
-  ALL_MODELS_DISABLED = !ALL_MODELS_DISABLED;
-  var btn = document.getElementById('toggle3d');
-  if (ALL_MODELS_DISABLED) {
-    btn.textContent = '显示 3D 预览';
-    ACTIVE_VIEWERS.slice().forEach(function(v) { disposeViewer(v.el); });
-    VIEWER_QUEUE = [];
-  } else {
-    btn.textContent = '隐藏 3D 预览';
-    document.querySelectorAll('.model-box[data-base64]').forEach(function(el) {
-      if (el.getAttribute('data-viewer-id')) return;
-      el.innerHTML = '<div class="model-placeholder">等待加载...</div>';
-    });
-  }
-}
-
 function openFullscreen(el) {
-  var b64 = el.getAttribute('data-base64');
-  if (!b64) return;
+  var url = el.getAttribute('data-url');
+  if (!url) return;
   var overlay = document.createElement('div');
   overlay.className = 'model-overlay';
   var vw = window.innerWidth;
   var vh = window.innerHeight - 42;
 
-  var v = createViewer(overlay, vw, vh, b64, true);
+  var v = createViewer(overlay, vw, vh, url, true);
   var bar = v.makeToolbar(null);
   overlay.appendChild(bar);
   var canvasArea = document.createElement('div');
@@ -1039,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_generate_index_html_empty() -> Result<()> {
-        let dir = std::env::temp_dir().join("saki_html_empty");
+        let dir = std::env::temp_dir().join("keinestamp_html_empty");
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
@@ -1060,7 +816,7 @@ mod tests {
 
     #[test]
     fn test_generate_index_html_with_entries() -> Result<()> {
-        let dir = std::env::temp_dir().join("saki_html_entries");
+        let dir = std::env::temp_dir().join("keinestamp_html_entries");
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
@@ -1093,7 +849,7 @@ mod tests {
 
     #[test]
     fn test_generate_index_html_no_tag() -> Result<()> {
-        let dir = std::env::temp_dir().join("saki_html_notag");
+        let dir = std::env::temp_dir().join("keinestamp_html_notag");
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
@@ -1122,8 +878,8 @@ mod tests {
 
     #[test]
     fn test_transform_gltf_loader() {
-        let src = std::str::from_utf8(GLTF_LOADER_SRC).unwrap();
-        let result = transform_addon_js(src);
+        let src = std::str::from_utf8(crate::three_assets::GLTF_LOADER_SRC).unwrap();
+        let result = crate::three_assets::transform_addon_js(src);
         assert!(result.starts_with("(function(){"), "should wrap in IIFE");
         assert!(result.contains("var THREE = window.THREE;"), "should have THREE alias");
         assert!(result.contains("var toTrianglesDrawMode = window.toTrianglesDrawMode;"), "should handle cross-addon import");
@@ -1134,33 +890,9 @@ mod tests {
     }
 
     #[test]
-    fn test_base64_encode_standard() {
-        assert_eq!(base64_encode(b"f"), "Zg==");
-        assert_eq!(base64_encode(b"fo"), "Zm8=");
-        assert_eq!(base64_encode(b"foo"), "Zm9v");
-        assert_eq!(base64_encode(b"foob"), "Zm9vYg==");
-        assert_eq!(base64_encode(b"fooba"), "Zm9vYmE=");
-        assert_eq!(base64_encode(b"foobar"), "Zm9vYmFy");
-    }
-
-    #[test]
-    fn test_base64_encode_empty() {
-        assert_eq!(base64_encode(b""), "");
-    }
-
-    #[test]
-    fn test_base64_encode_binary() {
-        let data: Vec<u8> = (0..255).collect();
-        let b64 = base64_encode(&data);
-        assert_eq!(b64.len(), ((data.len() + 2) / 3) * 4);
-        assert!(b64.is_ascii());
-        assert!(!b64.is_empty());
-    }
-
-    #[test]
     fn test_transform_orbit_controls() {
-        let src = std::str::from_utf8(ORBIT_CONTROLS_SRC).unwrap();
-        let result = transform_addon_js(src);
+        let src = std::str::from_utf8(crate::three_assets::ORBIT_CONTROLS_SRC).unwrap();
+        let result = crate::three_assets::transform_addon_js(src);
         assert!(result.starts_with("(function(){"), "should wrap in IIFE");
         assert!(result.contains("window.OrbitControls = OrbitControls;"), "should export OrbitControls to window");
         assert!(!result.contains("import "), "should have no import at all");

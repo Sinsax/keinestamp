@@ -11,5 +11,6 @@ pub mod init;
 pub mod main_helpers;
 pub mod push;
 pub mod recent;
+pub mod three_assets;
 pub mod serve;
 pub mod timeline;

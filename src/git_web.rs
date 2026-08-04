@@ -75,7 +75,7 @@ mod tests {
     use super::*;
 
     fn tmp_web_repo(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("saki_git_web_{}", name));
+        let dir = std::env::temp_dir().join(format!("keinestamp_git_web_{}", name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         Command::new("git")

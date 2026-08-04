@@ -1,4 +1,4 @@
-# SakiStep
+# Keinestamp
 
 Single-binary CLI + Tauri GUI Blender Git Progress Board. Rust Edition 2024.
 
@@ -30,8 +30,8 @@ Build order (crate): config → detect → init → git_project → git_web → 
 - **revert guard**: Checks commit count >= 2 before `reset --soft HEAD~1`. `get_commit_count()` in git_project.
 - **pull**: Always `git pull --rebase` to avoid merge commits.
 - **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.
-- **MetaConfig** (`.saki-step.toml`): `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `access_token`, `auto_connect`, `project_id`. Old fields silently ignored via `#[serde(default)]`. `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server.
-- **AppConfig** (`%APPDATA%/SakiStep/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. `deploy_token` is used by the app to authenticate with the server for upload/health.
+- **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `access_token`, `auto_connect`, `project_id`. Old fields silently ignored via `#[serde(default)]`. `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server.
+- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. `deploy_token` is used by the app to authenticate with the server for upload/health.
 - **auto_connect**: When true, app tests server connection on project load.
 - **Atomic writes**: Temp file + rename (name includes PID + target filename).
 - **init idempotent**: Re-init fills gaps, does not overwrite `init_time`.
@@ -57,8 +57,8 @@ web_root = "C:/Projects/Alice/web-timeline"
 - All endpoints require valid deploy_token.
 - **Dynamic project names**: Deploy sends `X-Project-Name` header. Server creates `web_root/<project_name>/` directory and stores access_token in `HashMap<project_name, token>`.
 - **Token separation**: `/upload` and `/health` accept only `deploy_token` (Bearer). Browser endpoints (`/<project>/...`) accept `access_token` (cookie or Bearer).
-- **URL prefix routing**: Each project is accessible at `/<project_name>/`. Cookie `saki_token` is scoped to `Path=/<project_name>/` for multi-project isolation.
-- Login page at `GET /<project>/login`. On success, sets `saki_token` cookie with `Path=/<project>/` and saves token to `localStorage` for auto-fill.
+- **URL prefix routing**: Each project is accessible at `/<project_name>/`. Cookie `keinestamp_token` is scoped to `Path=/<project_name>/` for multi-project isolation.
+- Login page at `GET /<project>/login`. On success, sets `keinestamp_token` cookie with `Path=/<project>/` and saves token to `localStorage` for auto-fill.
 - Static files: try Bearer → Cookie auth (checks both config access_tokens and stored project tokens via `HashMap`), fallback to login page for browser requests
 - Per-user `last_update` timestamps (not global)
 - Rate limiter: 10 failures / 60s per IP → 120s block. `retain()` cleanup on each `check()`.
@@ -74,9 +74,9 @@ web_root = "C:/Projects/Alice/web-timeline"
 | Condition | Result |
 |---|---|
 | Path not a dir | `Fresh` |
-| No `.saki-step.toml`, has `.blend` | `Existing` |
-| Has `.saki-step.toml` | `Initialized(MetaConfig)` |
+| No `.keinestamp.toml`, has `.blend` | `Existing` |
 
+| Has `.keinestamp.toml` | `Initialized(MetaConfig)` |
 Non-recursive `*.blend` scan. File path → error.
 
 ## serve.toml auto-detect
@@ -152,7 +152,7 @@ All in `frontend/src/`. Key files:
 
 ## Integration tests
 
-At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/cuke_int_*`. Require `user.email`/`user.name` git config. Binary via `CARGO_BIN_EXE_saki_step`.
+At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/keinestamp_int_*`. Require `user.email`/`user.name` git config. Binary via `CARGO_BIN_EXE_keinestamp`.
 
 ## Test gaps (high-risk)
 

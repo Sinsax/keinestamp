@@ -61,7 +61,7 @@ fn perform_init(project_root: &Path) -> Result<()> {
         .with_context(|| format!("failed to write meta config to {:?}", meta_path))?;
 
     eprintln!(
-        "SakiStep initialized at {:?}",
+        "Keinestamp initialized at {:?}",
         project_root
     );
 
@@ -166,7 +166,7 @@ fn ensure_project_gitignore(project_root: &Path) -> Result<()> {
     if gitignore_path.exists() {
         content = std::fs::read_to_string(&gitignore_path)?;
     }
-    for pattern in &["web-timeline/", ".saki-step.toml"] {
+    for pattern in &["web-timeline/", ".keinestamp.toml"] {
         if !content.contains(pattern) {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
@@ -212,10 +212,10 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SakiStep</title>
+<title>Keinestamp</title>
 </head>
 <body>
-<p>SakiStep - 进度追踪</p>
+<p>Keinestamp - 进度追踪</p>
 </body>
 </html>
 "#;
@@ -231,7 +231,7 @@ mod tests {
     use super::*;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("saki_init_{}", name));
+        let dir = std::env::temp_dir().join(format!("keinestamp_init_{}", name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
