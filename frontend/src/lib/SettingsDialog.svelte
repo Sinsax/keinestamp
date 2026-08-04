@@ -235,21 +235,25 @@
 <style>
   .overlay {
     position: fixed; inset: 0;
-    background: rgba(0,0,0,0.65);
+    background: rgba(30, 40, 51, 0.35);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     z-index: 200;
     display: flex;
     align-items: center;
     justify-content: center;
+    animation: fade-in 0.15s var(--ease);
   }
   .panel {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     padding: 24px;
     width: 520px;
     max-height: 80vh;
     overflow-y: auto;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.4);
+    box-shadow: var(--shadow-lg);
+    animation: dialog-in 0.2s var(--ease);
   }
   h3 { margin-bottom: 16px; font-size: 16px; }
   .section { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
@@ -272,7 +276,7 @@
     position: relative;
   }
   .progress-bar {
-    height: 100%; background: #7c3aed;
+    height: 100%; background: var(--accent);
     border-radius: 3px;
     transition: width 0.3s ease;
   }
@@ -293,8 +297,8 @@
   .percent { font-weight: 600; }
 
   .dl-status { font-size: 11px; color: var(--text-dim); margin-top: 4px; display: block; }
-  .dl-status.success { color: #4ade80; }
-  .dl-status.error { color: #f87171; }
+  .dl-status.success { color: var(--ze); }
+  .dl-status.error { color: var(--error); }
   .toggle-field label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
   .toggle-field input[type="checkbox"] { width: auto; }
   .input-row { display: flex; align-items: center; gap: 8px; }
@@ -303,7 +307,7 @@
   .connect-btn:hover:not(:disabled) { background: var(--surface2); }
   .connect-btn:disabled { opacity: 0.4; cursor: default; }
   .conn-result { display: block; font-size: 11px; margin-top: 4px; }
-  .conn-result.ok { color: #4ade80; }
-  .conn-result.fail { color: #f87171; }
+  .conn-result.ok { color: var(--ze); }
+  .conn-result.fail { color: var(--error); }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 </style>

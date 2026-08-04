@@ -108,26 +108,28 @@
   }
   .tag-btn {
     font-size: 12px;
-    padding: 3px 10px;
-    border-radius: 12px;
+    padding: 4px 12px;
+    border-radius: 999px;
     border: 1px solid var(--border);
     background: var(--surface);
     color: var(--text-dim);
     cursor: pointer;
-    transition: all 0.15s;
+    transition: all 0.15s var(--ease);
   }
   .tag-btn:hover {
     border-color: var(--accent);
-    color: var(--text);
+    color: var(--accent);
   }
   .tag-btn.active {
-    background: var(--accent);
-    color: #1e1e2e;
+    background: var(--accent-soft);
+    color: var(--accent);
     border-color: var(--accent);
     font-weight: 600;
   }
   .custom-btn.active {
-    background: var(--accent);
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
   }
   .custom-input {
     margin-top: 6px;
