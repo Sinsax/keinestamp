@@ -172,3 +172,31 @@ fn test_export_with_real_hash() {
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn html_gen_contains_daynight_theme() {
+    let dir = tmp_dir("theme");
+    let timeline = keinestamp::timeline::Timeline {
+        project: "ThemeTest".to_string(),
+        entries: vec![keinestamp::timeline::TimelineEntry {
+            id: "abc123def456".to_string(),
+            timestamp: "2026-06-13T12:00:00Z".to_string(),
+            author: "artist".to_string(),
+            message: "theme test".to_string(),
+            files: vec!["char.blend".to_string()],
+            file_status: vec![],
+            preview: "previews/abc123.png".to_string(),
+            tag: Some("建模".to_string()),
+        }],
+    };
+
+    keinestamp::html_gen::generate_index_html(&dir, &dir, &timeline, "ThemeTest").unwrap();
+
+    let html = std::fs::read_to_string(dir.join("index.html")).unwrap();
+    assert!(html.contains(r#"[data-theme="night"]"#), "missing night palette selector");
+    assert!(html.contains("keinestamp_web_theme"), "missing theme storage key");
+    assert!(html.contains("theme-toggle"), "missing toggle button id");
+    assert!(html.contains("color-mix"), "missing color-mix badge styles");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
