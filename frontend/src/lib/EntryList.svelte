@@ -2,7 +2,7 @@
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
   import { getFileDiff, openWebTimeline, updateConfig } from '../api'
-  import { tagColor, tagSoft } from './tags'
+  import { tagColor } from './tags'
 
   let {
     entries,
@@ -247,7 +247,7 @@
         <div class="msg">
           {entry.message}
           {#if entryTag}
-            <span class="tag-badge" style="color:{tagColor(entryTag)};background:{tagSoft(entryTag)}">{entryTag}</span>
+            <span class="tag-badge" style="--tag-c:{tagColor(entryTag)}">{entryTag}</span>
           {/if}
         </div>
 
@@ -397,7 +397,7 @@
   .status-path { color: var(--text); }
   .st-add { color: var(--ze); background: var(--ze-soft); }
   .st-del { color: var(--error); background: var(--accent-soft); }
-  .st-mod { color: var(--warning); background: rgba(176, 128, 58, 0.12); }
+  .st-mod { color: var(--warning); background: var(--warning-soft); }
 
   .diff-entry, .model-entry { margin-bottom: 6px; }
   .diff-path {
@@ -461,6 +461,8 @@
     border-radius: 999px;
     margin-left: 6px;
     vertical-align: middle;
+    color: color-mix(in srgb, var(--tag-c) 45%, white);
+    background: color-mix(in srgb, var(--tag-c) 14%, transparent);
   }
   .entries-footer {
     padding: 10px 0 4px;

@@ -2,7 +2,7 @@
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
   import { openWebTimeline } from '../api'
-  import { tagColor, tagSoft } from './tags'
+  import { tagColor } from './tags'
 
   let {
     entry,
@@ -36,7 +36,7 @@
     <div class="detail-panel" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
       <h2>{entry.message}
         {#if entry.tag}
-          <span class="tag-badge" style="color:{tagColor(entry.tag)};background:{tagSoft(entry.tag)}">{entry.tag}</span>
+          <span class="tag-badge" style="--tag-c:{tagColor(entry.tag)}">{entry.tag}</span>
         {/if}
       </h2>
       <div class="meta">{entry.id.slice(0, 7)} &mdash; {entry.author}</div>
@@ -93,6 +93,8 @@
     border-radius: 999px;
     margin-left: 8px;
     vertical-align: middle;
+    color: color-mix(in srgb, var(--tag-c) 45%, white);
+    background: color-mix(in srgb, var(--tag-c) 14%, transparent);
   }
   .blend-item { font-family: var(--mono); font-size: 11px; color: var(--blue); margin-bottom: 4px; }
   .open-web-btn {

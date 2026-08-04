@@ -13,11 +13,3 @@ export function tagColor(tag: string): string {
   for (let i = 0; i < tag.length; i++) hash = ((hash << 5) - hash) + tag.charCodeAt(i)
   return FALLBACK_COLORS[Math.abs(hash) % FALLBACK_COLORS.length]
 }
-
-export function tagSoft(tag: string): string {
-  const c = tagColor(tag)
-  const r = parseInt(c.slice(1, 3), 16)
-  const g = parseInt(c.slice(3, 5), 16)
-  const b = parseInt(c.slice(5, 7), 16)
-  return `rgba(${r},${g},${b},0.12)`
-}
