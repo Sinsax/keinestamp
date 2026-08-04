@@ -112,7 +112,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
+    padding: 10px 14px;
     border-bottom: 1px solid var(--border);
   }
   .sp-title {
@@ -123,25 +123,28 @@
     font-size: 11px;
     color: var(--text-dim);
     background: var(--surface2);
-    padding: 1px 6px;
-    border-radius: 8px;
+    padding: 1px 8px;
+    border-radius: 999px;
   }
   .sp-spacer { flex: 1; }
   .sp-refresh {
     background: none;
+    border: none;
     font-size: 16px;
     padding: 2px 6px;
     cursor: pointer;
     color: var(--text-dim);
+    border-radius: 6px;
+    transition: background 0.12s, color 0.12s;
   }
-  .sp-refresh:hover { color: var(--text); }
+  .sp-refresh:hover { background: var(--surface2); color: var(--accent); }
   .sp-empty {
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
     flex: 1;
-    gap: 6px;
+    gap: 8px;
     color: var(--text-dim);
     font-size: 13px;
   }
@@ -149,25 +152,27 @@
   .sp-list {
     flex: 1;
     overflow-y: auto;
-    padding: 4px 0;
+    padding: 6px 8px;
   }
   .sp-item {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 12px;
+    padding: 5px 10px;
+    margin-bottom: 2px;
     font-size: 13px;
-    transition: background 0.1s;
+    border-radius: 8px;
+    transition: background 0.12s var(--ease), box-shadow 0.12s var(--ease);
   }
-  .sp-item:hover { background: var(--surface); }
+  .sp-item:hover { background: var(--surface); box-shadow: var(--shadow-sm); }
   .sp-icon { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
   .sp-ext-badge {
     font-size: 9px;
     font-weight: 600;
-    background: var(--surface2);
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: var(--text-dim);
+    background: var(--ice-soft);
+    padding: 1px 6px;
+    border-radius: 4px;
+    color: var(--blue);
     flex-shrink: 0;
     letter-spacing: 0.3px;
   }
@@ -176,7 +181,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-family: monospace;
+    font-family: var(--mono);
     font-size: 12px;
   }
   .sp-label {
