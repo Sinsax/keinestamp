@@ -149,6 +149,9 @@ All in `frontend/src/`. Key files:
 - **Diff data externalized**: `web-timeline/diffs.json` loaded via fetch()
 - **push/pull gated by `has_remote()`**: Buttons only enabled when git `origin` remote exists
 - **Notifications**: Toast auto-dismiss after 3s. No manual dismiss.
+- **Day/night dual theme**: Day = 人形 (white bg + deep blue + ice blue + red), Night = 白泽 (green-black bg + dark green + green-white + red). `[data-theme="night"]` override block at end of app.scss. Manual ☀/🌙 toggle, localStorage key `keinestamp_theme` (desktop) / `keinestamp_web_theme` (web). Inline pre-read script in `frontend/index.html` head prevents white flash. No system-follow, no animations.
+- **Tag badges**: inline `--tag-c` + CSS `color-mix` — auto-adapts to both themes, no `tagSoft`.
+- **Web page theme**: `html_gen.rs` template has `:root`/`[data-theme="night"]` dual palettes; 3D viewer and calendar heat colors stay dark/hardcoded.
 
 ## Integration tests
 
