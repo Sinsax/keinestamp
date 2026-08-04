@@ -44,6 +44,32 @@
   let accessToken = $state('')
   let deploying = $state(false)
 
+  let sidebarCollapsed = $state(localStorage.getItem('keinestamp_sidebar_collapsed') === '1')
+  let timelineWidth = $state(parseInt(localStorage.getItem('keinestamp_timeline_width') || '320', 10))
+
+  $effect(() => {
+    localStorage.setItem('keinestamp_sidebar_collapsed', sidebarCollapsed ? '1' : '0')
+  })
+  $effect(() => {
+    localStorage.setItem('keinestamp_timeline_width', String(timelineWidth))
+  })
+
+  function startTimelineDrag(e: PointerEvent) {
+    e.preventDefault()
+    const startX = e.clientX
+    const startW = timelineWidth
+    const onMove = (ev: PointerEvent) => {
+      const w = startW - (ev.clientX - startX)
+      timelineWidth = Math.min(480, Math.max(240, w))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
   async function loadCachedVersions() {
     if (cachedVersions.length === 0) {
       try {
@@ -284,10 +310,27 @@
   />
 
   <div class="body" onclick={() => selectedEntryId = ''}>
-    <Sidebar {trackedFiles} {activePath} onCloseProject={handleCloseAndRemove} />
+    <Sidebar
+      {trackedFiles}
+      {activePath}
+      collapsed={sidebarCollapsed}
+      onExpand={() => sidebarCollapsed = false}
+      onCloseProject={handleCloseAndRemove}
+    />
 
     <div class="main-area">
       <div class="toolbar">
+        <button
+          class="toolbar-icon"
+          onclick={() => sidebarCollapsed = !sidebarCollapsed}
+          title={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
+        >
+          {#if sidebarCollapsed}
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
+          {:else}
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M3 6l5 5 5-5H3z"/></svg>
+          {/if}
+        </button>
         {#if activePath}
           <span class="toolbar-path">
             <span class="path-text" title={cleanPath(activePath)}>{cleanPath(activePath)}</span>
@@ -321,7 +364,8 @@
         </div>
 
         {#if projectType === 'initialized'}
-          <div class="timeline-panel">
+          <div class="tl-resize" onpointerdown={startTimelineDrag}></div>
+          <div class="timeline-panel" style="width: {timelineWidth}px">
             <EntryList
               entries={entries}
               selectedId={selectedEntryId}
@@ -377,13 +421,40 @@
     flex-direction: column;
   }
   .timeline-panel {
-    width: 320px;
     border-left: 1px solid var(--border);
     background: var(--bg);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    transition: none;
+  }
+  .toolbar-icon {
+    background: none;
+    border: none;
+    color: var(--text-dim);
+    padding: 4px 6px;
+    border-radius: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s;
+  }
+  .toolbar-icon:hover {
+    background: var(--surface2);
+    color: var(--accent);
+  }
+  .tl-resize {
+    width: 5px;
+    cursor: col-resize;
+    flex-shrink: 0;
+    background: transparent;
+    transition: background 0.15s var(--ease);
+    z-index: 1;
+  }
+  .tl-resize:hover {
+    background: var(--accent-soft);
   }
   .toolbar-path {
     display: inline-flex;
@@ -414,7 +485,7 @@
     justify-content: center;
   }
   .path-folder:hover {
-    color: var(--accent, #cba6f7);
-    background: rgba(203, 166, 247, 0.12);
+    color: var(--accent);
+    background: var(--accent-soft);
   }
 </style>
