@@ -138,7 +138,7 @@ All in `frontend/src/`. Key files:
 - `App.svelte` — Main layout, state, 3s status polling
 - `SettingsDialog.svelte` — deploy_server_url/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle (app-level). Save does not close dialog.
 - `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. Site name + access token sections at bottom (token only after deploy).
-- `StatusPanel.svelte` — Changes panel: working-file list with per-row checkboxes (default all checked = full commit; unchecking some → record commits only selected via `files` param, selection persists across 3s auto-refresh). Header shows `selected/total` count + 全选 button when partial.
+- `StatusPanel.svelte` — Changes panel: directory-tree view of working files (`git status --porcelain -uall` so untracked dirs are not collapsed). Per-row checkboxes (default all = full commit; unchecking some → record commits only selected via `files` param, selection persists across 3s auto-refresh). Dir checkbox = select/deselect all files under it (indeterminate when partial), dir row click collapses/expands, file row click toggles. Header shows `selected/total` count + 全选/全不选 buttons.
 - `CommitDialog.svelte` — record dialog: message/tag/3D-preview only (file selection lives in StatusPanel); closes after each commit (batch = re-open, selection persists on main panel).
 - `statusParse.ts` — shared `parseStatus(output)` used by StatusPanel + CommitDialog.
 - `StatusBar.svelte` — Connection indicator (green/red dot) only.
