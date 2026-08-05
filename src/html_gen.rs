@@ -53,9 +53,12 @@ pub fn generate_index_html(
                 let safe_name = file.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
                 let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
                 let glb_rel = format!("./previews_glb/{}.glb", glb_name);
-                glb_map.entry(entry.id.clone())
-                    .or_insert_with(Vec::new)
-                    .push(serde_json::json!({"file": file, "url": glb_rel}));
+                let glb_path = web_root.join("previews_glb").join(format!("{}.glb", glb_name));
+                if glb_path.exists() {
+                    glb_map.entry(entry.id.clone())
+                        .or_insert_with(Vec::new)
+                        .push(serde_json::json!({"file": file, "url": glb_rel}));
+                }
             }
         }
     }
@@ -878,6 +881,40 @@ mod tests {
         assert!(html.contains("建模"));
         assert!(html.contains("tag-badge"));
         assert!(html.contains("var diffsData ="));
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_glb_section_only_when_file_exists() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_glb_exists");
+        std::fs::create_dir_all(&dir)?;
+        std::fs::create_dir_all(dir.join("previews_glb"))?;
+
+        let timeline = Timeline {
+            project: "GlbTest".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "model update".to_string(),
+                files: vec!["char.blend".to_string()],
+                file_status: vec!["M".to_string()],
+                preview: String::new(),
+                tag: None,
+            }],
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "GlbTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(html.contains("var glbData = {}"), "no glb file → empty glbData");
+
+        std::fs::write(dir.join("previews_glb/abc123d_char.glb"), b"fake glb")?;
+        generate_index_html(&dir, &dir, &timeline, "GlbTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(html.contains("previews_glb/abc123d_char.glb"), "glb file exists → glbData has entry");
+        assert!(html.contains("abc123def456"), "glbData keyed by entry id");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
