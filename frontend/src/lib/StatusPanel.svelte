@@ -209,17 +209,19 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 4px 8px;
-    margin-bottom: 1px;
+    padding: 5px 6px;
+    margin-bottom: 2px;
     font-size: 13px;
+    line-height: 1.4;
     border-radius: 6px;
     transition: background 0.12s var(--ease);
   }
   .sp-item:hover { background: var(--surface); }
   .sp-item.sp-dir { cursor: pointer; }
   .sp-check {
-    width: 13px;
-    height: 13px;
+    width: 14px;
+    height: 14px;
+    margin: 0;
     accent-color: var(--accent);
     cursor: pointer;
     flex-shrink: 0;
