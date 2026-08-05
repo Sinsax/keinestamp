@@ -199,7 +199,7 @@ fn html_gen_contains_daynight_theme() {
     assert!(html.contains("color-mix"), "missing color-mix badge styles");
     assert!(html.contains("--bg: #141d18"), "night palette drifted");
     assert!(html.contains("localStorage.getItem('keinestamp_web_theme')"), "missing pre-read script");
-    assert!(html.contains("brand-name"), "missing sidebar brand area");
+    assert!(!html.contains("class=\"brand\""), "web logo should be removed");
     assert!(html.contains("shadow-hover"), "missing hover shadow token");
     assert!(html.contains("--ice-soft"), "missing ice tokens");
 

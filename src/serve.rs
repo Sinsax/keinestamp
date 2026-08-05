@@ -293,8 +293,6 @@ fn login_page_html(project_name: &str) -> String {
 *{{box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--text)}}
 .card{{background:var(--surface);border:1px solid var(--border);padding:40px 36px 32px;border-radius:14px;box-shadow:var(--shadow-lg);text-align:center;width:340px}}
-.brand{{display:flex;justify-content:center;margin-bottom:20px}}
-.brand svg{{width:40px;height:40px}}
 h1{{font-size:20px;margin:0 0 4px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .sub{{font-size:13px;color:var(--text-dim);margin-bottom:24px}}
 input{{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}}
@@ -306,23 +304,6 @@ button:hover{{background:var(--accent-hover)}}
 </head>
 <body>
 <div class="card">
-  <div class="brand">
-    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M28 22 C44 14, 56 14, 72 22 C84 34, 84 66, 72 78 C56 86, 44 86, 28 78 C16 66, 16 34, 28 22Z" fill="#D94747"/>
-      <path d="M33 28 C22 40, 22 60, 33 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <path d="M44 24 C32 40, 32 60, 44 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <path d="M56 24 C44 40, 44 60, 56 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <path d="M67 28 C56 40, 56 60, 67 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
-      <circle cx="40" cy="40" r="3" fill="#FFE3E3"/>
-      <circle cx="44" cy="55" r="3.5" fill="#9FC3E3"/>
-      <circle cx="50" cy="70" r="3" fill="#FFE3E3"/>
-      <circle cx="52" cy="38" r="3.5" fill="#9FC3E3"/>
-      <circle cx="58" cy="53" r="3" fill="#FFE3E3"/>
-      <circle cx="62" cy="68" r="3.5" fill="#9FC3E3"/>
-      <path d="M46 16 C48 10, 52 6, 58 8" stroke="#E8B4B4" stroke-width="3" fill="none" stroke-linecap="round"/>
-      <path d="M58 8 C62 6, 64 8, 66 7" stroke="#E8B4B4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
-    </svg>
-  </div>
   <h1>{project}</h1>
   <div class="sub">输入访问令牌以查看时间线</div>
   <form method="post" action="/{project}/login">
@@ -950,13 +931,13 @@ mod tests {
     }
 
     #[test]
-    fn login_page_has_theme_brand_and_project() {
+    fn login_page_has_theme_and_project() {
         let html = login_page_html("my_proj");
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("my_proj"));
         assert!(html.contains("--accent"));
-        assert!(html.contains("svg"));
+        assert!(!html.contains("<svg"), "web logo should be removed");
         assert!(html.contains("输入访问令牌以查看时间线"));
     }
 
