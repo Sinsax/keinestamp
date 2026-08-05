@@ -209,10 +209,10 @@
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 6px;
-    margin-bottom: 2px;
+    padding: 3px 6px;
+    margin-bottom: 1px;
     font-size: 13px;
-    line-height: 1.4;
+    line-height: 1.3;
     border-radius: 6px;
     transition: background 0.12s var(--ease);
   }

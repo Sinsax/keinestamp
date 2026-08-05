@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import StatusTreeItem from './StatusTreeItem.svelte'
   import type { FileTreeNode } from './fileTree'
   import type { StatusFile } from './statusParse'
@@ -43,7 +43,7 @@
       onclick={(e) => e.stopPropagation()}
       onchange={() => onToggleDir(node)}
     />
-    <span class="sp-row" style="padding-left: {depth * 14}px">
+    <span class="sp-row" style="padding-left: {depth * 28}px">
       <span class="sp-arrow">{isCollapsed(node.path) ? '▸' : '▾'}</span>
       <span class="sp-dir-icon">
         <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor" opacity="0.7"><path d="M2 5a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/></svg>
@@ -76,7 +76,7 @@
       onchange={() => onToggleFile(node.path)}
       title="取消勾选可单独提交其余文件"
     />
-    <span class="sp-row" style="padding-left: {depth * 14}px">
+    <span class="sp-row" style="padding-left: {depth * 28}px">
       <span class="sp-icon" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
         {#if statusIconType(status?.x || ' ', status?.y || ' ') === 'added'}
           <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z"/></svg>
