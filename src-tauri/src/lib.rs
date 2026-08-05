@@ -47,7 +47,7 @@ fn init_project(path: String) -> Result<keinestamp::config::MetaConfig, String> 
         map_err(keinestamp::git_project::ensure_git_user(&meta.project_root))?;
         map_err(keinestamp::git_project::stage_files_and_commit(
             &meta.project_root,
-            &[".keinestamp.toml", ".gitignore", ".gitattributes"],
+            &[".gitignore", ".gitattributes"],
             "init",
         ))?;
     }
