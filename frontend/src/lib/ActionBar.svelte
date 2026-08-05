@@ -10,7 +10,6 @@
     connected = false,
     deployAhead = false,
     deployTip = '部署到服务器',
-    recordCount = null,
   }: {
     projectType: ProjectType | null
     onRecord: () => void
@@ -20,15 +19,14 @@
     connected?: boolean
     deployAhead?: boolean
     deployTip?: string
-    recordCount?: number | null
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
 </script>
 
 <div class="action-bar">
-  <button class="record-btn" onclick={onRecord} disabled={!initialized || recordCount === 0} title={recordCount === 0 ? '未选择任何文件' : ''}>
-    <span class="ab-label">{recordCount === null ? '记录' : `记录所选 (${recordCount})`}</span>
+  <button class="record-btn" onclick={onRecord} disabled={!initialized}>
+    <span class="ab-label">记录</span>
     <span class="ab-hint">record</span>
   </button>
 

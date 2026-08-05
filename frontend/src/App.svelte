@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { onMount } from 'svelte'
   import TitleBar from './lib/TitleBar.svelte'
   import Sidebar from './lib/Sidebar.svelte'
@@ -150,7 +150,6 @@
   }
 
   let deployAhead = $derived(!!deployStatus && deployStatus.local > (deployStatus.remote ?? 0))
-  let recordCount = $derived(commitSelection === null ? null : commitSelection.length)
   let deployTip = $derived.by(() => {
     if (!deployStatus) return '部署到服务器'
     const r = deployStatus.remote ?? '—'
@@ -470,7 +469,6 @@
         {connected}
         {deployAhead}
         {deployTip}
-        {recordCount}
       />
 
       <StatusBar
