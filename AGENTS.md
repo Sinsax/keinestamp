@@ -108,7 +108,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 |---|---|---|
 | `detect` | `"fresh"\|"existing"\|"initialized"` | |
 | `init_project` | `MetaConfig` | + init commit + add_recent |
-| `record` | short hash (7) | async, emits `commit-progress` events (5 phases). No auto-deploy. |
+| `record` | short hash (7) | async, emits `commit-progress` events (5 phases). No auto-deploy. Optional `files` param: selected-files commit (`add_and_commit_files`), otherwise full commit. |
 | `push` / `pull` | `()` | push only does git push, no deploy |
 | `deploy` | `()` | manual deploy to server (zip upload); on success writes `site_name` (resolved) + `site_locked = true` |
 | `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
@@ -136,11 +136,13 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 All in `frontend/src/`. Key files:
 
 - `App.svelte` — Main layout, state, 3s status polling
-- `SettingsDialog.svelte` — web_remote/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle. Save does not close dialog.
-- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. Access token section at bottom.
+- `SettingsDialog.svelte` — deploy_server_url/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle (app-level). Save does not close dialog.
+- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. Site name + access token sections at bottom (token only after deploy).
+- `CommitDialog.svelte` — record dialog; working-file checkbox list (default all = full commit; unchecking some → commit selected via record `files` param); stays open for batch commits until no files remain (hint text shows remaining count).
+- `statusParse.ts` — shared `parseStatus(output)` used by StatusPanel + CommitDialog.
 - `StatusBar.svelte` — Connection indicator (green/red dot) only.
 - `ProjectTabs.svelte` — Project tabs bar: scrollable tabs area (`overflow-x: auto` + wheel-scroll action + hover-only thin scrollbar + edge mask fade when scrollable + active tab auto `scrollIntoView`). Active tab shows × (wired to `onRemoveRecent`, reuses confirm logic, `stopPropagation` so it doesn't select). Fixed right actions area (☀/🌙 theme toggle + ⚙ settings, divided by border). Props: `theme`/`onToggleTheme`/`onRemoveRecent`.
-- `api.ts` — 27 Tauri invoke wrappers
+- `api.ts` — 31 Tauri invoke wrappers
 - `types.ts` — Interfaces
 
 **Dead code (don't use)**: `InitDialog.svelte` (replaced by native `@tauri-apps/plugin-dialog`), `ModelViewer.svelte` (3D preview via browser `openWebTimeline` instead).

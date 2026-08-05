@@ -63,8 +63,8 @@ struct CommitProgress {
 }
 
 #[tauri::command]
-async fn record(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>) -> Result<String, String> {
-    eprintln!("[debug] record({}, message={:?}, tag={:?}, no_preview={})", path, message, tag, no_preview.unwrap_or(false));
+async fn record(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>, files: Option<Vec<String>>) -> Result<String, String> {
+    eprintln!("[debug] record({}, message={:?}, tag={:?}, no_preview={}, files={:?})", path, message, tag, no_preview.unwrap_or(false), files);
     use tauri::Emitter;
     let app_clone = app.clone();
     let handle = tokio::task::spawn_blocking(move || {
@@ -85,7 +85,10 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
 
         map_err(keinestamp::git_project::ensure_git_user(&meta.project_root))?;
         map_err(keinestamp::git_project::lfs_auto_configure(&meta.project_root))?;
-        let hash: String = map_err(keinestamp::git_project::add_and_commit(&meta.project_root, &message))?;
+        let hash: String = match files {
+            Some(f) => map_err(keinestamp::git_project::add_and_commit_files(&meta.project_root, &f, &message))?,
+            None => map_err(keinestamp::git_project::add_and_commit(&meta.project_root, &message))?,
+        };
         let short_hash = hash[..7].to_string();
 
         let changed_files: Vec<String> = map_err(keinestamp::git_helpers::get_changed_files(&meta.project_root, &hash))?;

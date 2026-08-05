@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { parseStatus, type StatusFile } from './statusParse'
+
   let {
     statusOutput,
     onRefresh,
@@ -7,25 +9,7 @@
     onRefresh: () => void
   } = $props()
 
-  interface StatusFile {
-    path: string
-    x: string
-    y: string
-  }
-
   const files = $derived(parseStatus(statusOutput))
-
-  function parseStatus(output: string): StatusFile[] {
-    return output
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-      .map((l) => ({
-        x: l[0] || ' ',
-        y: l[1] || ' ',
-        path: l.substring(3).trim(),
-      }))
-  }
 
   function statusLabel(x: string, y: string): string {
     if (x !== ' ') return 'staged'

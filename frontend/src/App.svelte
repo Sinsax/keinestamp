@@ -208,19 +208,20 @@
     }
   }
 
-  async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false) {
-    showCommit = false
+  async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false, files: string[] | null = null): Promise<boolean> {
     statusText = '记录中...'
     const unlisten = await listen<CommitProgress>('commit-progress', (event) => {
       statusText = event.payload.message
     })
     try {
-      const hash = await api.record(activePath, msg, tag, noPreview)
+      const hash = await api.record(activePath, msg, tag, noPreview, files)
       pushToast(`已记录 ${hash}`, 'success')
       await loadProject(activePath)
+      return true
     } catch (e: any) {
       pushToast(`记录失败: ${e}`, 'error')
       statusText = '记录失败'
+      return false
     } finally {
       unlisten()
     }
@@ -478,7 +479,7 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} />
+  <CommitDialog path={activePath} onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} />
 {/if}
 
 {#if showSettings}

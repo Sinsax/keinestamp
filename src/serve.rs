@@ -18,31 +18,7 @@ const AUTH_BLOCK_SECS: u64 = 120;
 // --- Logger ---
 
 fn log_ts() -> String {
-    let d = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    let mut s = d;
-    let sec = s % 60; s /= 60;
-    let min = s % 60; s /= 60;
-    let hr = s % 60; s /= 60;
-    let mut dy = s;
-    let mut y = 1970i64;
-    loop {
-        let days = if y % 4 == 0 && (y % 100 != 0 || y % 400 == 0) { 366 } else { 365 };
-        if dy < days { break; }
-        dy -= days;
-        y += 1;
-    }
-    let leap = y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
-    let mdays: [u64; 12] = [31, if leap {29} else {28}, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    let mut mo = 0u64;
-    for &md in &mdays {
-        if dy < md { break; }
-        dy -= md;
-        mo += 1;
-    }
-    format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", y, mo + 1, dy + 1, hr, min, sec)
+    chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 fn log_info(tag: &str, msg: &str) {
@@ -1008,6 +984,18 @@ mod tests {
         assert!(html.contains("--accent"));
         assert!(!html.contains("<svg"), "web logo should be removed");
         assert!(html.contains("输入访问令牌以查看时间线"));
+    }
+
+    #[test]
+    fn log_ts_formats_current_date() {
+        let ts = log_ts();
+        assert!(
+            ts.len() == 19 && ts.chars().nth(4) == Some('-') && ts.chars().nth(10) == Some(' '),
+            "unexpected format: {}",
+            ts
+        );
+        let year = ts[..4].parse::<i32>().unwrap();
+        assert!(year >= 2025, "year out of range: {}", ts);
     }
 
     #[test]

@@ -13,6 +13,22 @@ pub fn add_and_commit(project_root: &Path, message: &str) -> Result<String> {
     Ok(hash)
 }
 
+pub fn add_and_commit_files(project_root: &Path, files: &[String], message: &str) -> Result<String> {
+    eprintln!("[debug] add_and_commit_files: root={:?}, files={:?}, message={:?}", project_root, files, message);
+    if files.is_empty() {
+        anyhow::bail!("未选择要提交的文件");
+    }
+    let mut args = vec!["add", "--"];
+    args.extend(files.iter().map(|f| f.as_str()));
+    run_git(project_root, &args)?;
+
+    run_git(project_root, &["commit", "-m", message])?;
+
+    let hash = get_current_commit_hash(project_root)?;
+    eprintln!("[debug] add_and_commit_files → hash={}", hash);
+    Ok(hash)
+}
+
 pub fn stage_files_and_commit(project_root: &Path, files: &[&str], message: &str) -> Result<String> {
     eprintln!("[debug] stage_files_and_commit: root={:?}, files={:?}, message={:?}", project_root, files, message);
     let mut args = vec!["add", "--force"];
@@ -239,6 +255,40 @@ mod tests {
         let log_output = log(&dir, 1)?;
         assert!(log_output.contains(&hash));
 
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_add_and_commit_files_commits_only_selected() -> Result<()> {
+        let dir = tmp_repo("add_and_commit_files");
+        std::fs::write(dir.join("a.txt"), b"a")?;
+        std::fs::write(dir.join("b.txt"), b"b")?;
+        add_and_commit(&dir, "base")?;
+
+        std::fs::write(dir.join("a.txt"), b"a2")?;
+        std::fs::write(dir.join("b.txt"), b"b2")?;
+
+        let hash = add_and_commit_files(&dir, &["a.txt".to_string()], "only a")?;
+        assert_eq!(hash.len(), 40);
+
+        let stat = run_git_output(&dir, &["show", "--stat", "--name-only", "--format=", &hash])?;
+        assert!(stat.contains("a.txt"));
+        assert!(!stat.contains("b.txt"), "b.txt should not be in the first commit");
+
+        let s = status(&dir)?;
+        assert!(s.contains("b.txt"), "b.txt should still be uncommitted");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_add_and_commit_files_empty_fails() -> Result<()> {
+        let dir = tmp_repo("add_and_commit_files_empty");
+        std::fs::write(dir.join("a.txt"), b"a")?;
+        add_and_commit(&dir, "base")?;
+        assert!(add_and_commit_files(&dir, &[], "x").is_err());
         std::fs::remove_dir_all(&dir)?;
         Ok(())
     }

@@ -9,8 +9,8 @@ export async function initProject(path: string): Promise<MetaConfig> {
   return invoke<MetaConfig>('init_project', { path })
 }
 
-export async function record(path: string, message: string, tag?: string | null, noPreview?: boolean): Promise<string> {
-  return invoke<string>('record', { path, message, tag: tag ?? null, noPreview: noPreview ?? false })
+export async function record(path: string, message: string, tag?: string | null, noPreview?: boolean, files?: string[] | null): Promise<string> {
+  return invoke<string>('record', { path, message, tag: tag ?? null, noPreview: noPreview ?? false, files: files ?? null })
 }
 
 export async function push(path: string): Promise<void> {
