@@ -1,4 +1,4 @@
-use crate::three_assets;
+﻿use crate::three_assets;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -272,29 +272,59 @@ fn check_browser_static_auth(
 // --- Login page ---
 
 fn login_page_html(project_name: &str) -> String {
-    format!(r#"<!DOCTYPE html>
+    format!(r##"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Keinestamp 登录</title>
+<script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
 <style>
+:root{{
+--bg:#f4f6f8;--surface:#ffffff;--border:#e3e7ed;--text:#1e2833;--text-dim:#6b7684;
+--accent:#d94747;--accent-hover:#c63b3b;--accent-soft:#fbeded;
+--shadow-lg:0 16px 48px rgba(30,40,51,0.18);
+}}
+[data-theme="night"]{{
+--bg:#141d18;--surface:#1b2620;--border:#3b4f45;--text:#f4faf6;--text-dim:#bccac4;
+--accent:#ec6262;--accent-hover:#d94f4f;--accent-soft:#4a2b2d;
+--shadow-lg:0 16px 48px rgba(0,0,0,0.55);
+}}
 *{{box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a2e;color:#eee}}
-.card{{background:#16213e;padding:40px;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.4);text-align:center;width:340px}}
-h1{{font-size:20px;margin-bottom:24px;font-weight:600}}
-p{{font-size:13px;color:#999;margin-bottom:20px}}
-input{{width:100%;padding:10px 14px;border:1px solid #333;border-radius:8px;background:#0f3460;color:#eee;font-size:14px;outline:none;transition:border-color .2s}}
-input:focus{{border-color:#7c3aed}}
-button{{margin-top:16px;padding:10px 32px;border:none;border-radius:8px;background:#7c3aed;color:#fff;font-size:14px;cursor:pointer;width:100%;transition:background .2s}}
-button:hover{{background:#6d28d9}}
-.error{{color:#f87171;font-size:13px;margin-top:12px;display:none}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--text)}}
+.card{{background:var(--surface);border:1px solid var(--border);padding:40px 36px 32px;border-radius:14px;box-shadow:var(--shadow-lg);text-align:center;width:340px}}
+.brand{{display:flex;justify-content:center;margin-bottom:20px}}
+.brand svg{{width:40px;height:40px}}
+h1{{font-size:20px;margin:0 0 4px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.sub{{font-size:13px;color:var(--text-dim);margin-bottom:24px}}
+input{{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}}
+input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}}
+button{{margin-top:16px;padding:10px 32px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;transition:background .15s}}
+button:hover{{background:var(--accent-hover)}}
+.error{{color:var(--accent);font-size:13px;margin-top:12px;display:none}}
 </style>
 </head>
 <body>
 <div class="card">
-  <h1>Keinestamp</h1>
-  <p>输入访问令牌以查看时间线</p>
+  <div class="brand">
+    <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M28 22 C44 14, 56 14, 72 22 C84 34, 84 66, 72 78 C56 86, 44 86, 28 78 C16 66, 16 34, 28 22Z" fill="#D94747"/>
+      <path d="M33 28 C22 40, 22 60, 33 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <path d="M44 24 C32 40, 32 60, 44 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <path d="M56 24 C44 40, 44 60, 56 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <path d="M67 28 C56 40, 56 60, 67 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+      <circle cx="40" cy="40" r="3" fill="#FFE3E3"/>
+      <circle cx="44" cy="55" r="3.5" fill="#9FC3E3"/>
+      <circle cx="50" cy="70" r="3" fill="#FFE3E3"/>
+      <circle cx="52" cy="38" r="3.5" fill="#9FC3E3"/>
+      <circle cx="58" cy="53" r="3" fill="#FFE3E3"/>
+      <circle cx="62" cy="68" r="3.5" fill="#9FC3E3"/>
+      <path d="M46 16 C48 10, 52 6, 58 8" stroke="#E8B4B4" stroke-width="3" fill="none" stroke-linecap="round"/>
+      <path d="M58 8 C62 6, 64 8, 66 7" stroke="#E8B4B4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+    </svg>
+  </div>
+  <h1>{project}</h1>
+  <div class="sub">输入访问令牌以查看时间线</div>
   <form method="post" action="/{project}/login">
     <input type="password" name="token" placeholder="访问令牌" required autofocus id="token-input" />
     <button type="submit">确认</button>
@@ -313,7 +343,7 @@ button:hover{{background:#6d28d9}}
 }})();
 </script>
 </body>
-</html>"#, project = project_name)
+</html>"##, project = project_name)
 }
 
 fn serve_login_page(request: tiny_http::Request, project_name: &str) -> Result<()> {
@@ -917,6 +947,17 @@ mod tests {
         assert_eq!(sanitize_project_name("芙姆米"), "");
         assert_eq!(sanitize_project_name("My-Proj_2"), "My-Proj_2");
         assert_eq!(sanitize_project_name(&"a".repeat(80)), "a".repeat(64));
+    }
+
+    #[test]
+    fn login_page_has_theme_brand_and_project() {
+        let html = login_page_html("my_proj");
+        assert!(html.contains("data-theme"));
+        assert!(html.contains("keinestamp_web_theme"));
+        assert!(html.contains("my_proj"));
+        assert!(html.contains("--accent"));
+        assert!(html.contains("svg"));
+        assert!(html.contains("输入访问令牌以查看时间线"));
     }
 
     #[test]

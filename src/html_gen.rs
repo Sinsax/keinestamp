@@ -1,4 +1,4 @@
-use crate::timeline::Timeline;
+﻿use crate::timeline::Timeline;
 use crate::three_assets;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -89,7 +89,7 @@ pub fn generate_index_html(
 
 
 
-const TEMPLATE: &str = r#"<!DOCTYPE html>
+const TEMPLATE: &str = r##"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -109,9 +109,11 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
   --accent: #d94747; --accent-soft: #fbeded;
   --blue: #2e4a6b; --blue-soft: #ebf1f7;
   --ze: #3e6b52; --ze-soft: #eaf2ec;
+  --ice: #7fa8ce; --ice-soft: #eff5fb;
   --warning: #b0803a; --error: #c94343; --warning-soft: rgba(176,128,58,0.12);
   --card-active: #fffdfd;
   --shadow-sm: 0 1px 2px rgba(30,40,51,0.06);
+  --shadow-hover: 0 4px 12px rgba(30,40,51,0.10);
 }
 [data-theme="night"] {
   --bg: #141d18; --surface: #1b2620; --surface2: #273830; --surface3: #35483e;
@@ -119,9 +121,11 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
   --accent: #ec6262; --accent-soft: #4a2b2d;
   --blue: #6fc49a; --blue-soft: #24392f;
   --ze: #63b58b; --ze-soft: #223a2e;
+  --ice: #c3ecd4; --ice-soft: #25362e;
   --warning: #ddb25e; --error: #e96868; --warning-soft: rgba(221,178,94,0.18);
   --card-active: #233129;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-hover: 0 4px 12px rgba(0,0,0,0.45);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
@@ -129,8 +133,10 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .left-col { width: 270px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
 .right-col { flex: 1; min-width: 0; max-width: 800px; margin: 0 auto; padding: 40px 24px; }
 h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
-.subtitle { color: var(--text-dim); margin-bottom: 32px; }
-.entry { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); }
+.subtitle { color: var(--text-dim); margin-bottom: 32px; padding-bottom: 16px; }
+.subtitle::after { content: ''; display: block; height: 2px; margin-top: 16px; border-radius: 1px; background: linear-gradient(to right, var(--accent), transparent); }
+.entry { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.entry:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
 .entry.tagged { border-left-color: var(--tag-color, var(--accent)); }
 .entry-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .entry-id { font-size: 12px; color: var(--text-dim); font-family: monospace; }
@@ -138,13 +144,14 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .entry-message { font-size: 16px; font-weight: 500; margin-bottom: 8px; color: var(--text); }
 .tag-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: color-mix(in srgb, var(--tag-c) 45%, var(--text)); background: color-mix(in srgb, var(--tag-c) 14%, transparent); }
 .entry-files { margin-top: 6px; }
-.empty { text-align: center; color: var(--text-dim); padding: 60px 0; font-size: 16px; }
+.empty { text-align: center; color: var(--text-dim); padding: 80px 0; font-size: 15px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.empty-icon { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; background: var(--ice-soft); border-radius: 50%; color: var(--ice); }
 .tag-group { display: flex; align-items: center; gap: 8px; margin: 20px 0 8px; }
 .tag-group-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .tag-group-label { font-size: 13px; font-weight: 700; color: var(--text); }
 .tag-group-line { flex: 1; height: 1px; background: var(--border); }
 
-.sec-hdr { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 0; font-size: 12px; font-weight: 600; color: var(--text-dim); cursor: pointer; user-select: none; border-top: 1px solid var(--border); }
+.sec-hdr { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 0; font-size: 12px; font-weight: 600; color: var(--text-dim); cursor: pointer; user-select: none; border-top: 1px solid var(--border); transition: color .15s ease; }
 .sec-hdr:hover { color: var(--text); }
 .sec-hdr .arr { font-size: 9px; width: 10px; flex-shrink: 0; }
 .sec-body { padding: 4px 0 2px 16px; font-size: 13px; }
@@ -167,6 +174,7 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .dl.del .dl-num { color: var(--error); }
 .dl.mod { background: var(--blue-soft); color: var(--blue); }
 .dl.mod .dl-num { color: var(--blue); }
+.dl:hover { filter: brightness(1.15); }
 .cal { }
 .cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .cal-title { font-size: 14px; font-weight: 700; color: var(--text); }
@@ -211,6 +219,24 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 <body>
 <div class="page">
   <div class="left-col">
+    <div class="brand">
+      <svg viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M28 22 C44 14, 56 14, 72 22 C84 34, 84 66, 72 78 C56 86, 44 86, 28 78 C16 66, 16 34, 28 22Z" fill="#D94747"/>
+        <path d="M33 28 C22 40, 22 60, 33 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+        <path d="M44 24 C32 40, 32 60, 44 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+        <path d="M56 24 C44 40, 44 60, 56 76" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+        <path d="M67 28 C56 40, 56 60, 67 72" stroke="#B03030" stroke-width="2.5" fill="none" opacity="0.35"/>
+        <circle cx="40" cy="40" r="3" fill="#FFE3E3"/>
+        <circle cx="44" cy="55" r="3.5" fill="#9FC3E3"/>
+        <circle cx="50" cy="70" r="3" fill="#FFE3E3"/>
+        <circle cx="52" cy="38" r="3.5" fill="#9FC3E3"/>
+        <circle cx="58" cy="53" r="3" fill="#FFE3E3"/>
+        <circle cx="62" cy="68" r="3.5" fill="#9FC3E3"/>
+        <path d="M46 16 C48 10, 52 6, 58 8" stroke="#E8B4B4" stroke-width="3" fill="none" stroke-linecap="round"/>
+        <path d="M58 8 C62 6, 64 8, 66 7" stroke="#E8B4B4" stroke-width="2.5" fill="none" stroke-linecap="round"/>
+      </svg>
+      <span class="brand-name">{{PAGE_TITLE}}</span>
+    </div>
     <div id="cal-sidebar"></div>
     <div class="left-footer">
       <button id="theme-toggle" class="left-footer-btn" style="margin-top:6px">☀ 切换日/夜</button>
@@ -380,7 +406,7 @@ function render() {
       h += '</div>';
     });
   } else {
-    h += '<div class="empty">No progress entries yet</div>';
+    h += '<div class="empty"><div class="empty-icon"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>暂无记录</div>';
   }
   document.getElementById('app').innerHTML = h;
 }
@@ -813,7 +839,7 @@ renderCalendar();
 initModelsLazy();
 </script>
 </body>
-</html>"#;
+</html>"##;
 
 #[cfg(test)]
 mod tests {
@@ -834,7 +860,8 @@ mod tests {
 
         let html = std::fs::read_to_string(dir.join("index.html"))?;
         assert!(html.contains("Test Project"));
-        assert!(html.contains("No progress entries yet"));
+        assert!(html.contains("暂无记录"));
+        assert!(html.contains("empty-icon"));
         assert!(html.contains("var diffsData = {}"));
 
         std::fs::remove_dir_all(&dir)?;

@@ -153,7 +153,7 @@ All in `frontend/src/`. Key files:
 - **Day/night dual theme**: Day = 人形 (white bg + deep blue + ice blue + red), Night = 白泽 (green-black bg + dark green + green-white + red). `[data-theme="night"]` override block at end of app.scss. Manual ☀/🌙 toggle, localStorage key `keinestamp_theme` (desktop) / `keinestamp_web_theme` (web). Inline pre-read script in `frontend/index.html` head prevents white flash. No system-follow, no animations.
 - **Theme toggle location**: ☀/🌙 sits in ProjectTabs fixed right actions area; TitleBar is pure window controls (no theme button).
 - **Tag badges**: inline `--tag-c` + CSS `color-mix` — auto-adapts to both themes, no `tagSoft`.
-- **Web page theme**: `html_gen.rs` template has `:root`/`[data-theme="night"]` dual palettes; 3D viewer and calendar heat colors stay dark/hardcoded.
+- **Web page theme**: `html_gen.rs` template has `:root`/`[data-theme="night"]` dual palettes; 3D viewer and calendar heat colors stay dark/hardcoded. Login page (`serve.rs login_page_html`) uses the same dual palettes and shares the `keinestamp_web_theme` localStorage key (same origin → theme carries over between login and timeline pages). Timeline page extras: sidebar brand area (red-white logo + project name), entry card hover lift, empty state with ice-blue clock icon, diff-row hover brightness.
 
 ## Integration tests
 
