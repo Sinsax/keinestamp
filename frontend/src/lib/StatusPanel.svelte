@@ -18,8 +18,29 @@
   const files = $derived(parseStatus(statusOutput))
   const statusMap = $derived(Object.fromEntries(files.map((f) => [f.path, f])) as Record<string, StatusFile>)
   const tree = $derived(buildFileTree(files.map((f) => f.path)))
-  const selectedCount = $derived(selection === null ? files.length : selection.filter((p) => files.some((f) => f.path === p)).length)
+  const fileSet = $derived(new Set(files.map((f) => f.path)))
+  const selectionSet = $derived(selection === null ? null : new Set(selection))
+  const selectedCount = $derived(selection === null ? files.length : selection.filter((p) => fileSet.has(p)).length)
   const allSelected = $derived(selection === null || selectedCount === files.length)
+
+  const dirFilesMap = $derived.by(() => {
+    const map: Record<string, string[]> = {}
+    const walk = (nodes: FileTreeNode[]) => {
+      for (const n of nodes) {
+        if (n.children.length === 0) continue
+        const collected: string[] = []
+        const collect = (nn: FileTreeNode) => {
+          if (nn.children.length === 0) collected.push(nn.path)
+          else nn.children.forEach(collect)
+        }
+        collect(n)
+        map[n.path] = collected
+        walk(n.children)
+      }
+    }
+    walk(tree)
+    return map
+  })
 
   let collapsedDirs = $state<Set<string>>(new Set())
 
@@ -35,7 +56,7 @@
   }
 
   function isChecked(path: string): boolean {
-    return selection === null || selection.includes(path)
+    return selectionSet === null || selectionSet.has(path)
   }
 
   function toggleFile(path: string) {
@@ -54,29 +75,18 @@
     }
   }
 
-  function collectFiles(node: FileTreeNode): string[] {
-    const out: string[] = []
-    const walk = (n: FileTreeNode) => {
-      if (n.children.length === 0) out.push(n.path)
-      else n.children.forEach(walk)
-    }
-    walk(node)
-    return out
-  }
-
   function dirState(node: FileTreeNode): 'all' | 'none' | 'partial' {
-    const fs = collectFiles(node)
-    const sel = selection === null ? files.map((f) => f.path) : selection
-    const selSet = new Set(sel)
+    const fs = dirFilesMap[node.path] || []
+    if (selection === null) return fs.length === 0 ? 'none' : 'all'
     let count = 0
-    for (const p of fs) if (selSet.has(p)) count++
+    for (const p of fs) if (selection.includes(p)) count++
     if (count === 0) return 'none'
     if (count === fs.length) return 'all'
     return 'partial'
   }
 
   function toggleDir(node: FileTreeNode) {
-    const fs = collectFiles(node)
+    const fs = dirFilesMap[node.path] || []
     const base = selection === null ? files.map((f) => f.path) : [...selection]
     const baseSet = new Set(base)
     const allIn = fs.every((p) => baseSet.has(p))
