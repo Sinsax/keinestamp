@@ -21,12 +21,20 @@ pub fn deploy_to_server(
     })?;
     eprintln!("[debug] deploy_to_server: zip size={} bytes", zip_bytes.len());
 
+    let sanitized_name = crate::serve::sanitize_project_name(project_name);
+    let safe_project_name = if sanitized_name.is_empty() {
+        let suffix = &project_id[..8.min(project_id.len())];
+        format!("project{}", suffix)
+    } else {
+        sanitized_name
+    };
+
     let upload_url = format!("{}/upload", server_url.trim_end_matches('/'));
     eprintln!("[debug] deploy_to_server: posting to {}", upload_url);
 
     let mut req = ureq::post(&upload_url)
         .set("Content-Type", "application/zip")
-        .set("X-Project-Name", project_name)
+        .set("X-Project-Name", &safe_project_name)
         .set("X-Project-Id", project_id);
 
     if let Some(token) = deploy_token {
@@ -109,4 +117,40 @@ fn add_dir_to_zip(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn safe_name(project_name: &str, project_id: &str) -> String {
+        let sanitized = crate::serve::sanitize_project_name(project_name);
+        if sanitized.is_empty() {
+            let suffix = &project_id[..8.min(project_id.len())];
+            format!("project{}", suffix)
+        } else {
+            sanitized
+        }
+    }
+
+    #[test]
+    fn sanitize_keeps_ascii() {
+        assert_eq!(safe_name("33_芙姆米_新1皮", "deadbeef1234"), "33__1");
+    }
+
+    #[test]
+    fn sanitize_all_chinese_falls_back_to_project_id() {
+        assert_eq!(safe_name("芙姆米", "deadbeef1234"), "projectdeadbeef");
+    }
+
+    #[test]
+    fn sanitize_truncates_at_64() {
+        let long = "a".repeat(80);
+        assert_eq!(safe_name(&long, "deadbeef"), "a".repeat(64));
+    }
+
+    #[test]
+    fn sanitize_empty_name_falls_back() {
+        assert_eq!(safe_name("", "deadbeef"), "projectdeadbeef");
+    }
 }

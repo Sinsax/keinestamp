@@ -323,9 +323,9 @@ fn serve_login_page(request: tiny_http::Request, project_name: &str) -> Result<(
     Ok(())
 }
 
-fn sanitize_project_name(name: &str) -> String {
+pub fn sanitize_project_name(name: &str) -> String {
     name.chars()
-        .filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_')
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
         .take(64)
         .collect()
 }
@@ -521,7 +521,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
             None => (trimmed, "/"),
         };
 
-        if project_name.is_empty() || !project_name.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if project_name.is_empty() || !project_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
             continue;
         }
@@ -910,6 +910,14 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_project_name_filters_unicode() {
+        assert_eq!(sanitize_project_name("33_芙姆米_新1皮"), "33__1");
+        assert_eq!(sanitize_project_name("芙姆米"), "");
+        assert_eq!(sanitize_project_name("My-Proj_2"), "My-Proj_2");
+        assert_eq!(sanitize_project_name(&"a".repeat(80)), "a".repeat(64));
+    }
 
     #[test]
     fn test_load_config() -> Result<()> {
