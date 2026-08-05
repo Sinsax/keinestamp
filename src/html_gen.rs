@@ -115,7 +115,7 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
 }
 [data-theme="night"] {
   --bg: #141d18; --surface: #1b2620; --surface2: #273830; --surface3: #35483e;
-  --border: #3b4f45; --text: #eef6f1; --text-dim: #9fb5ac; --text-2: #c2d2ca;
+  --border: #3b4f45; --text: #f4faf6; --text-dim: #bccac4; --text-2: #c9d6d0;
   --accent: #ec6262; --accent-soft: #4a2b2d;
   --blue: #6fc49a; --blue-soft: #24392f;
   --ze: #63b58b; --ze-soft: #223a2e;
