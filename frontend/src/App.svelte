@@ -211,6 +211,7 @@
       await api.deploy(activePath)
       pushToast('部署成功', 'success')
       await testConnection()
+      await loadProject(activePath)
       statusText = '部署完成'
     } catch (e: any) {
       pushToast(`部署失败: ${e}`, 'error')

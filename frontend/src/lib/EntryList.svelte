@@ -236,14 +236,15 @@
 </script>
 
 <div class="entries">
-  {#if entries.length === 0}
-    <div class="empty-state">
-      <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>
-<div>暂无记录</div>
-              <div style="font-size:12px">使用记录按钮记录进度</div>
-    </div>
-  {:else}
-    {#each grouped as g (g.entry.id)}
+  <div class="entries-scroll">
+    {#if entries.length === 0}
+      <div class="empty-state">
+        <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>
+        <div>暂无记录</div>
+        <div style="font-size:12px">使用记录按钮记录进度</div>
+      </div>
+    {:else}
+      {#each grouped as g (g.entry.id)}
       {@const entry = g.entry}
       {@const entryTag = entry.tag || null}
       {@const textF = entry.files.map((f, i) => ({ file: f, status: entry.file_status?.[i] || '', idx: i })).filter(x => !x.file.endsWith('.blend') && x.status !== 'A')}
@@ -342,7 +343,8 @@
         {/if}
       </div>
     {/each}
-  {/if}
+    {/if}
+  </div>
   <div class="entries-footer">
     <div class="at-section">
       <label>网页名称</label>
@@ -521,9 +523,10 @@
     background: color-mix(in srgb, var(--tag-c) 14%, transparent);
   }
   .entries-footer {
-    padding: 10px 0 4px;
+    flex-shrink: 0;
+    padding: 10px 10px 6px;
     border-top: 1px solid var(--border);
-    margin-top: 8px;
+    background: var(--surface);
   }
   .at-section label {
     display: block;
