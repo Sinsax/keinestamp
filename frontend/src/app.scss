@@ -302,28 +302,28 @@ input:focus, textarea:focus, select:focus {
 
 /* ---- 夜间模式（白泽形态） ---- */
 [data-theme="night"] {
-  --accent: #e05555;
-  --accent-hover: #c94545;
-  --accent-soft: #3a2424;
-  --blue: #5fae8a;
-  --blue-soft: #1e2e26;
-  --ze: #57a07f;
-  --ze-hover: #4a8f70;
-  --ze-soft: #1e2e26;
-  --ice: #b8e6c8;
-  --ice-soft: #1f2d26;
+  --accent: #ec6262;
+  --accent-hover: #d94f4f;
+  --accent-soft: #4a2b2d;
+  --blue: #6fc49a;
+  --blue-soft: #24392f;
+  --ze: #63b58b;
+  --ze-hover: #549f7a;
+  --ze-soft: #223a2e;
+  --ice: #c3ecd4;
+  --ice-soft: #25362e;
   --bg: #141d18;
   --surface: #1b2620;
-  --surface2: #22302a;
-  --surface3: #2c3d35;
-  --border: #2e3f37;
-  --text: #e8f2ec;
-  --text-dim: #93a8a0;
-  --success: #57a07f;
-  --warning: #d4a04d;
-  --error: #e05c5c;
-  --card-active: #1f2c25;
-  --warning-soft: rgba(212, 160, 77, 0.14);
+  --surface2: #273830;
+  --surface3: #35483e;
+  --border: #3b4f45;
+  --text: #eef6f1;
+  --text-dim: #9fb5ac;
+  --success: #63b58b;
+  --warning: #ddb25e;
+  --error: #e96868;
+  --card-active: #233129;
+  --warning-soft: rgba(221, 178, 94, 0.18);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);

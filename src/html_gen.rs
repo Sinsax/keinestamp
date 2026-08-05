@@ -114,13 +114,13 @@ const TEMPLATE: &str = r#"<!DOCTYPE html>
   --shadow-sm: 0 1px 2px rgba(30,40,51,0.06);
 }
 [data-theme="night"] {
-  --bg: #141d18; --surface: #1b2620; --surface2: #22302a; --surface3: #2c3d35;
-  --border: #2e3f37; --text: #e8f2ec; --text-dim: #93a8a0; --text-2: #b5c4bc;
-  --accent: #e05555; --accent-soft: #3a2424;
-  --blue: #5fae8a; --blue-soft: #1e2e26;
-  --ze: #57a07f; --ze-soft: #1e2e26;
-  --warning: #d4a04d; --error: #e05c5c; --warning-soft: rgba(212,160,77,0.14);
-  --card-active: #1f2c25;
+  --bg: #141d18; --surface: #1b2620; --surface2: #273830; --surface3: #35483e;
+  --border: #3b4f45; --text: #eef6f1; --text-dim: #9fb5ac; --text-2: #c2d2ca;
+  --accent: #ec6262; --accent-soft: #4a2b2d;
+  --blue: #6fc49a; --blue-soft: #24392f;
+  --ze: #63b58b; --ze-soft: #223a2e;
+  --warning: #ddb25e; --error: #e96868; --warning-soft: rgba(221,178,94,0.18);
+  --card-active: #233129;
   --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
