@@ -3,10 +3,7 @@ export interface MetaConfig {
   init_time: string
   project_root: string
   web_root: string
-  web_remote: string | null
-  web_push_enabled: boolean
   access_token: string | null
-  auto_connect: boolean
   project_id: string | null
   site_name: string | null
   site_locked: boolean

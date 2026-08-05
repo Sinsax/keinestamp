@@ -15,11 +15,7 @@ pub struct MetaConfig {
     #[serde(default, skip_serializing_if = "is_default_path")]
     pub web_root: PathBuf,
     #[serde(default)]
-    pub web_remote: Option<String>,
-    #[serde(default)]
     pub access_token: Option<String>,
-    #[serde(default)]
-    pub auto_connect: bool,
     #[serde(default)]
     pub project_id: Option<String>,
     #[serde(default)]
@@ -36,9 +32,7 @@ impl MetaConfig {
             init_time: chrono::Utc::now().to_rfc3339(),
             project_root,
             web_root,
-            web_remote: None,
             access_token: Some(generate_access_token()),
-            auto_connect: false,
             project_id: Some(generate_project_id()),
             site_name: None,
             site_locked: false,
@@ -53,9 +47,7 @@ impl Default for MetaConfig {
             init_time: String::new(),
             project_root: PathBuf::new(),
             web_root: PathBuf::new(),
-            web_remote: None,
             access_token: None,
-            auto_connect: false,
             project_id: None,
             site_name: None,
             site_locked: false,

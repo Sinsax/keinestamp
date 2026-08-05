@@ -385,12 +385,11 @@ fn cmd_serve(path: &Path, port: u16, host: &str, config_path: Option<&Path>) -> 
         if serve_toml.exists() {
             keinestamp::serve::load_config(&serve_toml)?
         } else {
-            let meta_path = keinestamp::config::meta_path(path);
-            let web_root = if meta_path.exists() {
-                keinestamp::config::read_meta(&meta_path)?.web_root
-            } else {
-                path.to_path_buf()
-            };
+            let exe_dir = std::env::current_exe()
+                .ok()
+                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+                .unwrap_or_else(|| path.to_path_buf());
+            let web_root = exe_dir.join("web-root");
             keinestamp::serve::auto_generate_config(&serve_toml, port, host, &web_root)?
         }
     };
@@ -455,13 +454,10 @@ fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
     println!("  工程根目录:     {}", meta.project_root.display());
     println!("  网页输出目录:   {}", meta.web_root.display());
 
-    if let Some(ref remote) = meta.web_remote {
-        println!("  网页远端:       {}", remote);
-    } else {
-        println!("  网页远端:       (未设置)");
-    }
-
-    println!("  自动连接:       {}", if meta.auto_connect { "是" } else { "否" });
+    println!(
+        "  自动连接:       {}",
+        if keinestamp::app_config::get_auto_connect() { "是" } else { "否" }
+    );
 
     if let Some(ref token) = meta.access_token {
         println!("  访问令牌:       {}****", &token[..4.min(token.len())]);
@@ -474,7 +470,7 @@ fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
 
 fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
     let equal_pos = kv.find('=').ok_or_else(|| {
-        anyhow::anyhow!("格式错误，请使用 key=value 格式，例如 web_remote=https://example.com")
+        anyhow::anyhow!("格式错误，请使用 key=value 格式，例如 access_token=abc123")
     })?;
 
     let key = &kv[..equal_pos];
@@ -485,19 +481,16 @@ fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
     let mut meta = keinestamp::config::read_meta(&meta_path)?;
 
     match key {
-        "web_remote" => {
-            meta.web_remote = value.filter(|s| !s.is_empty()).map(|s| s.to_string());
-        }
         "access_token" => {
             meta.access_token = value.map(|s| s.to_string());
         }
         "auto_connect" => {
             let v = value.unwrap_or("false");
-            meta.auto_connect = v == "true" || v == "1" || v == "yes";
+            keinestamp::app_config::set_auto_connect(v == "true" || v == "1" || v == "yes");
         }
         _ => {
             anyhow::bail!(
-                "未知配置项: {}。可用项: web_remote, access_token, auto_connect",
+                "未知配置项: {}。可用项: access_token, auto_connect（软件级）",
                 key
             );
         }

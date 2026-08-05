@@ -30,9 +30,10 @@ Build order (crate): config → detect → init → git_project → git_web → 
 - **revert guard**: Checks commit count >= 2 before `reset --soft HEAD~1`. `get_commit_count()` in git_project.
 - **pull**: Always `git pull --rebase` to avoid merge commits.
 - **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.
-- **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `access_token`, `auto_connect`, `project_id`, `site_name`, `site_locked`. Old fields silently ignored via `#[serde(default)]`. `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server. `site_name` (ASCII `[A-Za-z0-9-_]` only, URL prefix / `X-Project-Name`) locks permanently after first deploy (`site_locked = true`); `config::resolve_site_name()` picks `site_name` → sanitized folder name → `project<id前8>` fallback, shared by deploy + jump button.
-- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. `deploy_token` is used by the app to authenticate with the server for upload/health.
-- **auto_connect**: When true, app tests server connection on project load.
+- **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `access_token`, `project_id`, `site_name`, `site_locked`. Old fields silently ignored via `#[serde(default)]` (`web_remote`/`auto_connect` removed — legacy `web_remote` was a never-effective web git remote, and `auto_connect` moved to AppConfig). `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server. `site_name` (ASCII `[A-Za-z0-9-_]` only, URL prefix / `X-Project-Name`) locks permanently after first deploy (`site_locked = true`); `config::resolve_site_name()` picks `site_name` → sanitized folder name → `project<id前8>` fallback, shared by deploy + jump button.
+- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. Server connection settings are all app-level: `deploy_token` authenticates upload/health, `deploy_server_url` is the server address, `auto_connect` is the global auto-test-on-load switch.
+- **auto_connect**: App-level (AppConfig). When true, app tests server connection on every project load. GUI: SettingsDialog checkbox; Tauri commands `get_auto_connect`/`set_auto_connect`; CLI `config auto_connect=` writes app config.
+- **serve web_root default**: Auto-generated `serve.toml` uses `<exe_dir>/web-root/` (stable, not CWD); explicit `web_root` in `serve.toml` or `--config` overrides. Deployed sites land in `web_root/<site_name>/`, shared three.js in `web_root/_three/`.
 - **Atomic writes**: Temp file + rename (name includes PID + target filename).
 - **init idempotent**: Re-init fills gaps, does not overwrite `init_time`.
 - **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands.
@@ -98,7 +99,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (28)
+### Tauri commands (30)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -113,7 +114,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `has_remote` | `bool` | checks git `origin` only |
 | `revert` | `()` | error `"no commits to revert"` < 2 commits |
 | `status` | `{clean, output}` | |
-| `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching; `site_name` key validates ASCII `[A-Za-z0-9-_]` and rejects when locked |
+| `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching (`access_token`, `site_name`); `site_name` key validates ASCII `[A-Za-z0-9-_]` and rejects when locked |
 | `get_timeline` | `Timeline` | resolves preview paths to absolute |
 | `get_recent` / `add_recent` / `remove_recent` | recent mgmt | |
 | `open_folder` / `open_web_timeline` / `open_site` | `()` | platform-specific shell cmds; `open_site(url)` requires http(s):// prefix |
@@ -126,6 +127,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `list_blender_versions` / `list_installed_blender_versions` | `String[]` | |
 | `get_blender_path` / `set_blender_path` | `String` / `()` | AppConfig |
 | `get_deploy_token` / `set_deploy_token` | `String` / `()` | AppConfig deploy_token |
+| `get_auto_connect` / `set_auto_connect` | `bool` / `()` | AppConfig auto_connect |
 
 ### Frontend components
 

@@ -207,7 +207,6 @@ fn deploy(path: String) -> Result<(), String> {
     }
 
     let server = keinestamp::app_config::get_deploy_server_url()
-        .or_else(|| meta.web_remote.clone())
         .filter(|s| !s.is_empty());
 
     if let Some(ref server) = server {
@@ -405,15 +404,8 @@ fn update_config(
     let mut meta = map_err(keinestamp::config::read_meta(&meta_path))?;
 
     match key.as_str() {
-        "web_remote" => {
-            meta.web_remote = value.filter(|s| !s.is_empty());
-        }
         "access_token" => {
             meta.access_token = value;
-        }
-        "auto_connect" => {
-            let v = value.as_deref().unwrap_or("false");
-            meta.auto_connect = v == "true" || v == "1" || v == "yes";
         }
         "site_name" => {
             if meta.site_locked {
@@ -425,7 +417,7 @@ fn update_config(
             }
             meta.site_name = v;
         }
-        _ => return Err(format!("unknown config key: {key}. Available: web_remote, access_token, auto_connect, site_name")),
+        _ => return Err(format!("unknown config key: {key}. Available: access_token, site_name")),
     }
 
     map_err(keinestamp::config::write_meta(&meta_path, &meta))
@@ -728,6 +720,18 @@ fn set_deploy_token(token: String) {
 }
 
 #[tauri::command]
+fn get_auto_connect() -> bool {
+    eprintln!("[debug] get_auto_connect()");
+    keinestamp::app_config::get_auto_connect()
+}
+
+#[tauri::command]
+fn set_auto_connect(enabled: bool) {
+    eprintln!("[debug] set_auto_connect({})", enabled);
+    keinestamp::app_config::set_auto_connect(enabled);
+}
+
+#[tauri::command]
 fn get_deploy_server_url() -> String {
     eprintln!("[debug] get_deploy_server_url()");
     keinestamp::app_config::get_deploy_server_url().unwrap_or_default()
@@ -833,6 +837,8 @@ pub fn run() {
             set_deploy_token,
             get_deploy_server_url,
             set_deploy_server_url,
+            get_auto_connect,
+            set_auto_connect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

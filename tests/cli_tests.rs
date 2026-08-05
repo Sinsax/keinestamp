@@ -104,14 +104,14 @@ fn test_init_then_config_set() {
         "config",
         &dir.to_string_lossy(),
         "--set",
-        "web_remote=https://gitea.example.com/user/project-web.git",
+        "access_token=abcdef1234567890",
     ]);
     assert!(ok, "config set failed: {}", out);
     assert!(out.contains("已更新"));
 
     let (out, ok) = run(&["config", &dir.to_string_lossy()]);
     assert!(ok, "config show failed: {}", out);
-    assert!(out.contains("https://gitea.example.com/user/project-web.git"));
+    assert!(out.contains("abcd****"));
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

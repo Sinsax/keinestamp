@@ -28,7 +28,6 @@
   let testing = $state(false)
   let connectStatus = $state<'none' | 'ok' | 'fail'>('none')
   let savedFeedback = $state(false)
-  let hasProject = $derived(!!path)
 
   $effect(() => {
     if (cachedVersions.length > 0 && versions.length === 0) {
@@ -42,16 +41,9 @@
       try {
         deployToken = await api.getDeployToken()
         webRemote = await api.getDeployServerUrl()
+        autoConnect = await api.getAutoConnect()
       } catch { /* ignore */ }
     })()
-    if (hasProject) {
-      (async () => {
-        try {
-          const cfg = await api.readConfig(path)
-          autoConnect = cfg.auto_connect
-        } catch { /* ignore */ }
-      })()
-    }
 
     if (versions.length > 0 && !selectedVersion) {
       selectedVersion = versions[0]
@@ -128,9 +120,7 @@
     try {
       await api.setDeployToken(deployToken)
       await api.setDeployServerUrl(webRemote)
-      if (hasProject) {
-        await api.updateConfig(path, 'auto_connect', autoConnect ? 'true' : 'false')
-      }
+      await api.setAutoConnect(autoConnect)
       savedFeedback = true
       setTimeout(() => savedFeedback = false, 2000)
     } catch { /* ignore */ }
@@ -215,14 +205,12 @@
           <input type="password" bind:value={deployToken} placeholder="可选" />
           <span class="hint">用于 App 上传认证（Bearer Token），保存在本机</span>
         </div>
-        {#if hasProject}
         <div class="field toggle-field">
           <label>
             <input type="checkbox" bind:checked={autoConnect} />
-            下次自动连接
+            打开项目时自动测试连接（软件级设置）
           </label>
         </div>
-        {/if}
       </div>
 
     <div class="actions">

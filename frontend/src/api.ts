@@ -140,3 +140,11 @@ export async function getDeployServerUrl(): Promise<string> {
 export async function setDeployServerUrl(url: string): Promise<void> {
   return invoke<void>('set_deploy_server_url', { url })
 }
+
+export async function getAutoConnect(): Promise<boolean> {
+  return invoke<boolean>('get_auto_connect')
+}
+
+export async function setAutoConnect(enabled: boolean): Promise<void> {
+  return invoke<void>('set_auto_connect', { enabled })
+}

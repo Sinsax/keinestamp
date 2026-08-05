@@ -140,14 +140,14 @@
       const pt = await api.detect(path)
       projectType = pt
       if (pt === 'initialized') {
-        const [timeline, cfg] = await Promise.all([api.getTimeline(path), api.readConfig(path)])
+        const [timeline, cfg, autoConn] = await Promise.all([api.getTimeline(path), api.readConfig(path), api.getAutoConnect()])
         entries = timeline.entries.toReversed()
         hasRemote = await api.hasRemote(path)
         accessToken = cfg.access_token || ''
         siteName = cfg.site_name || ''
         siteLocked = cfg.site_locked
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
-        if (cfg.auto_connect) {
+        if (autoConn) {
           testConnection()
         }
       } else {
