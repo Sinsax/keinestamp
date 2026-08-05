@@ -45,6 +45,7 @@
   let siteName = $state('')
   let siteLocked = $state(false)
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
+  let commitSelection = $state<string[] | null>(null)
   let deploying = $state(false)
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
@@ -149,6 +150,7 @@
   }
 
   let deployAhead = $derived(!!deployStatus && deployStatus.local > (deployStatus.remote ?? 0))
+  let recordCount = $derived(commitSelection === null ? null : commitSelection.length)
   let deployTip = $derived.by(() => {
     if (!deployStatus) return '部署到服务器'
     const r = deployStatus.remote ?? '—'
@@ -159,6 +161,7 @@
 
   async function loadProject(path: string) {
     activePath = normalizePath(path)
+    commitSelection = null
     try {
       const pt = await api.detect(path)
       projectType = pt
@@ -208,14 +211,15 @@
     }
   }
 
-  async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false, files: string[] | null = null): Promise<boolean> {
+  async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false): Promise<boolean> {
     statusText = '记录中...'
     const unlisten = await listen<CommitProgress>('commit-progress', (event) => {
       statusText = event.payload.message
     })
     try {
-      const hash = await api.record(activePath, msg, tag, noPreview, files)
+      const hash = await api.record(activePath, msg, tag, noPreview, commitSelection)
       pushToast(`已记录 ${hash}`, 'success')
+      commitSelection = null
       await loadProject(activePath)
       return true
     } catch (e: any) {
@@ -433,7 +437,7 @@
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} onRefresh={refreshStatus} />
+            <StatusPanel {statusOutput} onRefresh={refreshStatus} selection={commitSelection} onSelectionChange={(sel) => commitSelection = sel} />
           {/if}
         </div>
 
@@ -466,6 +470,7 @@
         {connected}
         {deployAhead}
         {deployTip}
+        {recordCount}
       />
 
       <StatusBar
@@ -479,7 +484,7 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog path={activePath} onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} />
 {/if}
 
 {#if showSettings}

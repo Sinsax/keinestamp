@@ -4,12 +4,42 @@
   let {
     statusOutput,
     onRefresh,
+    selection = null,
+    onSelectionChange = (_sel: string[] | null) => {},
   }: {
     statusOutput: string
     onRefresh: () => void
+    selection?: string[] | null
+    onSelectionChange?: (sel: string[] | null) => void
   } = $props()
 
   const files = $derived(parseStatus(statusOutput))
+  const selectedCount = $derived(selection === null ? files.length : selection.filter((p) => files.some((f) => f.path === p)).length)
+  const allSelected = $derived(selection === null || selectedCount === files.length)
+
+  function isChecked(path: string): boolean {
+    return selection === null || selection.includes(path)
+  }
+
+  function toggleFile(path: string) {
+    if (selection === null) {
+      const next = files.filter((f) => f.path !== path).map((f) => f.path)
+      onSelectionChange(next)
+    } else {
+      const next = selection.includes(path)
+        ? selection.filter((p) => p !== path)
+        : [...selection, path]
+      if (next.length === files.length) {
+        onSelectionChange(null)
+      } else {
+        onSelectionChange(next)
+      }
+    }
+  }
+
+  function selectAll() {
+    onSelectionChange(null)
+  }
 
   function statusLabel(x: string, y: string): string {
     if (x !== ' ') return 'staged'
@@ -50,8 +80,11 @@
 <div class="status-panel">
   <div class="sp-header">
     <span class="sp-title">Changes</span>
-    <span class="sp-count">{files.length} file{files.length !== 1 ? 's' : ''}</span>
+    <span class="sp-count">{selectedCount}/{files.length} file{files.length !== 1 ? 's' : ''}</span>
     <div class="sp-spacer"></div>
+    {#if !allSelected}
+      <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
+    {/if}
     <button class="sp-refresh" onclick={onRefresh} title="Refresh status">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 3a5 5 0 014.546 2.916.5.5 0 01-.908.417A4 4 0 108 11.5a4.002 4.002 0 003.392-1.87.5.5 0 11.854.52A5 5 0 113 8a5 5 0 015-5z"/><path d="M11.5 3.5A.5.5 0 0112 4v2.5a.5.5 0 01-.5.5H9a.5.5 0 010-1h1.802A4.003 4.003 0 004 8a.5.5 0 01-1 0 5 5 0 015-5 .5.5 0 01.5.5z"/></svg>
     </button>
@@ -66,6 +99,13 @@
     <div class="sp-list">
       {#each files as f}
         <div class="sp-item">
+          <input
+            type="checkbox"
+            class="sp-check"
+            checked={isChecked(f.path)}
+            onchange={() => toggleFile(f.path)}
+            title="取消勾选可单独提交其余文件"
+          />
           <span class="sp-icon" style="color: {statusColor(f.x, f.y)}">
             {#if iconType(f.x, f.y) === 'added'}
               <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z"/></svg>
@@ -111,6 +151,27 @@
     border-radius: 999px;
   }
   .sp-spacer { flex: 1; }
+  .sp-select-all {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 10px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: color 0.12s, border-color 0.12s;
+  }
+  .sp-select-all:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+  .sp-check {
+    width: 13px;
+    height: 13px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
   .sp-refresh {
     background: none;
     border: none;

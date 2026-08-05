@@ -1,16 +1,10 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
-  import * as api from '../api'
-  import { parseStatus, type StatusFile } from './statusParse'
-
   let {
-    path = '',
     onConfirm,
     onCancel,
     lastTag = '',
   }: {
-    path?: string
-    onConfirm: (msg: string, tag: string | null, noPreview: boolean, files: string[] | null) => Promise<boolean>
+    onConfirm: (msg: string, tag: string | null, noPreview: boolean) => Promise<boolean>
     onCancel: () => void
     lastTag?: string
   } = $props()
@@ -22,41 +16,6 @@
   let customTag = $state('')
   let useCustom = $state(false)
   let previewEnabled = $state(true)
-  let statusFiles = $state<StatusFile[]>([])
-  let checked = $state<Record<string, boolean>>({})
-  let loadingFiles = $state(false)
-  let hint = $state('')
-
-  let selectedFiles = $derived(statusFiles.filter((f) => checked[f.path]).map((f) => f.path))
-  let allChecked = $derived(statusFiles.length > 0 && selectedFiles.length === statusFiles.length)
-  let hasFiles = $derived(statusFiles.length > 0)
-
-  async function refreshFiles() {
-    if (!path) {
-      statusFiles = []
-      return
-    }
-    loadingFiles = true
-    try {
-      const s = await api.status(path)
-      statusFiles = parseStatus(s.output)
-      const next: Record<string, boolean> = {}
-      for (const f of statusFiles) next[f.path] = true
-      checked = next
-    } catch {
-      statusFiles = []
-    }
-    loadingFiles = false
-  }
-
-  onMount(() => { refreshFiles() })
-
-  function toggleAll() {
-    const nextAll = !allChecked
-    const next: Record<string, boolean> = {}
-    for (const f of statusFiles) next[f.path] = nextAll
-    checked = next
-  }
 
   function effectiveTag(): string | null {
     if (!tag && !useCustom) return null
@@ -66,16 +25,8 @@
 
   async function handleConfirm() {
     if (!message.trim()) return
-    const filesArg = hasFiles && !allChecked ? selectedFiles : null
-    const ok = await onConfirm(message.trim(), effectiveTag(), !previewEnabled, filesArg)
-    if (!ok) return
-    await refreshFiles()
-    if (statusFiles.length > 0) {
-      message = ''
-      hint = `还有 ${statusFiles.length} 个文件未提交，可继续分批记录`
-    } else {
-      onCancel()
-    }
+    const ok = await onConfirm(message.trim(), effectiveTag(), !previewEnabled)
+    if (ok) onCancel()
   }
 
   $effect(() => {
@@ -142,33 +93,6 @@
         />
       {/if}
     </div>
-    {#if hasFiles}
-      <div class="field">
-        <label class="file-select-header">
-          <input type="checkbox" checked={allChecked} onchange={toggleAll} />
-          文件选择（{selectedFiles.length}/{statusFiles.length}）
-        </label>
-        <div class="file-list">
-          {#if loadingFiles}
-            <div class="file-hint">加载中...</div>
-          {:else}
-            {#each statusFiles as f}
-              <label class="file-item">
-                <input type="checkbox" bind:checked={checked[f.path]} />
-                <span class="file-status">{f.x !== ' ' ? f.x : f.y || '·'}</span>
-                <span class="file-path">{f.path}</span>
-              </label>
-            {/each}
-          {/if}
-        </div>
-        {#if !allChecked}
-          <div class="file-hint">提交所选文件，其余文件保持未提交，可继续分批记录</div>
-        {/if}
-        {#if hint}
-          <div class="file-hint highlight">{hint}</div>
-        {/if}
-      </div>
-    {/if}
     <div class="field row-field">
       <label>3D 预览</label>
       <input type="checkbox" bind:checked={previewEnabled} />
@@ -176,7 +100,7 @@
     <div class="actions">
       <button onclick={onCancel}>取消</button>
       <button onclick={handleConfirm} class="accent" disabled={!message.trim()}>
-        {hasFiles && !allChecked ? `记录所选 (${selectedFiles.length})` : '记录 (Ctrl+Enter)'}
+        记录 (Ctrl+Enter)
       </button>
     </div>
   </div>
@@ -240,72 +164,5 @@
     height: 14px;
     accent-color: var(--accent);
     cursor: pointer;
-  }
-  .file-select-header {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    font-weight: 600;
-  }
-  .file-select-header input[type="checkbox"] {
-    width: 13px;
-    height: 13px;
-    accent-color: var(--accent);
-    cursor: pointer;
-  }
-  .file-list {
-    max-height: 140px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 4px 6px;
-    margin-top: 4px;
-    background: var(--bg);
-  }
-  .file-item {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 3px 4px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    transition: background 0.1s;
-  }
-  .file-item:hover {
-    background: var(--surface2);
-  }
-  .file-item input[type="checkbox"] {
-    width: 13px;
-    height: 13px;
-    accent-color: var(--accent);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
-  .file-status {
-    width: 16px;
-    text-align: center;
-    font-weight: 700;
-    font-size: 12px;
-    color: var(--text-dim);
-    flex-shrink: 0;
-  }
-  .file-path {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-family: var(--mono);
-    font-size: 11px;
-  }
-  .file-hint {
-    font-size: 10px;
-    color: var(--text-dim);
-    margin-top: 4px;
-  }
-  .file-hint.highlight {
-    color: var(--accent);
-    font-weight: 600;
   }
 </style>
