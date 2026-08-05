@@ -1,4 +1,4 @@
-/target
+ï»¿/target
 frontend/node_modules
 frontend/dist
 src-tauri/target
@@ -9,6 +9,10 @@ src-tauri/gen
 *.svg
 !frontend/public/keinestamp.svg
 /test
-# ÔËĞĞÊ±Éú³É
+# è¿è¡Œæ—¶ç”Ÿæˆ
 serve.toml
 _three/
+!frontend/public/keinestamp.png
+!frontend/src/assets/logo.png
+!src-tauri/icons/*.png
+!src-tauri/icons/icon.ico
