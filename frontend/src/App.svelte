@@ -307,7 +307,7 @@
 </script>
 
 <div class="app-layout">
-  <TitleBar theme={theme} onToggleTheme={() => theme = theme === 'day' ? 'night' : 'day'} />
+  <TitleBar />
 
   <ProjectTabs
     entries={recentProjects.toReversed()}
@@ -315,6 +315,9 @@
     onSelect={selectRecent}
     onNewProject={handleNewProject}
     onSettings={() => showSettings = true}
+    theme={theme}
+    onToggleTheme={() => theme = theme === 'day' ? 'night' : 'day'}
+    onRemoveRecent={handleRemoveRecent}
   />
 
   <div class="body" onclick={() => selectedEntryId = ''}>
