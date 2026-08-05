@@ -102,9 +102,9 @@
   <div class="tabs-actions">
     <button class="project-tab theme-tab" onclick={onToggleTheme} title={theme === 'night' ? '切换到日间模式' : '切换到夜间模式'}>
       {#if theme === 'night'}
-        <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor"><path d="M6 1a5 5 0 100 10A5 5 0 016 1z"/></svg>
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 9.6A6.5 6.5 0 1 1 6.4 1.5a5.2 5.2 0 0 0 8.1 8.1z"/></svg>
       {:else}
-        <svg viewBox="0 0 12 12" width="11" height="11" fill="currentColor"><path d="M6 3a3 3 0 100 6 3 3 0 000-6zm0-2a.5.5 0 01.5.5v1a.5.5 0 01-1 0v-1A.5.5 0 016 1zm0 7a.5.5 0 01.5.5v1a.5.5 0 01-1 0v-1A.5.5 0 016 8zm4-2a.5.5 0 010 1H9a.5.5 0 010-1h1zM2 6a.5.5 0 01.5-.5H4a.5.5 0 010 1H2.5A.5.5 0 012 6zm3.646-3.354a.5.5 0 01.708 0l.707.707a.5.5 0 01-.707.708l-.708-.707a.5.5 0 010-.708zm3.354 3.354a.5.5 0 01.708 0l.707.707a.5.5 0 01-.708.708l-.707-.708a.5.5 0 010-.707z"/></svg>
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="8" r="3.4"/><path d="M8 1.5v1.6M8 12.9v1.6M1.5 8h1.6M12.9 8h1.6M3.4 3.4l1.1 1.1M11.5 11.5l1.1 1.1M3.4 12.6l1.1-1.1M11.5 4.5l1.1-1.1"/></svg>
       {/if}
     </button>
     <button class="project-tab settings-tab" onclick={onSettings} title="Settings">
