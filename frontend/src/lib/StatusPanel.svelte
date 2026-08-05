@@ -41,6 +41,10 @@
     onSelectionChange(null)
   }
 
+  function selectNone() {
+    onSelectionChange([])
+  }
+
   function statusLabel(x: string, y: string): string {
     if (x !== ' ') return 'staged'
     if (y === 'M') return 'modified'
@@ -85,6 +89,9 @@
     {#if !allSelected}
       <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
     {/if}
+    {#if selectedCount > 0}
+      <button class="sp-select-all" onclick={selectNone} title="全部取消">全不选</button>
+    {/if}
     <button class="sp-refresh" onclick={onRefresh} title="Refresh status">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 3a5 5 0 014.546 2.916.5.5 0 01-.908.417A4 4 0 108 11.5a4.002 4.002 0 003.392-1.87.5.5 0 11.854.52A5 5 0 113 8a5 5 0 015-5z"/><path d="M11.5 3.5A.5.5 0 0112 4v2.5a.5.5 0 01-.5.5H9a.5.5 0 010-1h1.802A4.003 4.003 0 004 8a.5.5 0 01-1 0 5 5 0 015-5 .5.5 0 01.5.5z"/></svg>
     </button>
@@ -98,11 +105,12 @@
   {:else}
     <div class="sp-list">
       {#each files as f}
-        <div class="sp-item">
+        <div class="sp-item" onclick={() => toggleFile(f.path)}>
           <input
             type="checkbox"
             class="sp-check"
             checked={isChecked(f.path)}
+            onclick={(e) => e.stopPropagation()}
             onchange={() => toggleFile(f.path)}
             title="取消勾选可单独提交其余文件"
           />
