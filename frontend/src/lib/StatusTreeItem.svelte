@@ -34,7 +34,7 @@
 </script>
 
 {#if isDir}
-  <div class="sp-item sp-dir" onclick={() => onToggleCollapse(node.path)} title="点击展开/折叠；勾选 = 选择其中所有文件">
+  <div class="sp-item sp-dir" onclick={() => onToggleDir(node)} title="点击 = 选择/取消目录内所有文件">
     <input
       type="checkbox"
       class="sp-check"
@@ -44,7 +44,9 @@
       onchange={() => onToggleDir(node)}
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
-      <span class="sp-arrow">{isCollapsed(node.path) ? '▸' : '▾'}</span>
+      <span class="sp-arrow" onclick={(e) => { e.stopPropagation(); onToggleCollapse(node.path) }} title="展开/折叠">
+        {isCollapsed(node.path) ? '▸' : '▾'}
+      </span>
       <span class="sp-dir-icon">
         <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor" opacity="0.7"><path d="M2 5a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/></svg>
       </span>
