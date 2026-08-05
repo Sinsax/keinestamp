@@ -205,7 +205,7 @@
     overflow-y: auto;
     padding: 6px 8px;
   }
-  .sp-item {
+  :global(.sp-item) {
     display: flex;
     align-items: center;
     gap: 6px;
@@ -216,9 +216,9 @@
     border-radius: 6px;
     transition: background 0.12s var(--ease);
   }
-  .sp-item:hover { background: var(--surface); }
-  .sp-item.sp-dir { cursor: pointer; }
-  .sp-check {
+  :global(.sp-item:hover) { background: var(--surface); }
+  :global(.sp-item.sp-dir) { cursor: pointer; }
+  :global(.sp-check) {
     width: 14px;
     height: 14px;
     margin: 0;
@@ -226,8 +226,8 @@
     cursor: pointer;
     flex-shrink: 0;
   }
-  .sp-icon { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
-  .sp-ext-badge {
+  :global(.sp-icon) { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
+  :global(.sp-ext-badge) {
     font-size: 9px;
     font-weight: 600;
     background: var(--ice-soft);
@@ -237,7 +237,7 @@
     flex-shrink: 0;
     letter-spacing: 0.3px;
   }
-  .sp-path {
+  :global(.sp-path) {
     flex: 1;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -245,7 +245,7 @@
     font-family: var(--mono);
     font-size: 12px;
   }
-  .sp-label {
+  :global(.sp-label) {
     font-size: 10px;
     font-weight: 500;
     text-transform: uppercase;
