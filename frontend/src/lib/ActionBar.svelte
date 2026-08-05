@@ -8,6 +8,8 @@
     onRevert,
     onDeploy,
     connected = false,
+    deployAhead = false,
+    deployTip = '部署到服务器',
   }: {
     projectType: ProjectType | null
     onRecord: () => void
@@ -15,6 +17,8 @@
     onRevert: () => void
     onDeploy: () => void
     connected?: boolean
+    deployAhead?: boolean
+    deployTip?: string
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
@@ -38,7 +42,7 @@
 
   <div class="spacer"></div>
 
-  <button class="deploy-btn" onclick={onDeploy} disabled={!initialized || !connected}>
+  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!initialized || !connected} title={deployTip}>
     <span class="ab-label">部署</span>
     <span class="ab-hint">deploy</span>
   </button>
@@ -115,6 +119,19 @@
   .deploy-btn .ab-hint {
     color: var(--ze);
     opacity: 0.75;
+  }
+  .deploy-btn.ahead {
+    border-color: var(--error) !important;
+    color: var(--error) !important;
+  }
+  .deploy-btn.ahead .ab-hint {
+    color: var(--error);
+    opacity: 0.75;
+  }
+  .deploy-btn.ahead:hover:not(:disabled) {
+    background: var(--accent-soft) !important;
+    border-color: var(--error) !important;
+    color: var(--error) !important;
   }
   .spacer { flex: 1; }
 </style>

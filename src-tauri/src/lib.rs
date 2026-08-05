@@ -256,6 +256,42 @@ fn test_connection(server_url: String, deploy_token: Option<String>) -> Result<b
     }
 }
 
+#[derive(Clone, serde::Serialize)]
+struct DeployStatus {
+    local: u64,
+    remote: Option<u64>,
+}
+
+#[tauri::command]
+fn get_deploy_status(
+    server_url: String,
+    deploy_token: Option<String>,
+    path: String,
+) -> Result<DeployStatus, String> {
+    eprintln!("[debug] get_deploy_status({})", path);
+    let p = PathBuf::from(&path);
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    let local = keinestamp::git_web::get_web_commit_count(&meta.web_root);
+    let site = keinestamp::config::resolve_site_name(&meta);
+    let url = format!("{}/{}/version", server_url.trim_end_matches('/'), site);
+    eprintln!("[debug] get_deploy_status: local={}, GET {}", local, url);
+    let mut req = ureq::get(&url);
+    if let Some(ref token) = deploy_token {
+        if !token.is_empty() {
+            req = req.set("Authorization", &format!("Bearer {}", token));
+        }
+    }
+    let remote = req
+        .call()
+        .ok()
+        .and_then(|r| r.into_string().ok())
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.get("count").and_then(|c| c.as_u64()));
+    eprintln!("[debug] get_deploy_status → remote={:?}", remote);
+    Ok(DeployStatus { local, remote })
+}
+
 #[tauri::command]
 fn pull(path: String) -> Result<(), String> {
     eprintln!("[debug] pull({})", path);
@@ -808,6 +844,7 @@ pub fn run() {
             push,
             deploy,
             test_connection,
+            get_deploy_status,
             pull,
             has_remote,
             revert,

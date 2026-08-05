@@ -148,3 +148,7 @@ export async function getAutoConnect(): Promise<boolean> {
 export async function setAutoConnect(enabled: boolean): Promise<void> {
   return invoke<void>('set_auto_connect', { enabled })
 }
+
+export async function getDeployStatus(serverUrl: string, deployToken: string | null, path: string): Promise<{ local: number; remote: number | null }> {
+  return invoke('get_deploy_status', { serverUrl, deployToken, path })
+}

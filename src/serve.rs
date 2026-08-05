@@ -341,6 +341,43 @@ pub fn sanitize_project_name(name: &str) -> String {
         .collect()
 }
 
+fn versions_path(web_root: &Path) -> PathBuf {
+    web_root.join(".versions.json")
+}
+
+fn load_versions(web_root: &Path) -> HashMap<String, u64> {
+    std::fs::read_to_string(versions_path(web_root))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
+}
+
+fn save_versions(web_root: &Path, versions: &HashMap<String, u64>) {
+    if let Ok(json) = serde_json::to_string(versions) {
+        let path = versions_path(web_root);
+        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
+fn handle_version(
+    request: tiny_http::Request,
+    project_name: &str,
+    web_versions: &RwLock<HashMap<String, u64>>,
+) -> Result<()> {
+    let count = web_versions.read().unwrap().get(project_name).copied();
+    let body = match count {
+        Some(n) => format!(r#"{{"count":{}}}"#, n),
+        None => r#"{"count":null}"#.to_string(),
+    };
+    let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
+    let response = Response::from_string(body).with_header(hdr);
+    request.respond(response)?;
+    Ok(())
+}
+
 fn percent_decode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -469,6 +506,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
     let last_update = Arc::new(AtomicU64::new(now));
     let project_tokens: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
     let project_ids: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let web_versions: Arc<RwLock<HashMap<String, u64>>> = Arc::new(RwLock::new(load_versions(&web_root)));
     let rate_limiter = Arc::new(RateLimiter::new());
 
     for request in server.incoming_requests() {
@@ -476,6 +514,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
         let dt = deploy_token.clone();
         let pt = project_tokens.clone();
         let pi = project_ids.clone();
+        let wv = web_versions.clone();
         let wr = web_root.clone();
         let lu = last_update.clone();
         let method = request.method().clone();
@@ -508,7 +547,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
             let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
             match auth {
                 AuthResult::Authenticated => {
-                    if let Err(e) = handle_upload(request, &wr, &lu, &pt, &pi) {
+                    if let Err(e) = handle_upload(request, &wr, &lu, &pt, &pi, &wv) {
                         log_error("DEPLOY", &format!("{} {}", req_ip, e));
                     }
                 }
@@ -538,6 +577,26 @@ pub fn start(config: ServeConfig) -> Result<()> {
         }
 
         let route_path = if rest.is_empty() { "/" } else { rest };
+
+        if route_path == "/version" && method == Method::Get {
+            let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
+            match auth {
+                AuthResult::Authenticated => {
+                    if let Err(e) = handle_version(request, project_name, &wv) {
+                        log_error("VERSION", &format!("{} {}", req_ip, e));
+                    }
+                }
+                AuthResult::RateLimited => {
+                    log_warn("AUTH", &format!("{} rate limited on /version", req_ip));
+                    let _ = request.respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+                }
+                AuthResult::Unauthorized => {
+                    log_warn("AUTH", &format!("{} unauthorized on /version", req_ip));
+                    let _ = request.respond(unauthorized_response());
+                }
+            }
+            continue;
+        }
 
         if route_path == "/login" && method == Method::Get {
             if let Err(e) = serve_login_page(request, project_name) {
@@ -603,6 +662,7 @@ fn handle_upload(
     last_update: &AtomicU64,
     project_tokens: &RwLock<HashMap<String, String>>,
     project_ids: &RwLock<HashMap<String, String>>,
+    web_versions: &RwLock<HashMap<String, u64>>,
 ) -> Result<()> {
     let ip = request_ip(&request);
     let mut body = Vec::new();
@@ -770,6 +830,15 @@ fn handle_upload(
     );
 
     log_info("DEPLOY", &format!("{} project={} → 200 /{}", ip, project_name, project_name));
+
+    let client_count = request.headers().iter()
+        .find(|h| h.field.equiv("X-Web-Count"))
+        .and_then(|h| h.value.as_str().parse::<u64>().ok());
+    if let Some(count) = client_count {
+        web_versions.write().unwrap().insert(project_name.clone(), count);
+        let snapshot = web_versions.read().unwrap().clone();
+        save_versions(web_root, &snapshot);
+    }
 
     let body = format!(r#"{{"status":"ok","prefix":"/{}"}}"#, project_name);
     let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
@@ -939,6 +1008,28 @@ mod tests {
         assert!(html.contains("--accent"));
         assert!(!html.contains("<svg"), "web logo should be removed");
         assert!(html.contains("输入访问令牌以查看时间线"));
+    }
+
+    #[test]
+    fn versions_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_versions_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut map: HashMap<String, u64> = HashMap::new();
+        map.insert("proj_a".to_string(), 3);
+        map.insert("proj_b".to_string(), 0);
+        save_versions(&dir, &map);
+        let loaded = load_versions(&dir);
+        assert_eq!(loaded.get("proj_a"), Some(&3));
+        assert_eq!(loaded.get("proj_b"), Some(&0));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn versions_load_missing_is_empty() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_versions_missing_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(load_versions(&dir).is_empty());
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

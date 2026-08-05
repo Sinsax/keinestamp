@@ -35,6 +35,25 @@ pub fn is_web_repo(web_root: &Path) -> bool {
     web_root.join(".git").exists()
 }
 
+pub fn get_web_commit_count(web_root: &Path) -> u64 {
+    if !is_web_repo(web_root) {
+        return 0;
+    }
+    let output = Command::new("git")
+        .args(["rev-list", "--count", "HEAD"])
+        .current_dir(web_root)
+        .output();
+    match output {
+        Ok(o) if o.status.success() => {
+            String::from_utf8_lossy(&o.stdout)
+                .trim()
+                .parse()
+                .unwrap_or(0)
+        }
+        _ => 0,
+    }
+}
+
 fn get_web_branch(web_root: &Path) -> Result<String> {
     let output = Command::new("git")
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
@@ -119,6 +138,32 @@ mod tests {
     fn test_is_web_repo() {
         let dir = tmp_web_repo("is_web_repo");
         assert!(is_web_repo(&dir));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_get_web_commit_count_empty_is_zero() {
+        let dir = tmp_web_repo("count_empty");
+        assert_eq!(get_web_commit_count(&dir), 0);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_get_web_commit_count_counts_commits() {
+        let dir = tmp_web_repo("count_commits");
+        std::fs::write(dir.join("a.txt"), b"1").unwrap();
+        web_commit_and_push(&dir, "one", false).unwrap();
+        std::fs::write(dir.join("b.txt"), b"2").unwrap();
+        web_commit_and_push(&dir, "two", false).unwrap();
+        assert_eq!(get_web_commit_count(&dir), 2);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_get_web_commit_count_non_repo_is_zero() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_git_web_norepo_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(get_web_commit_count(&dir), 0);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -44,6 +44,7 @@
   let accessToken = $state('')
   let siteName = $state('')
   let siteLocked = $state(false)
+  let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let deploying = $state(false)
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
@@ -129,10 +130,32 @@
       const [serverUrl, deployToken] = await Promise.all([api.getDeployServerUrl(), api.getDeployToken()])
       if (!serverUrl) { connected = false; return }
       connected = await api.testConnection(serverUrl, deployToken)
+      if (connected) refreshDeployStatus()
     } catch {
       connected = false
     }
   }
+
+  async function refreshDeployStatus() {
+    if (!activePath) { deployStatus = null; return }
+    try {
+      const serverUrl = await api.getDeployServerUrl()
+      if (!serverUrl) { deployStatus = null; return }
+      const token = await api.getDeployToken()
+      deployStatus = await api.getDeployStatus(serverUrl, token || null, activePath)
+    } catch {
+      deployStatus = null
+    }
+  }
+
+  let deployAhead = $derived(!!deployStatus && deployStatus.local > (deployStatus.remote ?? 0))
+  let deployTip = $derived.by(() => {
+    if (!deployStatus) return '部署到服务器'
+    const r = deployStatus.remote ?? '—'
+    return deployAhead
+      ? `有新版本可部署：本地 v${deployStatus.local} > 服务器 v${r}`
+      : `已是最新：本地 v${deployStatus.local} / 服务器 v${r}`
+  })
 
   async function loadProject(path: string) {
     activePath = normalizePath(path)
@@ -146,7 +169,7 @@
         accessToken = cfg.access_token || ''
         siteName = cfg.site_name || ''
         siteLocked = cfg.site_locked
-        await Promise.all([refreshStatus(), loadTrackedFiles(path)])
+        await Promise.all([refreshStatus(), loadTrackedFiles(path), refreshDeployStatus()])
         if (autoConn) {
           testConnection()
         }
@@ -440,6 +463,8 @@
         onRevert={handleRevert}
         onDeploy={handleDeploy}
         {connected}
+        {deployAhead}
+        {deployTip}
       />
 
       <StatusBar

@@ -34,6 +34,7 @@ Build order (crate): config → detect → init → git_project → git_web → 
 - **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. Server connection settings are all app-level: `deploy_token` authenticates upload/health, `deploy_server_url` is the server address, `auto_connect` is the global auto-test-on-load switch.
 - **auto_connect**: App-level (AppConfig). When true, app tests server connection on every project load. GUI: SettingsDialog checkbox; Tauri commands `get_auto_connect`/`set_auto_connect`; CLI `config auto_connect=` writes app config.
 - **serve web_root default**: Auto-generated `serve.toml` uses `<exe_dir>/web-root/` (stable, not CWD); explicit `web_root` in `serve.toml` or `--config` overrides. Deployed sites land in `web_root/<site_name>/`, shared three.js in `web_root/_three/`.
+- **Deploy version hint**: Client sends `X-Web-Count` (web-timeline `rev-list --count HEAD`) on upload; server records it in `web_root/.versions.json` and serves it at `GET /<project>/version` (deploy_token Bearer). GUI deploy button turns red (`deployAhead`) when `local > remote ?? 0`, tooltip shows version comparison. Purely a hint — no server-side blocking.
 - **Atomic writes**: Temp file + rename (name includes PID + target filename).
 - **init idempotent**: Re-init fills gaps, does not overwrite `init_time`.
 - **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands.
@@ -99,7 +100,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (30)
+### Tauri commands (31)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -111,6 +112,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `push` / `pull` | `()` | push only does git push, no deploy |
 | `deploy` | `()` | manual deploy to server (zip upload); on success writes `site_name` (resolved) + `site_locked = true` |
 | `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
+| `get_deploy_status` | `{local, remote}` | web-timeline commit count vs server record via `GET /<project>/version` (Bearer deploy_token); remote null = no record |
 | `has_remote` | `bool` | checks git `origin` only |
 | `revert` | `()` | error `"no commits to revert"` < 2 commits |
 | `status` | `{clean, output}` | |
