@@ -91,7 +91,7 @@ fn get_commit_count(project_root: &Path) -> Result<usize> {
 pub fn status(project_root: &Path) -> Result<String> {
     let output = run_git_output(project_root, &[
         "-c", "core.quotepath=false",
-        "status", "--porcelain",
+        "status", "--porcelain", "-uall",
     ])?;
     Ok(output)
 }
@@ -301,6 +301,26 @@ mod tests {
 
         let s = status(&dir)?;
         assert!(s.trim().is_empty());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_status_lists_untracked_files_inside_folder() -> Result<()> {
+        let dir = tmp_repo("status_uall");
+        std::fs::create_dir_all(dir.join("sub"))?;
+        std::fs::write(dir.join("sub/a.txt"), b"a")?;
+        std::fs::write(dir.join("sub/b.txt"), b"b")?;
+
+        let s = status(&dir)?;
+        assert!(s.contains("sub/a.txt"), "should list file a: {}", s);
+        assert!(s.contains("sub/b.txt"), "should list file b: {}", s);
+        assert!(
+            !s.lines().any(|l| l.trim() == "?? sub/"),
+            "should not collapse the folder: {}",
+            s
+        );
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())

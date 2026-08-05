@@ -1,5 +1,7 @@
 <script lang="ts">
   import { parseStatus, type StatusFile } from './statusParse'
+  import StatusTreeItem from './StatusTreeItem.svelte'
+  import { buildFileTree, type FileTreeNode } from './fileTree'
 
   let {
     statusOutput,
@@ -14,8 +16,23 @@
   } = $props()
 
   const files = $derived(parseStatus(statusOutput))
+  const statusMap = $derived(Object.fromEntries(files.map((f) => [f.path, f])) as Record<string, StatusFile>)
+  const tree = $derived(buildFileTree(files.map((f) => f.path)))
   const selectedCount = $derived(selection === null ? files.length : selection.filter((p) => files.some((f) => f.path === p)).length)
   const allSelected = $derived(selection === null || selectedCount === files.length)
+
+  let collapsedDirs = $state<Set<string>>(new Set())
+
+  function isCollapsed(path: string): boolean {
+    return collapsedDirs.has(path)
+  }
+
+  function toggleCollapse(path: string) {
+    const next = new Set(collapsedDirs)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    collapsedDirs = next
+  }
 
   function isChecked(path: string): boolean {
     return selection === null || selection.includes(path)
@@ -37,6 +54,38 @@
     }
   }
 
+  function collectFiles(node: FileTreeNode): string[] {
+    const out: string[] = []
+    const walk = (n: FileTreeNode) => {
+      if (n.children.length === 0) out.push(n.path)
+      else n.children.forEach(walk)
+    }
+    walk(node)
+    return out
+  }
+
+  function dirState(node: FileTreeNode): 'all' | 'none' | 'partial' {
+    const fs = collectFiles(node)
+    const sel = selection === null ? files.map((f) => f.path) : selection
+    const selSet = new Set(sel)
+    let count = 0
+    for (const p of fs) if (selSet.has(p)) count++
+    if (count === 0) return 'none'
+    if (count === fs.length) return 'all'
+    return 'partial'
+  }
+
+  function toggleDir(node: FileTreeNode) {
+    const fs = collectFiles(node)
+    const base = selection === null ? files.map((f) => f.path) : [...selection]
+    const baseSet = new Set(base)
+    const allIn = fs.every((p) => baseSet.has(p))
+    const next = allIn
+      ? base.filter((p) => !fs.includes(p))
+      : Array.from(new Set([...base, ...fs]))
+    onSelectionChange(next.length === files.length ? null : next)
+  }
+
   function selectAll() {
     onSelectionChange(null)
   }
@@ -45,39 +94,8 @@
     onSelectionChange([])
   }
 
-  function statusLabel(x: string, y: string): string {
-    if (x !== ' ') return 'staged'
-    if (y === 'M') return 'modified'
-    if (y === 'A') return 'added'
-    if (y === 'D') return 'deleted'
-    if (y === '?') return 'untracked'
-    return ''
-  }
-
-  function statusColor(x: string, y: string): string {
-    if (x !== ' ') {
-      if (x === 'M') return 'var(--accent)'
-      if (x === 'A') return 'var(--success)'
-      if (x === 'D') return 'var(--error)'
-    }
-    if (y === 'M') return 'var(--warning)'
-    if (y === 'A') return 'var(--success)'
-    if (y === 'D') return 'var(--error)'
-    if (y === '?') return 'var(--text-dim)'
-    return 'var(--text-dim)'
-  }
-
-  function iconType(x: string, y: string): string {
-    if (x === 'A' || y === 'A') return 'added'
-    if (x === 'D' || y === 'D') return 'deleted'
-    if ((x !== ' ' || y === 'M')) return 'modified'
-    if (y === '?') return 'untracked'
-    return 'unknown'
-  }
-
-  function ext(path: string): string {
-    const i = path.lastIndexOf('.')
-    return i >= 0 ? path.slice(i + 1).toUpperCase() : 'FILE'
+  function statusOf(path: string): StatusFile | undefined {
+    return statusMap[path]
   }
 </script>
 
@@ -104,31 +122,18 @@
     </div>
   {:else}
     <div class="sp-list">
-      {#each files as f}
-        <div class="sp-item" onclick={() => toggleFile(f.path)}>
-          <input
-            type="checkbox"
-            class="sp-check"
-            checked={isChecked(f.path)}
-            onclick={(e) => e.stopPropagation()}
-            onchange={() => toggleFile(f.path)}
-            title="取消勾选可单独提交其余文件"
-          />
-          <span class="sp-icon" style="color: {statusColor(f.x, f.y)}">
-            {#if iconType(f.x, f.y) === 'added'}
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 2a.5.5 0 01.5.5v5h5a.5.5 0 010 1h-5v5a.5.5 0 01-1 0v-5h-5a.5.5 0 010-1h5v-5A.5.5 0 018 2z"/></svg>
-            {:else if iconType(f.x, f.y) === 'deleted'}
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M4 8a.5.5 0 01.5-.5h7a.5.5 0 010 1h-7A.5.5 0 014 8z"/></svg>
-            {:else if iconType(f.x, f.y) === 'modified'}
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M12.854.146a.5.5 0 00-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 000-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 016 13.5V13h-.5a.5.5 0 01-.5-.5V12h-.5a.5.5 0 01-.5-.5V11h-.5a.5.5 0 01-.5-.5V10h-.5a.499.499 0 01-.175-.032l-.179.178a.5.5 0 00-.11.168l-2 5a.5.5 0 00.65.65l5-2a.5.5 0 00.168-.11l.178-.178z"/></svg>
-            {:else}
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 15A7 7 0 118 1a7 7 0 010 14zm0 1A8 8 0 108 0a8 8 0 000 16z"/><path d="M5.255 5.786a.237.237 0 00.241.247h.825c.138 0 .248-.113.266-.25.09-.656.54-1.134 1.342-1.134.686 0 1.314.343 1.314 1.168 0 .635-.374.927-.965 1.371-.673.489-1.206 1.06-1.168 1.987l.003.217a.25.25 0 00.25.246h.811a.25.25 0 00.25-.25v-.105c0-.718.273-.927 1.01-1.486.609-.463 1.244-.977 1.244-2.056 0-1.511-1.276-2.241-2.673-2.241-1.267 0-2.655.59-2.75 2.286zm1.557 5.763c0 .533.425.927 1.01.927.609 0 1.028-.394 1.028-.927 0-.552-.42-.94-1.029-.94-.584 0-1.009.388-1.009.94z"/></svg>
-            {/if}
-          </span>
-          <span class="sp-ext-badge">{ext(f.path)}</span>
-          <span class="sp-path">{f.path}</span>
-          <span class="sp-label" style="color: {statusColor(f.x, f.y)}">{statusLabel(f.x, f.y)}</span>
-        </div>
+      {#each tree as node (node.path)}
+        <StatusTreeItem
+          {node}
+          depth={0}
+          {statusOf}
+          {isChecked}
+          {dirState}
+          onToggleFile={toggleFile}
+          onToggleDir={toggleDir}
+          {isCollapsed}
+          onToggleCollapse={toggleCollapse}
+        />
       {/each}
     </div>
   {/if}
@@ -173,13 +178,6 @@
     color: var(--accent);
     border-color: var(--accent);
   }
-  .sp-check {
-    width: 13px;
-    height: 13px;
-    accent-color: var(--accent);
-    cursor: pointer;
-    flex-shrink: 0;
-  }
   .sp-refresh {
     background: none;
     border: none;
@@ -210,14 +208,22 @@
   .sp-item {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 5px 10px;
-    margin-bottom: 2px;
+    gap: 6px;
+    padding: 4px 8px;
+    margin-bottom: 1px;
     font-size: 13px;
-    border-radius: 8px;
-    transition: background 0.12s var(--ease), box-shadow 0.12s var(--ease);
+    border-radius: 6px;
+    transition: background 0.12s var(--ease);
   }
-  .sp-item:hover { background: var(--surface); box-shadow: var(--shadow-sm); }
+  .sp-item:hover { background: var(--surface); }
+  .sp-item.sp-dir { cursor: pointer; }
+  .sp-check {
+    width: 13px;
+    height: 13px;
+    accent-color: var(--accent);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
   .sp-icon { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
   .sp-ext-badge {
     font-size: 9px;
