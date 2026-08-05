@@ -30,7 +30,7 @@ Build order (crate): config → detect → init → git_project → git_web → 
 - **revert guard**: Checks commit count >= 2 before `reset --soft HEAD~1`. `get_commit_count()` in git_project.
 - **pull**: Always `git pull --rebase` to avoid merge commits.
 - **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.
-- **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `access_token`, `auto_connect`, `project_id`. Old fields silently ignored via `#[serde(default)]`. `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server.
+- **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `web_remote`, `access_token`, `auto_connect`, `project_id`, `site_name`, `site_locked`. Old fields silently ignored via `#[serde(default)]`. `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server. `site_name` (ASCII `[A-Za-z0-9-_]` only, URL prefix / `X-Project-Name`) locks permanently after first deploy (`site_locked = true`); `config::resolve_site_name()` picks `site_name` → sanitized folder name → `project<id前8>` fallback, shared by deploy + jump button.
 - **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. `deploy_token` is used by the app to authenticate with the server for upload/health.
 - **auto_connect**: When true, app tests server connection on project load.
 - **Atomic writes**: Temp file + rename (name includes PID + target filename).
@@ -98,7 +98,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (27)
+### Tauri commands (28)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -108,15 +108,15 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `init_project` | `MetaConfig` | + init commit + add_recent |
 | `record` | short hash (7) | async, emits `commit-progress` events (5 phases). No auto-deploy. |
 | `push` / `pull` | `()` | push only does git push, no deploy |
-| `deploy` | `()` | manual deploy to server (zip upload) |
+| `deploy` | `()` | manual deploy to server (zip upload); on success writes `site_name` (resolved) + `site_locked = true` |
 | `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
 | `has_remote` | `bool` | checks git `origin` only |
 | `revert` | `()` | error `"no commits to revert"` < 2 commits |
 | `status` | `{clean, output}` | |
-| `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching |
+| `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching; `site_name` key validates ASCII `[A-Za-z0-9-_]` and rejects when locked |
 | `get_timeline` | `Timeline` | resolves preview paths to absolute |
 | `get_recent` / `add_recent` / `remove_recent` | recent mgmt | |
-| `open_folder` / `open_web_timeline` | `()` | platform-specific shell cmds |
+| `open_folder` / `open_web_timeline` / `open_site` | `()` | platform-specific shell cmds; `open_site(url)` requires http(s):// prefix |
 | `delete_entry` | `()` | timeline.json only, not git |
 | `get_project_log` | `String[]` | git log lines |
 | `get_tracked_files` | `String[]` | walks dir (skips hidden/node_modules/target/web-timeline) |

@@ -415,13 +415,16 @@ fn cmd_deploy(path: &Path, server: &str, deploy_token: Option<&str>) -> anyhow::
         keinestamp::config::write_meta(&keinestamp::config::meta_path(path), &meta)?;
     }
     let project_id = meta.project_id.as_deref().unwrap_or("");
-    let project_name = path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
+    let project_name = keinestamp::config::resolve_site_name(&meta);
     let prefix = keinestamp::push::deploy_to_server(&meta.web_root, server_url, token, meta.access_token.as_deref(), &project_name, project_id)?;
     let url = if prefix.is_empty() {
         server_url.to_string()
     } else {
         format!("{}{}", server_url.trim_end_matches('/'), prefix)
     };
+    meta.site_name = Some(project_name);
+    meta.site_locked = true;
+    keinestamp::config::write_meta(&keinestamp::config::meta_path(path), &meta)?;
     println!("已部署到 {}", url);
     Ok(())
 }

@@ -213,13 +213,14 @@ fn deploy(path: String) -> Result<(), String> {
     if let Some(ref server) = server {
         eprintln!("[debug] deploy: server={}", server);
         let deploy_token = keinestamp::app_config::get_deploy_token();
-        let project_name = meta.project_root.file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
+        let project_name = keinestamp::config::resolve_site_name(&meta);
         let project_id = meta.project_id.as_deref().unwrap_or("");
         map_err(keinestamp::push::deploy_to_server(
             &meta.web_root, server, deploy_token.as_deref(), meta.access_token.as_deref(), &project_name, project_id,
         ))?;
+        meta.site_name = Some(project_name);
+        meta.site_locked = true;
+        map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
         eprintln!("[debug] deploy → ok");
         Ok(())
     } else {
@@ -414,7 +415,17 @@ fn update_config(
             let v = value.as_deref().unwrap_or("false");
             meta.auto_connect = v == "true" || v == "1" || v == "yes";
         }
-        _ => return Err(format!("unknown config key: {key}. Available: web_remote, access_token, auto_connect")),
+        "site_name" => {
+            if meta.site_locked {
+                return Err("站点名已锁定，部署后无法修改".to_string());
+            }
+            let v = value.filter(|s| !s.is_empty());
+            if let Some(name) = &v {
+                map_err(keinestamp::config::validate_site_name(name))?;
+            }
+            meta.site_name = v;
+        }
+        _ => return Err(format!("unknown config key: {key}. Available: web_remote, access_token, auto_connect, site_name")),
     }
 
     map_err(keinestamp::config::write_meta(&meta_path, &meta))
@@ -756,6 +767,22 @@ fn open_web_timeline(path: String) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn open_site(url: String) -> Result<(), String> {
+    eprintln!("[debug] open_site({})", url);
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("invalid URL, must start with http:// or https://".to_string());
+    }
+    #[cfg(target_os = "windows")]
+    let result = std::process::Command::new("cmd").args(["/c", "start", &url]).spawn();
+    #[cfg(target_os = "macos")]
+    let result = std::process::Command::new("open").arg(&url).spawn();
+    #[cfg(target_os = "linux")]
+    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    result.map_err(|e| format!("failed to open site: {}", e))?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -791,6 +818,7 @@ pub fn run() {
             remove_recent,
             open_folder,
             open_web_timeline,
+            open_site,
             delete_entry,
             get_project_log,
             get_tracked_files,

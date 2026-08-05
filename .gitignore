@@ -9,3 +9,6 @@ src-tauri/gen
 *.svg
 !frontend/public/keinestamp.svg
 /test
+# 运行时生成
+serve.toml
+_three/

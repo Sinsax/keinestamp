@@ -7,6 +7,9 @@ export interface MetaConfig {
   web_push_enabled: boolean
   access_token: string | null
   auto_connect: boolean
+  project_id: string | null
+  site_name: string | null
+  site_locked: boolean
 }
 
 export interface AppConfig {

@@ -42,6 +42,8 @@
   let hasRemote = $state(false)
   let connected = $state(false)
   let accessToken = $state('')
+  let siteName = $state('')
+  let siteLocked = $state(false)
   let deploying = $state(false)
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
@@ -142,6 +144,8 @@
         entries = timeline.entries.toReversed()
         hasRemote = await api.hasRemote(path)
         accessToken = cfg.access_token || ''
+        siteName = cfg.site_name || ''
+        siteLocked = cfg.site_locked
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
         if (cfg.auto_connect) {
           testConnection()
@@ -223,6 +227,40 @@
       pushToast('Token 已保存', 'success')
     } catch (e: any) {
       pushToast(`Token 保存失败: ${e}`, 'error')
+    }
+  }
+
+  async function handleSiteNameChange(val: string): Promise<boolean> {
+    if (!/^[A-Za-z0-9_-]+$/.test(val)) {
+      pushToast('网页名称仅限英文、数字、- 和 _', 'error')
+      return false
+    }
+    try {
+      await api.updateConfig(activePath, 'site_name', val || null)
+      siteName = val
+      pushToast('网页名称已保存', 'success')
+      return true
+    } catch (e: any) {
+      pushToast(`网页名称保存失败: ${e}`, 'error')
+      return false
+    }
+  }
+
+  async function handleOpenSite() {
+    if (!siteName) {
+      pushToast('未设置网页名称', 'info')
+      return
+    }
+    try {
+      const serverUrl = await api.getDeployServerUrl()
+      if (!serverUrl) {
+        pushToast('未配置服务器地址', 'info')
+        return
+      }
+      const url = `${serverUrl.replace(/\/+$/, '')}/${siteName}/`
+      await api.openSite(url)
+    } catch (e: any) {
+      pushToast(`打开网页失败: ${e}`, 'error')
     }
   }
 
@@ -385,6 +423,10 @@
               onDblClick={(e) => detailEntry = e}
               accessToken={accessToken}
               onTokenChange={handleTokenChange}
+              siteName={siteName}
+              siteLocked={siteLocked}
+              onSiteNameChange={handleSiteNameChange}
+              onOpenSite={handleOpenSite}
             />
           </div>
         {/if}

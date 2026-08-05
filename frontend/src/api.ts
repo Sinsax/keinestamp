@@ -129,6 +129,10 @@ export async function openWebTimeline(path: string): Promise<void> {
   return invoke<void>('open_web_timeline', { path })
 }
 
+export async function openSite(url: string): Promise<void> {
+  return invoke<void>('open_site', { url })
+}
+
 export async function getDeployServerUrl(): Promise<string> {
   return invoke<string>('get_deploy_server_url')
 }

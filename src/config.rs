@@ -22,6 +22,10 @@ pub struct MetaConfig {
     pub auto_connect: bool,
     #[serde(default)]
     pub project_id: Option<String>,
+    #[serde(default)]
+    pub site_name: Option<String>,
+    #[serde(default)]
+    pub site_locked: bool,
 }
 
 impl MetaConfig {
@@ -36,6 +40,8 @@ impl MetaConfig {
             access_token: Some(generate_access_token()),
             auto_connect: false,
             project_id: Some(generate_project_id()),
+            site_name: None,
+            site_locked: false,
         }
     }
 }
@@ -51,6 +57,8 @@ impl Default for MetaConfig {
             access_token: None,
             auto_connect: false,
             project_id: None,
+            site_name: None,
+            site_locked: false,
         }
     }
 }
@@ -75,6 +83,41 @@ pub fn generate_access_token() -> String {
     let pid = std::process::id();
     let mix = secs.wrapping_mul(u64::from(nanos)) ^ u64::from(pid);
     format!("{:016x}{:08x}{:08x}{:016x}", secs, nanos, pid, mix)
+}
+
+pub fn validate_site_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        anyhow::bail!("网页名称不能为空");
+    }
+    if !name
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        anyhow::bail!("网页名称仅限英文、数字、- 和 _");
+    }
+    Ok(())
+}
+
+pub fn resolve_site_name(meta: &MetaConfig) -> String {
+    if let Some(name) = &meta.site_name {
+        if !name.is_empty() {
+            return crate::serve::sanitize_project_name(name);
+        }
+    }
+    let folder = meta
+        .project_root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let sanitized = crate::serve::sanitize_project_name(&folder);
+    if !sanitized.is_empty() {
+        return sanitized;
+    }
+    let suffix = meta
+        .project_id
+        .as_deref()
+        .unwrap_or_default();
+    format!("project{}", &suffix[..8.min(suffix.len())])
 }
 
 pub fn meta_path(project_root: &Path) -> PathBuf {
@@ -122,6 +165,53 @@ pub fn read_meta(path: &Path) -> Result<MetaConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_site_name_rules() {
+        assert!(validate_site_name("my-site_1").is_ok());
+        assert!(validate_site_name("Keine33").is_ok());
+        assert!(validate_site_name("").is_err());
+        assert!(validate_site_name("芙姆米").is_err());
+        assert!(validate_site_name("has space").is_err());
+        assert!(validate_site_name("a.b").is_err());
+    }
+
+    #[test]
+    fn resolve_site_name_prefers_configured_name() {
+        let mut meta = MetaConfig::default();
+        meta.project_root = PathBuf::from("F:\\proj\\33_芙姆米_新1皮");
+        meta.project_id = Some("deadbeef12345678".to_string());
+        meta.site_name = Some("MySite-1".to_string());
+        assert_eq!(resolve_site_name(&meta), "MySite-1");
+    }
+
+    #[test]
+    fn resolve_site_name_falls_back_to_folder() {
+        let mut meta = MetaConfig::default();
+        meta.project_root = PathBuf::from("F:\\proj\\33_芙姆米_新1皮");
+        meta.project_id = Some("deadbeef12345678".to_string());
+        assert_eq!(resolve_site_name(&meta), "33__1");
+    }
+
+    #[test]
+    fn resolve_site_name_falls_back_to_project_id() {
+        let mut meta = MetaConfig::default();
+        meta.project_root = PathBuf::from("F:\\proj\\芙姆米");
+        meta.project_id = Some("deadbeef12345678".to_string());
+        assert_eq!(resolve_site_name(&meta), "projectdeadbeef");
+    }
+
+    #[test]
+    fn old_config_without_site_fields_parses() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_oldsite_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = meta_path(&dir);
+        std::fs::write(&path, "version = \"0.1.0\"\ninit_time = \"2026-01-01T00:00:00Z\"\n").unwrap();
+        let meta = read_meta(&path).unwrap();
+        assert_eq!(meta.site_name, None);
+        assert!(!meta.site_locked);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn test_meta_path() {

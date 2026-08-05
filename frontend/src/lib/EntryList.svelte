@@ -12,6 +12,10 @@
     onDblClick,
     accessToken = '',
     onTokenChange,
+    siteName = '',
+    siteLocked = false,
+    onSiteNameChange = async (_val: string) => false,
+    onOpenSite = () => {},
   }: {
     entries: TimelineEntry[]
     selectedId: string
@@ -20,14 +24,33 @@
     onDblClick: (entry: TimelineEntry) => void
     accessToken?: string
     onTokenChange?: (val: string) => void
+    siteName?: string
+    siteLocked?: boolean
+    onSiteNameChange?: (val: string) => Promise<boolean>
+    onOpenSite?: () => void
   } = $props()
 
   let editingToken = $state(false)
   let tokenInput = $state(accessToken)
   let tokenSaving = $state(false)
   let copyFeedback = $state(false)
+  let siteInput = $state(siteName)
+  let siteSaving = $state(false)
 
   $effect(() => { tokenInput = accessToken })
+  $effect(() => { siteInput = siteName })
+
+  let siteDirty = $derived(siteInput !== siteName)
+
+  async function saveSiteName() {
+    if (!activePath || !siteDirty) return
+    siteSaving = true
+    try {
+      const ok = await onSiteNameChange(siteInput.trim())
+      if (ok) siteInput = siteInput.trim()
+    } catch { /* ignore */ }
+    siteSaving = false
+  }
 
   let isDirty = $derived(tokenInput !== accessToken)
 
@@ -322,48 +345,81 @@
   {/if}
   <div class="entries-footer">
     <div class="at-section">
-      <label>网页访问令牌</label>
-      <div class="at-row">
-        {#if editingToken}
+      <label>网页名称</label>
+      {#if siteLocked}
+        <div class="at-row">
+          <div class="at-masked site-name-display" title={siteName}>{siteName}</div>
+          <button class="at-save-btn site-open-btn" onclick={onOpenSite} title="在浏览器中打开部署的网页">
+            <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.354 5.5H4a3 3 0 0 0 0 6h3a3 3 0 0 0 2.83-4H9c-.086 0-.17.01-.25.031a2 2 0 0 1-2.29 2.969A2 2 0 0 1 4 8.5v-.5h2.354a1 1 0 0 0 0-2zM12 4.5H9a3 3 0 0 0-2.83 4h1.049a2 2 0 0 1 2.29-2.969A2 2 0 0 1 12 7.5v.5H9.646a1 1 0 0 0 0 2H12a3 3 0 0 0 0-6z"/></svg>
+            打开网页
+          </button>
+        </div>
+      {:else}
+        <div class="at-row">
           <input
             type="text"
             class="at-input"
-            bind:value={tokenInput}
-            placeholder="访问令牌"
-            autofocus
+            bind:value={siteInput}
+            placeholder="站点名（仅限英文、数字、- 和 _）"
+            onkeydown={(e) => { if (e.key === 'Enter') saveSiteName() }}
           />
-          {#if !tokenInput}
-            <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
-          {/if}
           <button
             class="at-save-btn"
-            class:saved={!isDirty}
-            onclick={saveToken}
-            disabled={tokenSaving || !isDirty}
+            class:saved={!siteDirty}
+            onclick={saveSiteName}
+            disabled={siteSaving || !siteDirty}
           >
-            {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
+            {siteSaving ? '保存中...' : siteDirty ? '保存' : '已保存'}
           </button>
-        {:else if accessToken}
-          <div
-            class="at-masked"
-            class:copied={copyFeedback}
-            onclick={copyToken}
-            ondblclick={() => { editingToken = true; tokenInput = accessToken }}
-            title="单击复制，双击编辑"
-          >
-            {#if copyFeedback}
-              已复制!
-            {:else}
-              {'*'.repeat(Math.min(accessToken.length, 16))}
-            {/if}
-          </div>
-        {:else}
-          <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
-            - 未设置 -
-          </div>
-        {/if}
-      </div>
+        </div>
+        <div class="site-hint">部署后锁定，作为站点访问地址</div>
+      {/if}
     </div>
+    {#if siteLocked}
+      <div class="at-section">
+        <label>网页访问令牌</label>
+        <div class="at-row">
+          {#if editingToken}
+            <input
+              type="text"
+              class="at-input"
+              bind:value={tokenInput}
+              placeholder="访问令牌"
+              autofocus
+            />
+            {#if !tokenInput}
+              <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
+            {/if}
+            <button
+              class="at-save-btn"
+              class:saved={!isDirty}
+              onclick={saveToken}
+              disabled={tokenSaving || !isDirty}
+            >
+              {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
+            </button>
+          {:else if accessToken}
+            <div
+              class="at-masked"
+              class:copied={copyFeedback}
+              onclick={copyToken}
+              ondblclick={() => { editingToken = true; tokenInput = accessToken }}
+              title="单击复制，双击编辑"
+            >
+              {#if copyFeedback}
+                已复制!
+              {:else}
+                {'*'.repeat(Math.min(accessToken.length, 16))}
+              {/if}
+            </div>
+          {:else}
+            <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
+              - 未设置 -
+            </div>
+          {/if}
+        </div>
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -565,5 +621,32 @@
     opacity: 0.5;
     cursor: default;
     pointer-events: none;
+  }
+  .site-name-display {
+    flex: 1;
+    font-family: var(--mono);
+    cursor: default;
+  }
+  .site-name-display:hover {
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .site-open-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--accent) !important;
+    border-color: var(--accent) !important;
+    color: #fff !important;
+    font-weight: 600;
+  }
+  .site-open-btn:hover:not(:disabled) {
+    background: var(--accent-hover) !important;
+    border-color: var(--accent-hover) !important;
+  }
+  .site-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top: 4px;
   }
 </style>
