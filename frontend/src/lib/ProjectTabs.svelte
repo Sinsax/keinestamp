@@ -16,7 +16,7 @@
     onSelect: (path: string) => void
     onNewProject: () => void
     onSettings: () => void
-    theme?: string
+    theme?: 'day' | 'night'
     onToggleTheme?: () => void
     onRemoveRecent?: (path: string) => void
   } = $props()
@@ -35,6 +35,10 @@
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) return
       if (node.scrollWidth <= node.clientWidth) return
+      const atEdge =
+        (e.deltaY < 0 && node.scrollLeft <= 0) ||
+        (e.deltaY > 0 && node.scrollLeft >= node.scrollWidth - node.clientWidth)
+      if (atEdge) return
       e.preventDefault()
       node.scrollLeft += e.deltaY
     }
@@ -60,6 +64,7 @@
     check()
     const ro = new ResizeObserver(check)
     ro.observe(el)
+    entries
     return () => ro.disconnect()
   })
 

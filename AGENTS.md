@@ -135,7 +135,7 @@ All in `frontend/src/`. Key files:
 - `SettingsDialog.svelte` — web_remote/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle. Save does not close dialog.
 - `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. Access token section at bottom.
 - `StatusBar.svelte` — Connection indicator (green/red dot) only.
-- `ProjectTabs.svelte` — Project tabs bar: scrollable tabs area (`overflow-x: auto` + wheel-scroll action + hover-only thin scrollbar + edge mask fade when scrollable + active tab auto `scrollIntoView`). Active tab hover shows × (wired to `onRemoveRecent`, reuses confirm logic, `stopPropagation` so it doesn't select). Fixed right actions area (☀/🌙 theme toggle + ⚙ settings, divided by border). Props: `theme`/`onToggleTheme`/`onRemoveRecent`.
+- `ProjectTabs.svelte` — Project tabs bar: scrollable tabs area (`overflow-x: auto` + wheel-scroll action + hover-only thin scrollbar + edge mask fade when scrollable + active tab auto `scrollIntoView`). Active tab shows × (wired to `onRemoveRecent`, reuses confirm logic, `stopPropagation` so it doesn't select). Fixed right actions area (☀/🌙 theme toggle + ⚙ settings, divided by border). Props: `theme`/`onToggleTheme`/`onRemoveRecent`.
 - `api.ts` — 27 Tauri invoke wrappers
 - `types.ts` — Interfaces
 
