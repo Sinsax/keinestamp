@@ -1,0 +1,22 @@
+[Unit]
+Description=Keinestamp web timeline server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+Group=YOUR_USERNAME
+WorkingDirectory=%h/exhd/keinestamp
+ExecStart=%h/exhd/keinestamp/keinestamp serve
+Restart=on-failure
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=%h/exhd/keinestamp/web-root
+
+[Install]
+WantedBy=multi-user.target
