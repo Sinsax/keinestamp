@@ -311,6 +311,95 @@ fn serve_login_page(request: tiny_http::Request, project_name: &str) -> Result<(
     Ok(())
 }
 
+fn handle_index(request: tiny_http::Request) -> Result<()> {
+    let hdr = Header::from_bytes(&b"Content-Type"[..], &b"text/html; charset=utf-8"[..]).unwrap();
+    let response = Response::from_string(index_page_html()).with_header(hdr);
+    request.respond(response)?;
+    Ok(())
+}
+
+fn index_page_html() -> String {
+    format!(
+        r##"<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
+<link rel="icon" href="data:image/png;base64,{favicon}">
+<title>Keinestamp</title>
+<style>
+:root{{
+--bg:#f4f6f8;--surface:#ffffff;--border:#e3e7ed;--text:#1e2833;--text-dim:#6b7684;
+--accent:#d94747;--accent-hover:#c63b3b;
+--ice:#7fa8ce;--ze:#3e6b52;
+--shadow-lg:0 16px 48px rgba(30,40,51,0.18);
+}}
+[data-theme="night"]{{
+--bg:#141d18;--surface:#1b2620;--border:#3b4f45;--text:#f4faf6;--text-dim:#bccac4;
+--accent:#ec6262;--accent-hover:#d94f4f;
+--ice:#c3ecd4;--ze:#63b58b;
+--shadow-lg:0 16px 48px rgba(0,0,0,0.55);
+}}
+*{{box-sizing:border-box}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;overflow:hidden;animation:fade-in .4s ease}}
+@keyframes fade-in{{from{{opacity:0}}to{{opacity:1}}}}
+.glow{{position:fixed;border-radius:50%;pointer-events:none;filter:blur(60px)}}
+.glow-tl{{width:360px;height:360px;left:-120px;top:-120px;background:color-mix(in srgb,var(--accent) 10%,transparent)}}
+.glow-br{{width:420px;height:420px;right:-140px;bottom:-140px;background:color-mix(in srgb,var(--ice) 10%,transparent)}}
+.moon{{position:absolute;top:28px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:flex-end;opacity:.7}}
+.moon svg{{height:26px}}
+.wrap{{position:relative;text-align:center;padding:48px 32px;max-width:640px}}
+.logo-box{{width:84px;height:84px;margin:0 auto 20px;background:var(--surface);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center}}
+.logo-box img{{width:52px;height:52px;border-radius:10px}}
+h1{{font-size:34px;font-weight:700;margin:0 0 6px;letter-spacing:.5px}}
+.sub{{font-size:14px;color:var(--text-dim);margin:0 0 18px}}
+.divider{{width:120px;height:2px;margin:0 auto 34px;border-radius:1px;background:linear-gradient(to right,transparent,var(--accent),transparent)}}
+.cards{{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}}
+.card{{width:168px;padding:20px 16px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(30,40,51,.06);transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}}
+.card:hover{{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}}
+.card-icon{{width:40px;height:40px;margin:0 auto 10px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}}
+.card h3{{font-size:13px;margin:0 0 6px;font-weight:600}}
+.card p{{font-size:11px;color:var(--text-dim);margin:0;line-height:1.5}}
+footer{{margin-top:36px;font-size:11px;color:var(--text-dim);opacity:.7}}
+</style>
+</head>
+<body>
+<div class="glow glow-tl"></div>
+<div class="glow glow-br"></div>
+<div class="moon">
+  <svg viewBox="0 0 40 26" fill="none"><path d="M2 24 A18 18 0 0 1 38 24" stroke="var(--ice)" stroke-width="4" stroke-linecap="round" opacity="0.55"/><path d="M8 24 A12 12 0 0 1 32 24" stroke="var(--ze)" stroke-width="4" stroke-linecap="round" opacity="0.6"/><path d="M14 24 A6 6 0 0 1 26 24" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/></svg>
+</div>
+<div class="wrap">
+  <div class="logo-box"><img src="data:image/png;base64,{favicon}" alt="Keinestamp logo"></div>
+  <h1>Keinestamp</h1>
+  <p class="sub">Blender Git Progress Board</p>
+  <div class="divider"></div>
+  <div class="cards">
+    <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M12.854.146a.5.5 0 00-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 000-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 016 13.5V13h-.5a.5.5 0 01-.5-.5V12h-.5a.5.5 0 01-.5-.5V11h-.5a.5.5 0 01-.5-.5V10h-.5a.499.499 0 01-.175-.032l-.179.178a.5.5 0 00-.11.168l-2 5a.5.5 0 00.65.65l5-2a.5.5 0 00.168-.11l.178-.178z"/></svg></div>
+      <h3>进度记录</h3>
+      <p>将 Blender 项目进展逐条记录为版本</p>
+    </div>
+    <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M3.5 0a.5.5 0 01.5.5V1h8V.5a.5.5 0 011 0V1h1a2 2 0 012 2v11a2 2 0 01-2 2H2a2 2 0 01-2-2V3a2 2 0 012-2h1V.5a.5.5 0 01.5-.5zM1 4v10a1 1 0 001 1h12a1 1 0 001-1V4H1z"/><path d="M4 7h3v1H4zM9 7h3v1H9zM4 10h3v1H4zM9 10h3v1H9z"/></svg></div>
+      <h3>版本时间线</h3>
+      <p>自动生成时间线与日历热力图</p>
+    </div>
+    <div class="card">
+      <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8.186 1.113a.5.5 0 00-.372 0L1.846 3.5l1.064 3.739L1.336 14.5h13.328L13.09 7.239 14.154 3.5 8.186 1.113zM8 2.18l4.53 1.79-1.22 4.287a4.5 4.5 0 01-1.242-.42l1.09-3.827a.5.5 0 00-.946-.32L9.2 7.18a4.5 4.5 0 01-2.4 0L7.79 5.69a.5.5 0 00-.947.32l1.09 3.827a4.5 4.5 0 01-1.242.42L5.47 5.97 8 2.18z"/></svg></div>
+      <h3>3D 预览</h3>
+      <p>模型预览直接内嵌网页</p>
+    </div>
+  </div>
+  <footer>Keinestamp © 2026</footer>
+</div>
+</body>
+</html>"##,
+        favicon = crate::three_assets::logo_favicon_b64()
+    )
+}
+
 pub fn sanitize_project_name(name: &str) -> String {
     name.chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
@@ -536,6 +625,14 @@ pub fn start(config: ServeConfig) -> Result<()> {
                     log_warn("AUTH", &format!("{} unauthorized on /upload", req_ip));
                     let _ = request.respond(unauthorized_response());
                 }
+            }
+            continue;
+        }
+
+        // Root homepage
+        if (url == "/" || url.is_empty()) && method == Method::Get {
+            if let Err(e) = handle_index(request) {
+                log_error("INDEX", &format!("{} {}", req_ip, e));
             }
             continue;
         }
@@ -985,6 +1082,21 @@ mod tests {
         assert!(html.contains("--accent"));
         assert!(!html.contains("<svg"), "web logo should be removed");
         assert!(html.contains("输入访问令牌以查看时间线"));
+    }
+
+    #[test]
+    fn index_page_has_brand_and_features() {
+        let html = index_page_html();
+        assert!(html.contains("Keinestamp"));
+        assert!(html.contains("Blender Git Progress Board"));
+        assert!(html.contains("data-theme"));
+        assert!(html.contains("keinestamp_web_theme"));
+        assert!(html.contains("data:image/png;base64,"), "favicon embedded");
+        assert!(html.contains("进度记录"));
+        assert!(html.contains("版本时间线"));
+        assert!(html.contains("3D 预览"));
+        assert!(html.contains("moon"), "moon decoration present");
+        assert!(html.contains("card-icon"), "feature cards present");
     }
 
     #[test]
