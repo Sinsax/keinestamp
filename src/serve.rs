@@ -342,58 +342,115 @@ fn index_page_html() -> String {
 --shadow-lg:0 16px 48px rgba(0,0,0,0.55);
 }}
 *{{box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);display:flex;align-items:center;justify-content:center;overflow:hidden;animation:fade-in .4s ease}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);overflow:hidden;animation:fade-in .5s ease;cursor:default}}
 @keyframes fade-in{{from{{opacity:0}}to{{opacity:1}}}}
-.glow{{position:fixed;border-radius:50%;pointer-events:none;filter:blur(60px)}}
-.glow-tl{{width:360px;height:360px;left:-120px;top:-120px;background:color-mix(in srgb,var(--accent) 10%,transparent)}}
-.glow-br{{width:420px;height:420px;right:-140px;bottom:-140px;background:color-mix(in srgb,var(--ice) 10%,transparent)}}
-.moon{{position:absolute;top:28px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:flex-end;opacity:.7}}
-.moon svg{{height:26px}}
-.wrap{{position:relative;text-align:center;padding:48px 32px;max-width:640px}}
-.logo-box{{width:84px;height:84px;margin:0 auto 20px;background:var(--surface);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center}}
-.logo-box img{{width:52px;height:52px;border-radius:10px}}
-h1{{font-size:34px;font-weight:700;margin:0 0 6px;letter-spacing:.5px}}
-.sub{{font-size:14px;color:var(--text-dim);margin:0 0 18px}}
-.divider{{width:120px;height:2px;margin:0 auto 34px;border-radius:1px;background:linear-gradient(to right,transparent,var(--accent),transparent)}}
-.cards{{display:flex;gap:14px;justify-content:center;flex-wrap:wrap}}
-.card{{width:168px;padding:20px 16px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 1px 2px rgba(30,40,51,.06);transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease}}
-.card:hover{{transform:translateY(-2px);box-shadow:var(--shadow-lg);border-color:var(--accent)}}
-.card-icon{{width:40px;height:40px;margin:0 auto 10px;border-radius:10px;display:flex;align-items:center;justify-content:center;color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,transparent)}}
-.card h3{{font-size:13px;margin:0 0 6px;font-weight:600}}
-.card p{{font-size:11px;color:var(--text-dim);margin:0;line-height:1.5}}
-footer{{margin-top:36px;font-size:11px;color:var(--text-dim);opacity:.7}}
+.glow{{position:fixed;border-radius:50%;pointer-events:none;filter:blur(70px)}}
+.glow-tl{{width:380px;height:380px;left:-130px;top:-130px;background:color-mix(in srgb,var(--accent) 9%,transparent)}}
+.glow-br{{width:440px;height:440px;right:-150px;bottom:-150px;background:color-mix(in srgb,var(--ice) 9%,transparent)}}
+.brand{{position:fixed;top:22px;left:26px;font-size:12px;font-weight:600;letter-spacing:2px;color:var(--text-dim);opacity:.8}}
+.stage{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}}
+.disk{{width:190px;height:190px;border-radius:50%;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;position:relative;transition:border-color .3s ease}}
+.disk::after{{content:'';position:absolute;inset:-14px;border-radius:50%;border:1px dashed color-mix(in srgb,var(--text-dim) 35%,transparent);animation:spin 40s linear infinite}}
+@keyframes spin{{to{{transform:rotate(360deg)}}}}
+.disk svg{{width:110px;height:110px;overflow:visible}}
+.disk svg .crescent{{fill:var(--accent)}}
+.disk svg .glow-inner{{fill:color-mix(in srgb,var(--ice) 55%,transparent)}}
+.moon-line{{margin-top:34px;font-size:13px;color:var(--text-dim);letter-spacing:1px}}
+.moon-line b{{color:var(--text);font-weight:600}}
+.moon-sub{{margin-top:6px;font-size:12px;color:var(--text-dim);opacity:.8}}
+.tagline{{margin-top:30px;font-size:15px;font-weight:500;max-width:520px;text-align:center;line-height:1.7;padding:0 24px}}
+.tagline::before{{content:'「';color:var(--accent)}}
+.tagline::after{{content:'」';color:var(--accent)}}
+.hint{{position:fixed;right:24px;bottom:20px;font-size:11px;color:var(--text-dim);opacity:.55;letter-spacing:1px;animation:bob 3s ease-in-out infinite}}
+@keyframes bob{{0%,100%{{transform:translateY(0)}}50%{{transform:translateY(-4px)}}}}
+.quote{{position:fixed;pointer-events:none;font-size:13px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;box-shadow:var(--shadow-lg);transform:translate(-50%,-110%);opacity:0;transition:opacity .3s ease,transform .3s ease;z-index:10;white-space:nowrap;max-width:70vw}}
+.quote.show{{opacity:1;transform:translate(-50%,-120%)}}
+.dot{{position:fixed;width:10px;height:10px;border-radius:50%;background:var(--accent);mix-blend-mode:multiply;pointer-events:none;z-index:5;transition:background .3s ease}}
+[data-theme="night"] .dot{{mix-blend-mode:screen}}
 </style>
 </head>
 <body>
 <div class="glow glow-tl"></div>
 <div class="glow glow-br"></div>
-<div class="moon">
-  <svg viewBox="0 0 40 26" fill="none"><path d="M2 24 A18 18 0 0 1 38 24" stroke="var(--ice)" stroke-width="4" stroke-linecap="round" opacity="0.55"/><path d="M8 24 A12 12 0 0 1 32 24" stroke="var(--ze)" stroke-width="4" stroke-linecap="round" opacity="0.6"/><path d="M14 24 A6 6 0 0 1 26 24" stroke="var(--accent)" stroke-width="4" stroke-linecap="round"/></svg>
-</div>
-<div class="wrap">
-  <div class="logo-box"><img src="data:image/png;base64,{favicon}" alt="Keinestamp logo"></div>
-  <h1>Keinestamp</h1>
-  <p class="sub">Blender Git Progress Board</p>
-  <div class="divider"></div>
-  <div class="cards">
-    <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M12.854.146a.5.5 0 00-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 000-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 016 13.5V13h-.5a.5.5 0 01-.5-.5V12h-.5a.5.5 0 01-.5-.5V11h-.5a.5.5 0 01-.5-.5V10h-.5a.499.499 0 01-.175-.032l-.179.178a.5.5 0 00-.11.168l-2 5a.5.5 0 00.65.65l5-2a.5.5 0 00.168-.11l.178-.178z"/></svg></div>
-      <h3>进度记录</h3>
-      <p>将 Blender 项目进展逐条记录为版本</p>
-    </div>
-    <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M3.5 0a.5.5 0 01.5.5V1h8V.5a.5.5 0 011 0V1h1a2 2 0 012 2v11a2 2 0 01-2 2H2a2 2 0 01-2-2V3a2 2 0 012-2h1V.5a.5.5 0 01.5-.5zM1 4v10a1 1 0 001 1h12a1 1 0 001-1V4H1z"/><path d="M4 7h3v1H4zM9 7h3v1H9zM4 10h3v1H4zM9 10h3v1H9z"/></svg></div>
-      <h3>版本时间线</h3>
-      <p>自动生成时间线与日历热力图</p>
-    </div>
-    <div class="card">
-      <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8.186 1.113a.5.5 0 00-.372 0L1.846 3.5l1.064 3.739L1.336 14.5h13.328L13.09 7.239 14.154 3.5 8.186 1.113zM8 2.18l4.53 1.79-1.22 4.287a4.5 4.5 0 01-1.242-.42l1.09-3.827a.5.5 0 00-.946-.32L9.2 7.18a4.5 4.5 0 01-2.4 0L7.79 5.69a.5.5 0 00-.947.32l1.09 3.827a4.5 4.5 0 01-1.242.42L5.47 5.97 8 2.18z"/></svg></div>
-      <h3>3D 预览</h3>
-      <p>模型预览直接内嵌网页</p>
-    </div>
+<div class="brand">KEINESTAMP</div>
+<div class="dot" id="dot"></div>
+<div class="quote" id="quote"></div>
+<main class="stage">
+  <div class="disk">
+    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="60" cy="60" r="46" class="glow-inner" opacity="0.5"/>
+      <path d="M84 32 A42 42 0 1 0 84 88 A34 34 0 0 1 84 32Z" class="crescent"/>
+      <circle cx="72" cy="42" r="2.5" fill="var(--surface)"/>
+    </svg>
   </div>
-  <footer>Keinestamp © 2026</footer>
-</div>
+  <div class="moon-line">月相 <b id="phaseName">—</b> · 月龄 <b id="phaseAge">—</b> 天</div>
+  <div class="moon-sub" id="phaseSub"></div>
+  <p class="tagline" id="tagline"></p>
+</main>
+<div class="hint">✦ 点一下页面</div>
+<script>
+(function(){{
+  var synodic = 29.53058867;
+  var ref = Date.UTC(2000,0,6,18,14);
+  var age = ((Date.now() - ref) % (synodic*864e5) + synodic*864e5) % (synodic*864e5) / 864e5;
+  var name = age < 1.8 ? '新月' : age < 5.5 ? '娥眉月' : age < 9.2 ? '上弦月' : age < 12.7 ? '盈凸月' : age < 16.4 ? '满月' : age < 20.1 ? '亏凸月' : age < 23.8 ? '下弦月' : age < 27.5 ? '残月' : '新月';
+  var toFull = (16.4 - age + synodic) % synodic;
+  var toNew = (synodic - age) % synodic;
+  var sub = '';
+  if (age > 14.5 && age < 18.3) sub = '今晚月圆，小心变成白泽';
+  else if (toFull < 3) sub = '距满月还有 ' + toFull.toFixed(1) + ' 天';
+  else if (toNew < 3) sub = '距新月还有 ' + toNew.toFixed(1) + ' 天';
+  else if (age < 14.5) sub = '月渐盈 · 距满月还有 ' + toFull.toFixed(1) + ' 天';
+  else sub = '月渐亏 · 距新月还有 ' + toNew.toFixed(1) + ' 天';
+  document.getElementById('phaseName').textContent = name;
+  document.getElementById('phaseAge').textContent = age.toFixed(1);
+  document.getElementById('phaseSub').textContent = sub;
+
+  var taglines = [
+    '记录 Blender 进度，不然就白干了',
+    '给每个版本留个痕迹，好让未来的你感谢现在的你',
+    '进度不一定有，记录一定要有',
+    '满月夜的代码总比白天靠谱（并没有）',
+    '时间线不会说谎，只有你的进度会说谎',
+    '模型改到第 N 版，说明 N-1 版都有意义',
+  ];
+  document.getElementById('tagline').textContent = taglines[Math.floor(Math.random()*taglines.length)];
+
+  var quotes = [
+    '模型不改个十版，都不好意思叫建模',
+    '又是满月，记得休息，别熬成白泽',
+    '今天也好好记录进度了吗？',
+    '撤回是悔恨，提交是勇气',
+    '贴图一时爽，UV 火葬场',
+    '这个版本一定没问题的……大概',
+    '夜已深，进度条还差一点',
+    '好版本都是记录出来的，不是猜出来的',
+  ];
+  document.addEventListener('click', function(e){{
+    var q = document.getElementById('quote');
+    q.textContent = quotes[Math.floor(Math.random()*quotes.length)];
+    q.style.left = e.clientX + 'px';
+    q.style.top = e.clientY + 'px';
+    q.classList.add('show');
+    clearTimeout(q._t);
+    q._t = setTimeout(function(){{ q.classList.remove('show'); }}, 1600);
+  }});
+
+  var dot = document.getElementById('dot');
+  var mx = -100, my = -100, dx = -100, dy = -100;
+  document.addEventListener('mousemove', function(e){{
+    mx = e.clientX; my = e.clientY;
+    if (dx < -50) {{ dx = mx; dy = my; }}
+  }});
+  (function loop(){{
+    dx += (mx - dx) * 0.12;
+    dy += (my - dy) * 0.12;
+    dot.style.left = dx + 'px';
+    dot.style.top = dy + 'px';
+    requestAnimationFrame(loop);
+  }})();
+}})();
+</script>
 </body>
 </html>"##,
         favicon = crate::three_assets::logo_favicon_b64()
@@ -1087,16 +1144,16 @@ mod tests {
     #[test]
     fn index_page_has_brand_and_features() {
         let html = index_page_html();
-        assert!(html.contains("Keinestamp"));
-        assert!(html.contains("Blender Git Progress Board"));
+        assert!(html.contains("KEINESTAMP"));
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");
-        assert!(html.contains("进度记录"));
-        assert!(html.contains("版本时间线"));
-        assert!(html.contains("3D 预览"));
-        assert!(html.contains("moon"), "moon decoration present");
-        assert!(html.contains("card-icon"), "feature cards present");
+        assert!(html.contains("phaseName"), "moon phase info present");
+        assert!(html.contains("tagline"), "random tagline present");
+        assert!(html.contains("quotes"), "click quotes present");
+        assert!(html.contains("mix-blend-mode"), "cursor dot present");
+        assert!(!html.contains("card-icon"), "no generic feature cards");
+        assert!(!html.contains("Keinestamp ©"), "no generic footer");
     }
 
     #[test]
