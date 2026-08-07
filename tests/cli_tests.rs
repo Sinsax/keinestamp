@@ -186,7 +186,7 @@ fn html_gen_contains_daynight_theme() {
             files: vec!["char.blend".to_string()],
             file_status: vec![],
             preview: "previews/abc123.png".to_string(),
-            tag: Some("建模".to_string()),
+            tag: Some("建模".to_string()), milestone: false,
         }],
     };
 
