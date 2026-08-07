@@ -86,7 +86,7 @@
         title={cleanPath(e.path)}
       >
         <span class="tab-name">{projectName(e.path)}</span>
-        <span class="tab-close" class:inactive={e.path !== activePath} onclick={(ev) => handleTabClose(ev, e.path)} title="移除仓库">
+        <span class="tab-close" onclick={(ev) => handleTabClose(ev, e.path)} title="移除仓库">
           <svg viewBox="0 0 12 12" width="9" height="9" fill="currentColor"><path d="M2.646 2.646a.5.5 0 0 1 .708 0L6 5.293l2.646-2.647a.5.5 0 0 1 .708.708L6.707 6l2.647 2.646a.5.5 0 0 1-.708.708L6 6.707l-2.646 2.647a.5.5 0 0 1-.708-.708L5.293 6 2.646 3.354a.5.5 0 0 1 0-.708z"/></svg>
         </span>
       </button>
@@ -203,10 +203,6 @@
     color: var(--text-dim);
     flex-shrink: 0;
     transition: background 0.12s, color 0.12s;
-  }
-  .tab-close.inactive {
-    visibility: hidden;
-    pointer-events: none;
   }
   .tab-close:hover {
     background: var(--accent-soft);
