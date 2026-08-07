@@ -83,6 +83,7 @@
         class="project-tab"
         class:active={e.path === activePath}
         onclick={() => onSelect(e.path)}
+        onauxclick={(ev) => { if (ev.button === 1) handleTabClose(ev, e.path) }}
         title={cleanPath(e.path)}
       >
         <span class="tab-name">{projectName(e.path)}</span>
@@ -202,7 +203,12 @@
     border-radius: 50%;
     color: var(--text-dim);
     flex-shrink: 0;
-    transition: background 0.12s, color 0.12s;
+    visibility: hidden;
+    transition: background 0.12s, color 0.12s, visibility 0s;
+  }
+  .project-tab:hover .tab-close,
+  .project-tab.active .tab-close {
+    visibility: visible;
   }
   .tab-close:hover {
     background: var(--accent-soft);
