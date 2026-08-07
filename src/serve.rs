@@ -340,6 +340,8 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
   --text-dim: #69727c;
   --line: #d9dee5;
   --accent: #d94747;
+  --tint: #7fa8ce;
+  --tint-soft: #eff5fb;
   --deco-a: #9ab3cd;
   --deco-b: #8fa694;
   --deco-c: #c7a9a9;
@@ -347,12 +349,14 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
   --shadow-sm: 0 1px 2px rgba(27, 34, 43, 0.06);
 }
 [data-theme="night"] {
-  --bg: #14171a;
-  --surface: #1b1f22;
+  --bg: #151a18;
+  --surface: #1b211f;
   --text: #e9efeb;
   --text-dim: #9aa5a0;
   --line: #2a3237;
   --accent: #e05a5a;
+  --tint: #6fc49a;
+  --tint-soft: #25362e;
   --deco-a: #7fa08d;
   --deco-b: #6e8478;
   --deco-c: #8a6e6e;
@@ -374,10 +378,10 @@ body {
 /* ---- 装饰层 ---- */
 .deco { position: fixed; pointer-events: none; }
 .glow-tl { width: 420px; height: 420px; left: -140px; top: -140px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-a) 14%, transparent), transparent 70%); filter: blur(40px); }
-.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-b) 12%, transparent), transparent 70%); filter: blur(40px); }
+.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tint) 12%, transparent), transparent 70%); filter: blur(40px); }
 .wave { top: 0; left: 0; right: 0; height: 140px; opacity: 0.07; }
 .wave svg { width: 100%; height: 100%; }
-.code-tex { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: var(--deco-a); opacity: 0.05; letter-spacing: 0.5px; }
+.code-tex { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: var(--tint); opacity: 0.05; letter-spacing: 0.5px; }
 .c1 { left: 4%; bottom: 14%; }
 .c2 { right: 5%; bottom: 40%; }
 .c3 { left: 32%; bottom: 6%; }
