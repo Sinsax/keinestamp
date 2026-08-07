@@ -4,6 +4,22 @@ export interface StatusFile {
   y: string
 }
 
+function unquoteC(p: string): string {
+  if (p.length < 2 || p[0] !== '"' || p[p.length - 1] !== '"') return p
+  const s = p.slice(1, -1)
+  return s.replace(/\\(?:(["\\abtnr])|(\d{3}))/g, (m, c, o) => {
+    if (o) return String.fromCharCode(parseInt(o, 8))
+    switch (c) {
+      case 'a': return '\x07'
+      case 'b': return '\b'
+      case 't': return '\t'
+      case 'n': return '\n'
+      case 'r': return '\r'
+      default: return c
+    }
+  })
+}
+
 export function parseStatus(output: string): StatusFile[] {
   return output
     .split('\n')
@@ -12,7 +28,7 @@ export function parseStatus(output: string): StatusFile[] {
     .map((l) => ({
       x: l[0] || ' ',
       y: l[1] || ' ',
-      path: l.substring(3).trim(),
+      path: unquoteC(l.substring(3).trim()),
     }))
 }
 
