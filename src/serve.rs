@@ -349,23 +349,17 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang S
 .glow-br{{width:440px;height:440px;right:-150px;bottom:-150px;background:color-mix(in srgb,var(--ice) 9%,transparent)}}
 .brand{{position:fixed;top:22px;left:26px;font-size:12px;font-weight:600;letter-spacing:2px;color:var(--text-dim);opacity:.8}}
 .stage{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}}
-.disk{{width:190px;height:190px;border-radius:50%;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;position:relative;transition:border-color .3s ease}}
-.disk::after{{content:'';position:absolute;inset:-14px;border-radius:50%;border:1px dashed color-mix(in srgb,var(--text-dim) 35%,transparent);animation:spin 40s linear infinite}}
-@keyframes spin{{to{{transform:rotate(360deg)}}}}
-.disk svg{{width:110px;height:110px;overflow:visible}}
-.disk svg .crescent{{fill:var(--accent)}}
-.disk svg .glow-inner{{fill:color-mix(in srgb,var(--ice) 55%,transparent)}}
-.moon-line{{margin-top:34px;font-size:13px;color:var(--text-dim);letter-spacing:1px}}
-.moon-line b{{color:var(--text);font-weight:600}}
-.moon-sub{{margin-top:6px;font-size:12px;color:var(--text-dim);opacity:.8}}
-.tagline{{margin-top:30px;font-size:15px;font-weight:500;max-width:520px;text-align:center;line-height:1.7;padding:0 24px}}
-.tagline::before{{content:'「';color:var(--accent)}}
-.tagline::after{{content:'」';color:var(--accent)}}
+#moon{{width:150px;height:150px;filter:drop-shadow(0 8px 24px color-mix(in srgb,var(--text) 18%,transparent))}}
+.bow-wrap{{margin-top:-2px;display:flex;flex-direction:column;align-items:center}}
+.bow-svg{{width:150px;height:62px;display:block}}
+.connector{{width:2px;height:18px;background:linear-gradient(to bottom,color-mix(in srgb,var(--accent) 40%,transparent),var(--accent))}}
+.moon-info{{margin-top:18px;font-size:13px;color:var(--text-dim);letter-spacing:1px}}
+.moon-info b{{color:var(--text);font-weight:600}}
 .hint{{position:fixed;right:24px;bottom:20px;font-size:11px;color:var(--text-dim);opacity:.55;letter-spacing:1px;animation:bob 3s ease-in-out infinite}}
 @keyframes bob{{0%,100%{{transform:translateY(0)}}50%{{transform:translateY(-4px)}}}}
-.quote{{position:fixed;pointer-events:none;font-size:13px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;box-shadow:var(--shadow-lg);transform:translate(-50%,-110%);opacity:0;transition:opacity .3s ease,transform .3s ease;z-index:10;white-space:nowrap;max-width:70vw}}
+.quote{{position:fixed;pointer-events:none;font-size:14px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;box-shadow:var(--shadow-lg);transform:translate(-50%,-110%);opacity:0;transition:opacity .3s ease,transform .3s ease;z-index:10;white-space:nowrap;max-width:70vw}}
 .quote.show{{opacity:1;transform:translate(-50%,-120%)}}
-.dot{{position:fixed;width:10px;height:10px;border-radius:50%;background:var(--accent);mix-blend-mode:multiply;pointer-events:none;z-index:5;transition:background .3s ease}}
+.dot{{position:fixed;width:10px;height:10px;border-radius:50%;background:var(--accent);mix-blend-mode:multiply;pointer-events:none;z-index:5}}
 [data-theme="night"] .dot{{mix-blend-mode:screen}}
 </style>
 </head>
@@ -376,16 +370,18 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang S
 <div class="dot" id="dot"></div>
 <div class="quote" id="quote"></div>
 <main class="stage">
-  <div class="disk">
-    <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
-      <circle cx="60" cy="60" r="46" class="glow-inner" opacity="0.5"/>
-      <path d="M84 32 A42 42 0 1 0 84 88 A34 34 0 0 1 84 32Z" class="crescent"/>
-      <circle cx="72" cy="42" r="2.5" fill="var(--surface)"/>
+  <canvas id="moon" width="150" height="150"></canvas>
+  <div class="bow-wrap">
+    <div class="connector"></div>
+    <svg class="bow-svg" viewBox="0 0 150 62" xmlns="http://www.w3.org/2000/svg">
+      <path d="M75 30 C 55 4, 12 8, 12 30 C 12 52, 55 56, 75 30Z" fill="var(--accent)"/>
+      <path d="M75 30 C 95 4, 138 8, 138 30 C 138 52, 95 56, 75 30Z" fill="var(--accent)"/>
+      <rect x="67" y="21" width="16" height="18" rx="5" fill="var(--accent-hover)"/>
+      <path d="M12 30 C 2 24, -2 40, 6 50" stroke="var(--ice)" stroke-width="2" fill="none" opacity="0.65"/>
+      <path d="M138 30 C 148 24, 152 40, 144 50" stroke="var(--ze)" stroke-width="2" fill="none" opacity="0.65"/>
     </svg>
   </div>
-  <div class="moon-line">月相 <b id="phaseName">—</b> · 月龄 <b id="phaseAge">—</b> 天</div>
-  <div class="moon-sub" id="phaseSub"></div>
-  <p class="tagline" id="tagline"></p>
+  <div class="moon-info"><b id="phaseName">—</b> · <span>d</span><b id="phaseAge">—</b></div>
 </main>
 <div class="hint">✦ 点一下页面</div>
 <script>
@@ -393,28 +389,46 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang S
   var synodic = 29.53058867;
   var ref = Date.UTC(2000,0,6,18,14);
   var age = ((Date.now() - ref) % (synodic*864e5) + synodic*864e5) % (synodic*864e5) / 864e5;
+  var p = age / synodic;
   var name = age < 1.8 ? '新月' : age < 5.5 ? '娥眉月' : age < 9.2 ? '上弦月' : age < 12.7 ? '盈凸月' : age < 16.4 ? '满月' : age < 20.1 ? '亏凸月' : age < 23.8 ? '下弦月' : age < 27.5 ? '残月' : '新月';
-  var toFull = (16.4 - age + synodic) % synodic;
-  var toNew = (synodic - age) % synodic;
-  var sub = '';
-  if (age > 14.5 && age < 18.3) sub = '今晚月圆，小心变成白泽';
-  else if (toFull < 3) sub = '距满月还有 ' + toFull.toFixed(1) + ' 天';
-  else if (toNew < 3) sub = '距新月还有 ' + toNew.toFixed(1) + ' 天';
-  else if (age < 14.5) sub = '月渐盈 · 距满月还有 ' + toFull.toFixed(1) + ' 天';
-  else sub = '月渐亏 · 距新月还有 ' + toNew.toFixed(1) + ' 天';
   document.getElementById('phaseName').textContent = name;
   document.getElementById('phaseAge').textContent = age.toFixed(1);
-  document.getElementById('phaseSub').textContent = sub;
 
-  var taglines = [
-    '记录 Blender 进度，不然就白干了',
-    '给每个版本留个痕迹，好让未来的你感谢现在的你',
-    '进度不一定有，记录一定要有',
-    '满月夜的代码总比白天靠谱（并没有）',
-    '时间线不会说谎，只有你的进度会说谎',
-    '模型改到第 N 版，说明 N-1 版都有意义',
-  ];
-  document.getElementById('tagline').textContent = taglines[Math.floor(Math.random()*taglines.length)];
+  function drawMoon(phase) {{
+    var cv = document.getElementById('moon');
+    var ctx = cv.getContext('2d');
+    var cs = getComputedStyle(document.documentElement);
+    var light = cs.getPropertyValue('--text').trim() || '#1e2833';
+    var dark = cs.getPropertyValue('--bg').trim() || '#f4f6f8';
+    var border = cs.getPropertyValue('--border').trim() || '#e3e7ed';
+    var R = 68, xc = 75, yc = 75;
+    ctx.clearRect(0, 0, 150, 150);
+    ctx.beginPath();
+    ctx.arc(xc, yc, R, 0, Math.PI*2);
+    ctx.fillStyle = light;
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = border;
+    ctx.stroke();
+    ctx.beginPath();
+    var t = 2 * Math.PI * phase;
+    var rx = R * Math.sin(t);
+    if (phase < 0.5) {{
+      var tx = xc + R * Math.cos(t);
+      ctx.moveTo(tx, yc - R);
+      ctx.ellipse(tx, yc, rx, R, 0, -Math.PI/2, Math.PI/2);
+      ctx.arc(xc, yc, R, Math.PI/2, -Math.PI/2, true);
+    }} else {{
+      var tx = xc - R * Math.cos(t);
+      ctx.moveTo(tx, yc - R);
+      ctx.ellipse(tx, yc, rx, R, 0, Math.PI*1.5, Math.PI/2, true);
+      ctx.arc(xc, yc, R, Math.PI/2, -Math.PI/2, false);
+    }}
+    ctx.closePath();
+    ctx.fillStyle = dark;
+    ctx.fill();
+  }}
+  drawMoon(p);
 
   var quotes = [
     '模型不改个十版，都不好意思叫建模',
@@ -423,8 +437,11 @@ body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang S
     '撤回是悔恨，提交是勇气',
     '贴图一时爽，UV 火葬场',
     '这个版本一定没问题的……大概',
+    '进度不一定有，记录一定要有',
+    '满月夜的代码总比白天靠谱（并没有）',
     '夜已深，进度条还差一点',
     '好版本都是记录出来的，不是猜出来的',
+    '时间线不会说谎，只有你的进度会说谎',
   ];
   document.addEventListener('click', function(e){{
     var q = document.getElementById('quote');
@@ -1148,12 +1165,13 @@ mod tests {
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");
-        assert!(html.contains("phaseName"), "moon phase info present");
-        assert!(html.contains("tagline"), "random tagline present");
+        assert!(html.contains("bow-svg"), "red bow present");
+        assert!(html.contains("phaseName"), "moon phase name present");
+        assert!(html.contains("drawMoon"), "real moon phase canvas present");
         assert!(html.contains("quotes"), "click quotes present");
         assert!(html.contains("mix-blend-mode"), "cursor dot present");
         assert!(!html.contains("card-icon"), "no generic feature cards");
-        assert!(!html.contains("Keinestamp ©"), "no generic footer");
+        assert!(!html.contains("tagline"), "no tagline text element");
     }
 
     #[test]
