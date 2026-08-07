@@ -457,7 +457,7 @@
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} onRefresh={refreshStatus} selection={commitSelection} onSelectionChange={(sel) => commitSelection = sel} />
+            <StatusPanel {statusOutput} onRefresh={refreshStatus} {activePath} selection={commitSelection} onSelectionChange={(sel) => commitSelection = sel} />
           {/if}
         </div>
 

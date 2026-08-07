@@ -14,6 +14,7 @@
     onToggleDir,
     isCollapsed,
     onToggleCollapse,
+    onContextMenu = (_path: string, _isDir: boolean, _x: number, _y: number) => {},
   }: {
     node: FileTreeNode
     depth?: number
@@ -24,6 +25,7 @@
     onToggleDir: (node: FileTreeNode) => void
     isCollapsed: (path: string) => boolean
     onToggleCollapse: (path: string) => void
+    onContextMenu?: (path: string, isDir: boolean, x: number, y: number) => void
   } = $props()
 
   let indet = $state(false)
@@ -34,7 +36,7 @@
 </script>
 
 {#if isDir}
-  <div class="sp-item sp-dir" onclick={() => onToggleDir(node)} title="点击 = 选择/取消目录内所有文件">
+  <div class="sp-item sp-dir" onclick={() => onToggleDir(node)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title="点击 = 选择/取消目录内所有文件">
     <input
       type="checkbox"
       class="sp-check"
@@ -65,11 +67,12 @@
         {onToggleDir}
         {isCollapsed}
         {onToggleCollapse}
+        {onContextMenu}
       />
     {/each}
   {/if}
 {:else}
-  <div class="sp-item" onclick={() => onToggleFile(node.path)}>
+  <div class="sp-item" onclick={() => onToggleFile(node.path)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
     <input
       type="checkbox"
       class="sp-check"

@@ -372,6 +372,32 @@ fn open_folder(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
+    eprintln!("[debug] add_to_gitignore(root={}, entry={})", project_root, entry);
+    let entry_path = std::path::Path::new(&entry);
+    if entry.trim().is_empty() || entry_path.is_absolute() {
+        return Err("invalid entry".into());
+    }
+    for comp in entry_path.components() {
+        if matches!(comp, std::path::Component::ParentDir) {
+            return Err("invalid entry path".into());
+        }
+    }
+    let root = PathBuf::from(&project_root);
+    let gitignore = root.join(".gitignore");
+    let mut content = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    if !content.is_empty() && !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&entry);
+    content.push('\n');
+    let tmp = gitignore.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, &content).map_err(|e| format!("failed to write gitignore: {}", e))?;
+    std::fs::rename(&tmp, &gitignore).map_err(|e| format!("failed to save gitignore: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
 fn revert(path: String) -> Result<(), String> {
     eprintln!("[debug] revert({})", path);
     let p = PathBuf::from(&path);
@@ -992,6 +1018,7 @@ pub fn run() {
             add_recent,
             remove_recent,
             open_folder,
+            add_to_gitignore,
             open_web_timeline,
             open_site,
             delete_entry,

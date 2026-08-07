@@ -2,15 +2,18 @@
   import { parseStatus, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
+  import { openFolder, addToGitignore } from '../api'
 
   let {
     statusOutput,
     onRefresh,
+    activePath = '',
     selection = null,
     onSelectionChange = (_sel: string[] | null) => {},
   }: {
     statusOutput: string
     onRefresh: () => void
+    activePath?: string
     selection?: string[] | null
     onSelectionChange?: (sel: string[] | null) => void
   } = $props()
@@ -107,7 +110,66 @@
   function statusOf(path: string): StatusFile | undefined {
     return statusMap[path]
   }
+
+  let contextMenu = $state<{ x: number; y: number; path: string; isDir: boolean } | null>(null)
+
+  function openContextMenu(path: string, isDir: boolean, x: number, y: number) {
+    contextMenu = { x, y, path, isDir }
+  }
+
+  function closeContextMenu() {
+    contextMenu = null
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') closeContextMenu()
+  }
+
+  async function menuOpenFolder() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const rel = menu.path
+    const dir = menu.isDir ? rel : rel.split('/').slice(0, -1).join('/')
+    const full = activePath ? `${activePath}\\${dir.replace(/\//g, '\\')}` : ''
+    try {
+      await openFolder(full)
+    } catch (e) {
+      console.error('open folder failed', e)
+    }
+  }
+
+  async function menuCopyPath() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const full = activePath ? `${activePath}\\${menu.path.replace(/\//g, '\\')}` : menu.path
+    await navigator.clipboard.writeText(full)
+  }
+
+  async function menuCopyName() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const name = menu.path.split('/').pop() || menu.path
+    await navigator.clipboard.writeText(name)
+  }
+
+  async function menuIgnore() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const rule = menu.isDir ? `${menu.path}/` : menu.path
+    try {
+      await addToGitignore(activePath, rule)
+      onRefresh()
+    } catch (e) {
+      console.error('add to gitignore failed', e)
+    }
+  }
 </script>
+
+<svelte:window onkeydown={handleKeydown} />
 
 <div class="status-panel">
   <div class="sp-header">
@@ -131,7 +193,7 @@
       <div>无变更 — 工作区干净</div>
     </div>
   {:else}
-    <div class="sp-list">
+    <div class="sp-list" oncontextmenu={(e) => e.preventDefault()}>
       {#each tree as node (node.path)}
         <StatusTreeItem
           {node}
@@ -143,8 +205,20 @@
           onToggleDir={toggleDir}
           {isCollapsed}
           onToggleCollapse={toggleCollapse}
+          onContextMenu={openContextMenu}
         />
       {/each}
+    </div>
+  {/if}
+
+  {#if contextMenu}
+    <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu() }}></div>
+    <div class="ctx-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px">
+      <button onclick={menuOpenFolder}>打开所在文件夹</button>
+      <button onclick={menuCopyPath}>复制路径</button>
+      <button onclick={menuCopyName}>复制名称</button>
+      <div class="ctx-sep"></div>
+      <button class="ctx-danger" onclick={menuIgnore}>加入忽略</button>
     </div>
   {/if}
 </div>
@@ -260,5 +334,50 @@
     font-weight: 500;
     text-transform: uppercase;
     flex-shrink: 0;
+  }
+  .ctx-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+  }
+  .ctx-menu {
+    position: fixed;
+    z-index: 91;
+    min-width: 150px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+    padding: 4px;
+    font-size: 12px;
+  }
+  .ctx-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 10px;
+    background: none;
+    border: none;
+    border-radius: 5px;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.1s var(--ease), color 0.1s var(--ease);
+  }
+  .ctx-menu button:hover {
+    background: var(--surface2);
+    color: var(--accent);
+  }
+  .ctx-menu .ctx-danger {
+    color: var(--error);
+  }
+  .ctx-menu .ctx-danger:hover {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .ctx-sep {
+    height: 1px;
+    background: var(--border);
+    margin: 4px 6px;
   }
 </style>

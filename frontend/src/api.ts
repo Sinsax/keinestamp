@@ -93,6 +93,10 @@ export async function openFolder(path: string): Promise<void> {
   return invoke<void>('open_folder', { path })
 }
 
+export async function addToGitignore(projectRoot: string, entry: string): Promise<void> {
+  return invoke<void>('add_to_gitignore', { projectRoot, entry })
+}
+
 export async function deleteEntry(path: string, entryId: string): Promise<void> {
   return invoke<void>('delete_entry', { path, entryId })
 }
