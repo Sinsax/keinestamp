@@ -100,7 +100,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (32)
+### Tauri commands (34)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -114,7 +114,9 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
 | `get_deploy_status` | `{local, remote}` | web-timeline commit count vs server record via `GET /<project>/version` (Bearer deploy_token); remote null = no record |
 | `has_remote` | `bool` | checks git `origin` only |
-| `revert` | `()` | error `"no commits to revert"` < 2 commits |
+| `revert` | `()` | error `"no commits to revert"` < 2 commits; records `last_revert` (AppConfig: project_id/revert_hash/original_hash/removed_entry) for restore |
+| `restore_revert` | `()` | `git reset --soft <original_hash>` + re-append timeline entry + regen web; requires HEAD == revert_hash (no new commits since revert) |
+| `can_restore_revert` | `bool` | last_revert belongs to current project AND HEAD still at revert_hash |
 | `status` | `{clean, output}` | |
 | `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching (`access_token`, `site_name`); `site_name` key validates ASCII `[A-Za-z0-9-_]` and rejects when locked |
 | `get_timeline` | `Timeline` | resolves preview paths to absolute |

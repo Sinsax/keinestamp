@@ -45,6 +45,14 @@ export async function revert(path: string): Promise<void> {
   return invoke<void>('revert', { path })
 }
 
+export async function restoreRevert(path: string): Promise<void> {
+  return invoke<void>('restore_revert', { path })
+}
+
+export async function canRestoreRevert(path: string): Promise<boolean> {
+  return invoke<boolean>('can_restore_revert', { path })
+}
+
 export async function status(path: string): Promise<StatusResult> {
   return invoke<StatusResult>('status', { path })
 }

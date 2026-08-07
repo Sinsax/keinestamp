@@ -46,6 +46,7 @@
   let siteLocked = $state(false)
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let commitSelection = $state<string[] | null>(null)
+  let canRestore = $state(false)
   let deploying = $state(false)
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
@@ -171,6 +172,7 @@
         accessToken = cfg.access_token || ''
         siteName = cfg.site_name || ''
         siteLocked = cfg.site_locked
+        canRestore = await api.canRestoreRevert(path)
         await Promise.all([refreshStatus(), loadTrackedFiles(path), refreshDeployStatus()])
         if (autoConn) {
           testConnection()
@@ -211,6 +213,10 @@
   }
 
   async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false): Promise<boolean> {
+    if (canRestore) {
+      const ok = confirm('⚠️ 当前处于撤回状态\n\n上次撤回的记录尚未恢复。继续记录将把其内容合并进新记录，且无法再恢复原记录。\n\n建议先点击「恢复」，或确认继续记录。')
+      if (!ok) return false
+    }
     statusText = '记录中...'
     const unlisten = await listen<CommitProgress>('commit-progress', (event) => {
       statusText = event.payload.message
@@ -301,6 +307,18 @@
     } catch (e: any) {
       pushToast(`Revert: ${e}`, 'info')
       statusText = 'Revert skipped'
+    }
+  }
+
+  async function handleRestore() {
+    statusText = '恢复中...'
+    try {
+      await api.restoreRevert(activePath)
+      pushToast('已恢复上次撤回的记录', 'success')
+      await loadProject(activePath)
+    } catch (e: any) {
+      pushToast(`恢复失败: ${e}`, 'error')
+      statusText = '恢复失败'
     }
   }
 
@@ -466,10 +484,12 @@
         onRecord={() => showCommit = true}
         onExport={handleExport}
         onRevert={handleRevert}
+        onRestore={handleRestore}
         onDeploy={handleDeploy}
         {connected}
         {deployAhead}
         {deployTip}
+        {canRestore}
       />
 
       <StatusBar

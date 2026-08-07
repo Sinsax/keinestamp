@@ -8,7 +8,7 @@ pub struct Timeline {
     pub entries: Vec<TimelineEntry>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TimelineEntry {
     pub id: String,
     pub timestamp: String,

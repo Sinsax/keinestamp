@@ -6,19 +6,23 @@
     onRecord,
     onExport,
     onRevert,
+    onRestore,
     onDeploy,
     connected = false,
     deployAhead = false,
     deployTip = '部署到服务器',
+    canRestore = false,
   }: {
     projectType: ProjectType | null
     onRecord: () => void
     onExport: () => void
     onRevert: () => void
+    onRestore: () => void
     onDeploy: () => void
     connected?: boolean
     deployAhead?: boolean
     deployTip?: string
+    canRestore?: boolean
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
@@ -38,6 +42,11 @@
   <button onclick={onRevert} disabled={!initialized}>
     <span class="ab-label">撤回</span>
     <span class="ab-hint">revert</span>
+  </button>
+
+  <button class="restore-btn" class:enabled={canRestore} onclick={onRestore} disabled={!initialized || !canRestore} title={canRestore ? '恢复上次撤回的记录' : '没有可恢复的撤回'}>
+    <span class="ab-label">恢复</span>
+    <span class="ab-hint">redo</span>
   </button>
 
   <div class="spacer"></div>
@@ -134,4 +143,12 @@
     color: var(--error) !important;
   }
   .spacer { flex: 1; }
+  .restore-btn.enabled {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+  }
+  .restore-btn.enabled:hover:not(:disabled) {
+    background: var(--accent-soft) !important;
+    border-color: var(--accent) !important;
+  }
 </style>

@@ -83,6 +83,13 @@ pub fn revert(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
+pub fn restore_revert(project_root: &Path, original_hash: &str) -> Result<()> {
+    eprintln!("[debug] restore_revert: root={:?}, original={}", project_root, original_hash);
+    run_git(project_root, &["reset", "--soft", original_hash])?;
+    eprintln!("[debug] restore_revert → ok");
+    Ok(())
+}
+
 fn get_commit_count(project_root: &Path) -> Result<usize> {
     let output = run_git_output(project_root, &["rev-list", "--count", "HEAD"])?;
     Ok(output.trim().parse().unwrap_or(0))
