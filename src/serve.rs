@@ -1,4 +1,4 @@
-﻿use crate::three_assets;
+use crate::three_assets;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -319,7 +319,9 @@ fn handle_index(request: tiny_http::Request) -> Result<()> {
 }
 
 fn index_page_html() -> String {
-    INDEX_HTML_TEMPLATE.replace("{favicon}", crate::three_assets::logo_favicon_b64())
+    INDEX_HTML_TEMPLATE
+        .replace("{favicon}", crate::three_assets::logo_favicon_b64())
+        .replace("{greenfavicon}", crate::three_assets::logo_green_favicon_b64())
 }
 
 const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
@@ -464,7 +466,7 @@ h1 {
   transform: translate(38px, -132px);
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
 }
-.ha-moon { position: relative; display: flex; align-items: center; justify-content: center; }
+.ha-moon { position: relative; display: flex; align-items: center; justify-content: center; cursor: pointer; }
 .ha-moon svg { display: block; }
 .ha-moon svg circle { opacity: 0.30; }
 [data-theme="night"] .ha-moon svg circle { opacity: 0.10; }
@@ -482,39 +484,77 @@ h1 {
   position: absolute; bottom: -16px; right: 6%;
   font-family: ui-monospace, Consolas, monospace; font-size: 12px;
   color: var(--text-dim); opacity: 0.8; letter-spacing: 1px;
+  cursor: pointer;
 }
 
-/* ---- 特性卡（错落） ---- */
-.cards {
-  display: flex; gap: 16px; justify-content: center;
-  padding: 0 60px 40px;
-  position: relative; z-index: 2;
-}
-.card {
-  width: 200px; padding: 24px 18px;
-  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
-  box-shadow: var(--shadow-sm);
+.stage {
   position: relative;
-  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+  display: flex; flex-direction: column; align-items: center; gap: 34px;
+  padding: 56px 60px 84px;
+  z-index: 2;
 }
-.card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
-.card:hover .card-icon { background: color-mix(in srgb, var(--accent) 15%, transparent); transform: scale(1.05); }
-.card-icon { transition: background 0.15s ease, transform 0.15s ease; }
-.card:hover .card-num { color: var(--accent); opacity: 1; }
-.card-num {
-  position: absolute; top: 12px; right: 14px;
-  font-family: ui-monospace, Consolas, monospace; font-size: 10px;
-  color: var(--text-dim); opacity: 0.6; letter-spacing: 1px;
-  transition: color 0.15s ease, opacity 0.15s ease;
-}
-.card-icon {
-  width: 40px; height: 40px; margin-bottom: 14px; border-radius: 10px;
+.cf-geo {
+  position: absolute; inset: 0; z-index: 0;
   display: flex; align-items: center; justify-content: center;
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  pointer-events: none; opacity: 0.4;
 }
-.card h3 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
-.card p { font-size: 11.5px; color: var(--text-dim); margin: 0; line-height: 1.55; }
+.cf-geo svg { width: 640px; max-width: 92vw; }
+.cf-word {
+  position: absolute; z-index: 0; top: 44px;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: clamp(68px, 11vw, 118px); font-weight: 800; letter-spacing: -6px;
+  color: var(--text); opacity: 0.05; line-height: 1;
+  user-select: none; pointer-events: none; white-space: nowrap;
+}
+.codeflow {
+  position: relative; z-index: 1;
+  display: flex; flex-direction: column; gap: 20px; align-items: center;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+}
+.cf-line {
+  font-size: 12.5px; letter-spacing: 2px; color: var(--text-dim); opacity: 0.55;
+}
+.cf-line i { font-style: normal; color: var(--accent); opacity: 0.7; margin: 0 8px; }
+.cf-line em { font-style: normal; color: var(--tint); opacity: 0.8; margin: 0 6px; }
+.cf-b { margin-left: -64px; opacity: 0.4; }
+.cf-c { margin-left: 56px; opacity: 0.5; }
+.cf-d { margin-left: -32px; opacity: 0.45; }
+.cf-scale {
+  position: relative;
+  width: 220px; height: 22px;
+  display: flex; align-items: center;
+  margin: 8px 0 4px; opacity: 0.6;
+}
+.cf-scale b {
+  flex: 1; height: 10px; border-radius: 1px;
+  background: var(--text-dim); display: block;
+}
+.cf-scale i {
+  position: absolute; top: 50%;
+  width: 2px; height: 18px; border-radius: 1px;
+  background: var(--accent); display: block;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: left 0.4s ease;
+}
+.cf-symbols {
+  font-size: 17px; letter-spacing: 6px; color: var(--text-dim); opacity: 0.28;
+}
+.cf-symbols em { font-style: normal; color: var(--accent); opacity: 0.8; }
+.cf-symbols2 { font-size: 13px; letter-spacing: 10px; opacity: 0.22; }
+.cf-symbols2 em { color: var(--tint); opacity: 0.7; }
+.stats-strip {
+  position: relative; z-index: 1;
+  display: flex; gap: 8px; flex-wrap: wrap; justify-content: center;
+}
+.stats-strip span {
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10.5px; color: var(--text-dim); letter-spacing: 0.5px;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px 12px;
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.stats-strip span:hover { color: var(--accent); border-color: var(--accent); }
 
 footer {
   padding: 8px 48px 30px;
@@ -547,6 +587,9 @@ html[data-moon="full"][data-theme="night"] {
   --surface: #15202e;
   --line: #2a3848;
   --text-dim: #90a4b8;
+}
+html[data-moon="full"] .bm-logo {
+  filter: hue-rotate(120deg);
 }
 </style>
 </head>
@@ -617,26 +660,31 @@ html[data-moon="full"][data-theme="night"] {
   </div>
 </main>
 
-<section class="cards">
-  <div class="card">
-    <span class="card-num">01</span>
-    <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M12.854.146a.5.5 0 00-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 000-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 016 13.5V13h-.5a.5.5 0 01-.5-.5V12h-.5a.5.5 0 01-.5-.5V11h-.5a.5.5 0 01-.5-.5V10h-.5a.499.499 0 01-.175-.032l-.179.178a.5.5 0 00-.11.168l-2 5a.5.5 0 00.65.65l5-2a.5.5 0 00.168-.11l.178-.178z"/></svg></div>
-    <h3>进度记录</h3>
-    <p>将 Blender 项目进展逐条记录为版本</p>
+<div class="stage">
+  <div class="cf-geo">
+    <svg viewBox="0 0 640 320" fill="none">
+      <circle cx="320" cy="160" r="145" stroke="var(--deco-a)" stroke-width="1"/>
+      <circle cx="320" cy="160" r="110" stroke="var(--deco-b)" stroke-width="1" stroke-dasharray="3 9"/>
+      <path d="M60 160 Q320 40 580 160" stroke="var(--deco-c)" stroke-width="1"/>
+      <path d="M130 240 Q320 120 500 70" stroke="var(--deco-a)" stroke-width="1" opacity="0.7"/>
+      <circle cx="96" cy="88" r="3" fill="var(--accent)" opacity="0.5"/>
+      <circle cx="556" cy="228" r="3" fill="var(--tint)" opacity="0.5"/>
+    </svg>
   </div>
-  <div class="card">
-    <span class="card-num">02</span>
-    <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M3.5 0a.5.5 0 01.5.5V1h8V.5a.5.5 0 011 0V1h1a2 2 0 012 2v11a2 2 0 01-2 2H2a2 2 0 01-2-2V3a2 2 0 012-2h1V.5a.5.5 0 01.5-.5zM1 4v10a1 1 0 001 1h12a1 1 0 001-1V4H1z"/><path d="M4 7h3v1H4zM9 7h3v1H9zM4 10h3v1H4zM9 10h3v1H9z"/></svg></div>
-    <h3>版本时间线</h3>
-    <p>自动生成时间线与日历热力图</p>
+  <span class="cf-word">timeline</span>
+  <div class="codeflow">
+    <span class="cf-line cf-a">record <i>·</i> commit <i>·</i> push</span>
+    <span class="cf-line cf-b">fn timeline <i>→</i> index.html</span>
+    <span class="cf-line cf-c">diff <em>◉</em> milestone <em>★</em> tag</span>
+    <span class="cf-scale"><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><b></b><i id="cfMark"></i></span>
+    <span class="cf-symbols">{ } [ ] ( ) <em>:</em> <em>::</em> ⟶ ⇄</span>
+    <span class="cf-symbols cf-symbols2">‹ › « » … <em>·</em> <em>·</em> <em>·</em></span>
+    <span class="cf-line cf-d">blend <i>·</i> glb <i>·</i> web</span>
   </div>
-  <div class="card">
-    <span class="card-num">03</span>
-    <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8.186 1.113a.5.5 0 00-.372 0L1.846 3.5l1.064 3.739L1.336 14.5h13.328L13.09 7.239 14.154 3.5 8.186 1.113zM8 2.18l4.53 1.79-1.22 4.287a4.5 4.5 0 01-1.242-.42l1.09-3.827a.5.5 0 00-.946-.32L9.2 7.18a4.5 4.5 0 01-2.4 0L7.79 5.69a.5.5 0 00-.947.32l1.09 3.827a4.5 4.5 0 01-1.242.42L5.47 5.97 8 2.18z"/></svg></div>
-    <h3>3D 预览</h3>
-    <p>模型预览直接内嵌网页</p>
+  <div class="stats-strip">
+    <span>entries 42</span><span>commits 128</span><span>glb 7</span><span>uptime 99.9%</span><span>tz +08:00</span>
   </div>
-</section>
+</div>
 
 <footer>Keinestamp © 2026</footer>
 
@@ -683,18 +731,63 @@ html[data-moon="full"][data-theme="night"] {
     function moonPath(p) {
       var waxing = p < 0.5;
       var k = Math.cos(2 * Math.PI * p);
-      var kx = Math.abs(k) * 42;
+      var lit = (1 + k) / 2;
+      var small = lit < 0.5;
+      var kx = Math.abs(2 * lit - 1) * 42;
       if (kx < 0.6) kx = 0;
-      return 'M 50 8 A 42 42 0 0 ' + (waxing ? 1 : 0) + ' 50 92 A ' + kx.toFixed(3) + ' 42 0 0 ' + (waxing ? 0 : 1) + ' 50 8 Z';
+      var s1 = waxing ? 1 : 0;
+      var s2 = small ? s1 : 1 - s1;
+      return 'M 50 8 A 42 42 0 0 ' + s1 + ' 50 92 A ' + kx.toFixed(3) + ' 42 0 0 ' + s2 + ' 50 8 Z';
     }
     var now = new Date();
     var day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-    var info = moonInfo(day);
-    document.getElementById('moonLight').setAttribute('d', moonPath(info.phase));
-    document.getElementById('moonName').textContent = moonName(info.phase, info.illum);
-    if (info.illum >= 0.95) {
-      document.documentElement.dataset.moon = 'full';
+    var real = moonInfo(day);
+    var overridePhase = null;
+    var NAME_IDX = { '新月': 0, '蛾眉月': 1, '上弦月': 2, '盈凸月': 3, '满月': 4, '亏凸月': 5, '下弦月': 6, '残月': 7 };
+    var realIdx = NAME_IDX[moonName(real.phase, real.illum)];
+
+    function currentPhase() {
+      return overridePhase === null ? real.phase : overridePhase / 8;
     }
+    function currentIllum() {
+      if (overridePhase === null) return real.illum;
+      return (1 - Math.cos(2 * Math.PI * (overridePhase / 8))) / 2;
+    }
+    var faviconLink = document.querySelector('link[rel="icon"]');
+    var originalFavicon = faviconLink ? faviconLink.href : null;
+    var greenFavicon = 'data:image/png;base64,{greenfavicon}';
+    function setGreenFavicon(enable) {
+      if (!faviconLink || !originalFavicon) return;
+      faviconLink.href = enable ? greenFavicon : originalFavicon;
+    }
+    function renderMoon() {
+      var p = currentPhase();
+      var i = currentIllum();
+      document.getElementById('moonLight').setAttribute('d', moonPath(p));
+      document.getElementById('moonName').textContent = moonName(p, i);
+      var cfMark = document.getElementById('cfMark');
+      if (cfMark) {
+        cfMark.style.left = (6 + (p % 1) * 208) + 'px';
+      }
+      var full = overridePhase === 4 || (overridePhase === null && real.illum >= 0.95);
+      if (full) {
+        document.documentElement.dataset.moon = 'full';
+        setGreenFavicon(true);
+      } else {
+        delete document.documentElement.dataset.moon;
+        setGreenFavicon(false);
+      }
+    }
+    renderMoon();
+    document.querySelector('.ha-moon').addEventListener('click', function () {
+      if (overridePhase === null) overridePhase = realIdx;
+      overridePhase = (overridePhase + 1) % 8;
+      renderMoon();
+    });
+    document.getElementById('moonName').addEventListener('click', function () {
+      overridePhase = null;
+      renderMoon();
+    });
   })();
 </script>
 <script>
@@ -1401,10 +1494,6 @@ mod tests {
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");
-        assert!(html.contains("进度记录"));
-        assert!(html.contains("版本时间线"));
-        assert!(html.contains("3D 预览"));
-        assert!(html.contains("card-icon"), "feature cards present");
         assert!(html.contains("eyebrow"), "eyebrow label present");
         assert!(html.contains("hero-code"), "code block present");
         assert!(html.contains("ha-moon"), "moon art present");

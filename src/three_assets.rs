@@ -12,11 +12,21 @@ const BUFFER_GEOMETRY_UTILS_SRC: &[u8] = include_bytes!("three-src/utils/BufferG
 
 const LOGO_PNG: &[u8] = include_bytes!("../frontend/public/keinestamp.png");
 
+const LOGO_GREEN_PNG: &[u8] = include_bytes!("../frontend/public/keinestamp-green.png");
+
 pub fn logo_favicon_b64() -> &'static str {
     static B64: OnceLock<String> = OnceLock::new();
     B64.get_or_init(|| {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(LOGO_PNG)
+    })
+}
+
+pub fn logo_green_favicon_b64() -> &'static str {
+    static B64: OnceLock<String> = OnceLock::new();
+    B64.get_or_init(|| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(LOGO_GREEN_PNG)
     })
 }
 
