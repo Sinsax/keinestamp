@@ -334,19 +334,43 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
 </script>
 <script>
   (function () {
-    var SYNODIC = 29.53058867 * 86400000;
-    var REF = Date.UTC(2000, 0, 6, 18, 14, 0);
-    var MOON_NAMES = ['新月', '蛾眉月', '上弦月', '盈凸月', '满月', '亏凸月', '下弦月', '残月'];
-    function localPhase() {
-      var now = new Date();
-      var day = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      var d = (day.getTime() - REF) % SYNODIC;
-      var p = d / SYNODIC;
-      if (p < 0) p += 1;
-      return p;
+    var RAD = Math.PI / 180;
+    function elongation(jd) {
+      var T = (jd - 2451545.0) / 36525.0;
+      var D = 297.8501921 + 445267.1114034 * T - 0.0018819 * T * T + 0.0000004 * T * T * T;
+      var M = 357.5291092 + 35999.0502909 * T - 0.0001536 * T * T;
+      var Mp = 134.9634114 + 477198.8676313 * T + 0.0089970 * T * T;
+      var F = 93.2720993 + 483202.0175273 * T - 0.0034029 * T * T;
+      var Lp = 218.3164477 + 481267.88123421 * T - 0.0015786 * T * T;
+      Lp += 6.288774 * Math.sin(Mp * RAD);
+      Lp += 1.274018 * Math.sin((2 * D - Mp) * RAD);
+      Lp += 0.658309 * Math.sin(2 * D * RAD);
+      Lp += 0.213616 * Math.sin(2 * Mp * RAD);
+      Lp -= 0.185596 * Math.sin(M * RAD);
+      Lp -= 0.114336 * Math.sin(2 * F * RAD);
+      Lp += 0.058793 * Math.sin((2 * D - 2 * Mp) * RAD);
+      Lp += 0.057212 * Math.sin((2 * D - M - Mp) * RAD);
+      Lp += 0.053320 * Math.sin((2 * D + Mp) * RAD);
+      Lp += 0.045877 * Math.sin((2 * D - M) * RAD);
+      Lp += 0.041033 * Math.sin((M - Mp) * RAD);
+      var L = 280.46646 + 36000.76983 * T + 0.0003032 * T * T;
+      var e = (Lp - L) % 360;
+      if (e < 0) e += 360;
+      return e;
     }
-    function moonName(p) {
-      return MOON_NAMES[Math.floor(((p + 0.0625) % 1) * 8)];
+    function moonInfo(date) {
+      var jd = date.getTime() / 86400000 + 2440587.5;
+      var elong = elongation(jd);
+      var phase = elong / 360;
+      var illum = (1 - Math.cos(elong * RAD)) / 2;
+      return { phase: phase, illum: illum };
+    }
+    function moonName(p, i) {
+      if (i < 0.02) return '新月';
+      if (i < 0.40) return p < 0.5 ? '蛾眉月' : '残月';
+      if (i <= 0.60) return p < 0.5 ? '上弦月' : '下弦月';
+      if (i < 0.95) return p < 0.5 ? '盈凸月' : '亏凸月';
+      return '满月';
     }
     function moonPath(p) {
       var waxing = p < 0.5;
@@ -355,9 +379,11 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
       if (kx < 0.6) kx = 0;
       return 'M 50 8 A 42 42 0 0 ' + (waxing ? 1 : 0) + ' 50 92 A ' + kx.toFixed(3) + ' 42 0 0 ' + (waxing ? 0 : 1) + ' 50 8 Z';
     }
-    var p = localPhase();
-    document.getElementById('moonLight').setAttribute('d', moonPath(p));
-    document.getElementById('moonName').textContent = moonName(p);
+    var now = new Date();
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+    var info = moonInfo(day);
+    document.getElementById('moonLight').setAttribute('d', moonPath(info.phase));
+    document.getElementById('moonName').textContent = moonName(info.phase, info.illum);
   })();
 </script>
 <style>
@@ -1337,8 +1363,7 @@ mod tests {
         assert!(html.contains("ha-ring"), "ring decoration present");
         assert!(html.contains("· moon phase"), "moon phase label present");
         assert!(html.contains("moonLight"), "client-side moon path element");
-        assert!(html.contains("MOON_NAMES"), "client-side moon name array");
-        assert!(html.contains("SYNODIC"), "client-side moon algorithm");
+        assert!(html.contains("elongation"), "client-side moon algorithm");
         assert!(html.contains("moonName"), "client-side moon name element");
         assert!(!html.contains("theme-toggle"), "no preview-only toggle in production");
     }
