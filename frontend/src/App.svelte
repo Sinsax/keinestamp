@@ -235,11 +235,14 @@
           return false
         }
         if (files === null) {
-          const hiddenPrefixes = ['.gitignore', '.gitattributes', '.keinestamp.toml', 'web-timeline']
-          const isHiddenPath = (p: string): boolean =>
-            hiddenPrefixes.some((h) => p === h || p.startsWith(h + '/'))
           files = parseStatus(statusOutput)
-            .filter((f) => !isIgnoredPath(f.path) && !isHiddenPath(f.path))
+            .filter(
+              (f) =>
+                !isIgnoredPath(f.path) &&
+                f.path !== '.keinestamp.toml' &&
+                f.path !== 'web-timeline' &&
+                !f.path.startsWith('web-timeline/')
+            )
             .map((f) => f.path)
         } else {
           for (const f of files) {
@@ -247,6 +250,16 @@
               await api.removeIgnore(activePath, f)
             }
           }
+        }
+        const hiddenAuto = parseStatus(statusOutput)
+          .filter(
+            (f) =>
+              (f.path === '.gitignore' || f.path === '.gitattributes') &&
+              !isIgnoredPath(f.path)
+          )
+          .map((f) => f.path)
+        if (hiddenAuto.length > 0) {
+          files = [...files, ...hiddenAuto.filter((p) => !files!.includes(p))]
         }
       } catch {
         /* ignore info unavailable — fall back to raw selection */

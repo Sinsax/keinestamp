@@ -830,6 +830,50 @@ fn save_versions(web_root: &Path, versions: &HashMap<String, u64>) {
     }
 }
 
+fn projects_file(web_root: &Path) -> PathBuf {
+    web_root
+        .parent()
+        .map(|p| p.join(".keinestamp-projects.json"))
+        .unwrap_or_else(|| web_root.join(".keinestamp-projects.json"))
+}
+
+fn load_projects(
+    web_root: &Path,
+) -> (HashMap<String, String>, HashMap<String, String>) {
+    let content = std::fs::read_to_string(projects_file(web_root)).unwrap_or_default();
+    if content.trim().is_empty() {
+        return (HashMap::new(), HashMap::new());
+    }
+    match serde_json::from_str::<serde_json::Value>(&content) {
+        Ok(v) => {
+            let tokens = v
+                .get("tokens")
+                .and_then(|x| serde_json::from_value(x.clone()).ok())
+                .unwrap_or_default();
+            let ids = v
+                .get("ids")
+                .and_then(|x| serde_json::from_value(x.clone()).ok())
+                .unwrap_or_default();
+            (tokens, ids)
+        }
+        Err(_) => (HashMap::new(), HashMap::new()),
+    }
+}
+
+fn save_projects(
+    web_root: &Path,
+    tokens: &HashMap<String, String>,
+    ids: &HashMap<String, String>,
+) {
+    if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "tokens": tokens, "ids": ids })) {
+        let path = projects_file(web_root);
+        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
 fn handle_version(
     request: tiny_http::Request,
     project_name: &str,
@@ -972,8 +1016,9 @@ pub fn start(config: ServeConfig) -> Result<()> {
         .unwrap_or_default()
         .as_secs();
     let last_update = Arc::new(AtomicU64::new(now));
-    let project_tokens: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
-    let project_ids: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(HashMap::new()));
+    let (tokens_loaded, ids_loaded) = load_projects(&web_root);
+    let project_tokens: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(tokens_loaded));
+    let project_ids: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(ids_loaded));
     let web_versions: Arc<RwLock<HashMap<String, u64>>> = Arc::new(RwLock::new(load_versions(&web_root)));
     let rate_limiter = Arc::new(RateLimiter::new());
 
@@ -1206,6 +1251,12 @@ fn handle_upload(
         log_info("DEPLOY", &format!("{} project={} stored access_token", ip, project_name));
     }
 
+    {
+        let tokens = project_tokens.read().unwrap().clone();
+        let ids = project_ids.read().unwrap().clone();
+        save_projects(&web_root, &tokens, &ids);
+    }
+
     log_info("DEPLOY", &format!("{} project={} size={} bytes", ip, project_name, size));
 
     // Deploy into web_root/<project_name>/ for per-project isolation
@@ -1346,17 +1397,26 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
     let ip = request_ip(&request);
     let method = request.method().to_string();
     let raw_path = request.url().to_string();
+    let path_no_query = raw_path.split('?').next().unwrap_or(&raw_path).to_string();
     let prefix_path = format!("/{}", project_name);
-    let without_prefix = raw_path.strip_prefix(&prefix_path).unwrap_or(&raw_path);
+    let without_prefix = path_no_query.strip_prefix(&prefix_path).unwrap_or(&path_no_query);
     let clean_path = if without_prefix == "/" || without_prefix.is_empty() {
         "index.html".to_string()
     } else {
         without_prefix.trim_start_matches('/').to_string()
     };
 
+    let access_msg = format!("{} {} {} → ", ip, method, raw_path);
+
+    if clean_path.starts_with('.') || clean_path.contains("/.") {
+        log_warn("ACCESS", &format!("{}404 (dotfile)", access_msg));
+        let response = Response::from_string("404 Not Found").with_status_code(404);
+        request.respond(response)?;
+        return Ok(());
+    }
+
     let serve_dir = web_root.join(project_name);
     let shared_three = web_root.join("_three");
-    let access_msg = format!("{} {} {} → ", ip, method, raw_path);
 
     let (file_path, canonical_base) = if let Some(three_rel) = clean_path.strip_prefix("three/") {
         (shared_three.join(three_rel), shared_three)
@@ -1466,6 +1526,36 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn projects_roundtrip_persists_tokens_and_ids() {
+        let dir = std::env::temp_dir().join(format!("ks_proj_test_{}", std::process::id()));
+        let web_root = dir.join("web");
+        std::fs::create_dir_all(&web_root).unwrap();
+        let mut tokens = HashMap::new();
+        tokens.insert("site-a".to_string(), "tok123".to_string());
+        let mut ids = HashMap::new();
+        ids.insert("site-a".to_string(), "id456".to_string());
+        save_projects(&web_root, &tokens, &ids);
+        let (t2, i2) = load_projects(&web_root);
+        assert_eq!(t2.get("site-a").map(String::as_str), Some("tok123"));
+        assert_eq!(i2.get("site-a").map(String::as_str), Some("id456"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn projects_load_tolerates_missing_and_corrupt_files() {
+        let dir = std::env::temp_dir().join(format!("ks_proj_bad_{}", std::process::id()));
+        let web_root = dir.join("web");
+        std::fs::create_dir_all(&web_root).unwrap();
+        let (t, i) = load_projects(&web_root);
+        assert!(t.is_empty() && i.is_empty());
+        let p = projects_file(&web_root);
+        std::fs::write(&p, "{ not json").unwrap();
+        let (t2, i2) = load_projects(&web_root);
+        assert!(t2.is_empty() && i2.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn sanitize_project_name_filters_unicode() {
