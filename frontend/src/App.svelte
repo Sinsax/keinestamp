@@ -14,7 +14,7 @@
   import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress } from './types'
   import * as api from './api'
   import { openFolder } from './api'
-  import { open } from '@tauri-apps/plugin-dialog'
+  import { open, ask } from '@tauri-apps/plugin-dialog'
   import { listen } from '@tauri-apps/api/event'
 
   function cleanPath(p: string): string {
@@ -212,9 +212,14 @@
     }
   }
 
-  function openCommitDialog() {
+  async function openCommitDialog() {
     if (canRestore) {
-      const ok = confirm('⚠️ 当前处于撤回状态\n\n上次撤回的记录尚未恢复。继续记录将把其内容合并进新记录，且无法再恢复原记录。\n\n建议先点击「恢复」，或确认继续记录。')
+      const ok = await ask('上次撤回的记录尚未恢复。继续记录将把其内容合并进新记录，且无法再恢复原记录。\n\n建议先点击「恢复」，或确认继续记录。', {
+        title: '⚠️ 当前处于撤回状态',
+        kind: 'warning',
+        okLabel: '继续记录',
+        cancelLabel: '取消',
+      })
       if (!ok) return
     }
     showCommit = true
@@ -354,7 +359,14 @@
   }
 
   async function handleRemoveRecent(recentPath: string) {
-    if (!confirm(`Remove "${recentPath.split(/[/\\]/).pop()}" from recent projects?\nProject files will NOT be deleted.`)) return
+    const name = recentPath.split(/[/\\]/).pop()
+    const ok = await ask(`从最近项目中移除「${name}」？\n项目文件不会被删除。`, {
+      title: '移除项目',
+      kind: 'warning',
+      okLabel: '移除',
+      cancelLabel: '取消',
+    })
+    if (!ok) return
     try {
       await api.removeRecent(recentPath)
       pushToast('Project removed from recent list', 'success')
