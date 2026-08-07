@@ -6,11 +6,14 @@ use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tiny_http::{Header, Method, Response, Server};
 
 const MAX_UPLOAD_SIZE: usize = 100 * 1024 * 1024;
+const MAX_EXTRACT_SIZE: u64 = 512 * 1024 * 1024;
+const BODY_READ_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_LOGIN_BODY: u64 = 8 * 1024;
 const MAX_AUTH_FAILURES: u32 = 10;
 const AUTH_WINDOW_SECS: u64 = 60;
 const AUTH_BLOCK_SECS: u64 = 120;
@@ -33,8 +36,26 @@ fn log_error(tag: &str, msg: &str) {
     eprintln!("[{}] [ERROR] [{}] {}", log_ts(), tag, msg);
 }
 
+static TRUST_PROXY: OnceLock<bool> = OnceLock::new();
+
 fn request_ip(request: &tiny_http::Request) -> IpAddr {
-    request.remote_addr().map(|sa| sa.ip()).unwrap_or(IpAddr::from([127, 0, 0, 1]))
+    let fallback = request.remote_addr().map(|sa| sa.ip()).unwrap_or(IpAddr::from([127, 0, 0, 1]));
+    fallback
+}
+
+// 反代（Caddy/nginx/CF）场景：serve.toml trust_proxy=true 时取 X-Forwarded-For 第一个 IP（真实客户端）。
+// 默认关闭——直接暴露时 X-Forwarded-For 可伪造，切勿开启。
+fn request_ip_trusted(request: &tiny_http::Request) -> IpAddr {
+    if *TRUST_PROXY.get().unwrap_or(&false) {
+        if let Some(h) = request.headers().iter().find(|h| h.field.equiv("X-Forwarded-For")) {
+            if let Some(first) = h.value.as_str().split(',').next() {
+                if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                    return ip;
+                }
+            }
+        }
+    }
+    request_ip(request)
 }
 
 // --- Serve config ---
@@ -47,9 +68,13 @@ pub struct ServeConfig {
     pub port: u16,
     pub deploy_token: Option<String>,
     pub web_root: PathBuf,
+    #[serde(default)]
+    pub trust_proxy: bool,
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
+// 默认只监听本机：请使用 Caddy 反代对外提供服务；
+// 仅局域网直接连接时，请改成 0.0.0.0（明文 HTTP，风险自负）。
+fn default_host() -> String { "127.0.0.1".to_string() }
 fn default_port() -> u16 { 7799 }
 
 pub fn load_config(path: &Path) -> Result<ServeConfig> {
@@ -869,7 +894,16 @@ fn save_projects(
         let path = projects_file(web_root);
         let tmp = path.with_extension(format!("tmp{}", std::process::id()));
         if std::fs::write(&tmp, &json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+            }
+            if std::fs::rename(&tmp, &path).is_err() {
+                log_error("PROJECTS", &format!("failed to save projects file {:?}", path));
+            }
+        } else {
+            log_error("PROJECTS", &format!("failed to write projects file {:?}", path));
         }
     }
 }
@@ -916,9 +950,27 @@ fn handle_login_post(
     project_name: &str,
     project_tokens: &RwLock<HashMap<String, String>>,
 ) -> Result<()> {
-    let ip = request_ip(&request);
+    let ip = request_ip_trusted(&request);
     let mut body = String::new();
-    request.as_reader().read_to_string(&mut body)?;
+    let read_start = Instant::now();
+    let mut reader = request.as_reader().take(MAX_LOGIN_BODY);
+    loop {
+        if read_start.elapsed() > BODY_READ_TIMEOUT {
+            log_warn("LOGIN", &format!("{} body read timeout", ip));
+            let response = Response::from_string("request timeout").with_status_code(408);
+            request.respond(response)?;
+            return Ok(());
+        }
+        let mut buf = [0u8; 512];
+        let n = reader.read(&mut buf).context("failed to read login body")?;
+        if n == 0 {
+            break;
+        }
+        body.push_str(&String::from_utf8_lossy(&buf[..n]));
+        if body.len() >= MAX_LOGIN_BODY as usize {
+            break;
+        }
+    }
 
     let token = body
         .split('&')
@@ -992,6 +1044,7 @@ web_root = "{}"
 // --- Server start ---
 
 pub fn start(config: ServeConfig) -> Result<()> {
+    let _ = TRUST_PROXY.set(config.trust_proxy);
     let addr = format!("{}:{}", config.host, config.port);
     let server = Server::http(&addr)
         .map_err(|e| anyhow::anyhow!("failed to start server on {}: {}", addr, e))?;
@@ -1032,7 +1085,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
         let lu = last_update.clone();
         let method = request.method().clone();
         let url = request.url().to_string();
-        let req_ip = request_ip(&request);
+        let req_ip = request_ip_trusted(&request);
 
         // /health
         if url == "/health" && method == Method::Get {
@@ -1093,6 +1146,11 @@ pub fn start(config: ServeConfig) -> Result<()> {
         };
 
         if project_name.is_empty() || !project_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
+            let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
+            continue;
+        }
+
+        if !web_root.join(project_name).is_dir() {
             let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
             continue;
         }
@@ -1167,7 +1225,7 @@ fn handle_health(
     request: tiny_http::Request,
     last_update: &AtomicU64,
 ) -> Result<()> {
-    let ip = request_ip(&request);
+    let ip = request_ip_trusted(&request);
     let ts = last_update.load(Ordering::Relaxed);
     let body = format!(r#"{{"status":"ok","lastUpdate":{}}}"#, ts);
     let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
@@ -1185,13 +1243,27 @@ fn handle_upload(
     project_ids: &RwLock<HashMap<String, String>>,
     web_versions: &RwLock<HashMap<String, u64>>,
 ) -> Result<()> {
-    let ip = request_ip(&request);
+    let ip = request_ip_trusted(&request);
     let mut body = Vec::new();
-    request
-        .as_reader()
-        .take(MAX_UPLOAD_SIZE as u64)
-        .read_to_end(&mut body)
-        .context("failed to read upload body")?;
+    let read_start = Instant::now();
+    let mut reader = request.as_reader().take(MAX_UPLOAD_SIZE as u64);
+    let mut chunk = [0u8; 8192];
+    loop {
+        if read_start.elapsed() > BODY_READ_TIMEOUT {
+            log_warn("DEPLOY", &format!("{} body read timeout", ip));
+            let response = Response::from_string("request timeout").with_status_code(408);
+            request.respond(response)?;
+            return Ok(());
+        }
+        let n = reader.read(&mut chunk).context("failed to read upload body")?;
+        if n == 0 {
+            break;
+        }
+        body.extend_from_slice(&chunk[..n]);
+        if body.len() >= MAX_UPLOAD_SIZE {
+            break;
+        }
+    }
     let size = body.len();
 
     if size >= MAX_UPLOAD_SIZE {
@@ -1285,6 +1357,8 @@ fn handle_upload(
         }
     };
 
+    let mut extracted_total: u64 = 0;
+
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let entry_path = file.mangled_name();
@@ -1310,11 +1384,15 @@ fn handle_upload(
                 std::fs::create_dir_all(parent)?;
             }
             let mut out = std::fs::File::create(&dest)?;
-            if let Err(e) = std::io::copy(&mut file, &mut out) {
+            let copied = std::io::copy(&mut file, &mut out).map_err(|e| {
                 let _ = std::fs::remove_dir_all(&tmp_dir);
-                let msg = format!("extract error at entry {}: {}", i, e);
-                log_error("DEPLOY", &format!("{} extract error: {}", ip, msg));
-                let response = Response::from_string(msg).with_status_code(500);
+                anyhow::anyhow!("extract error at entry {}: {}", i, e)
+            })?;
+            extracted_total += copied;
+            if extracted_total > MAX_EXTRACT_SIZE {
+                let _ = std::fs::remove_dir_all(&tmp_dir);
+                log_warn("DEPLOY", &format!("{} extraction exceeds limit ({} bytes)", ip, extracted_total));
+                let response = Response::from_string("payload expands beyond limit").with_status_code(413);
                 request.respond(response)?;
                 return Ok(());
             }
@@ -1326,9 +1404,8 @@ fn handle_upload(
         let _ = std::fs::remove_dir_all(&bak_dir);
         if let Err(e) = std::fs::rename(&deploy_dir, &bak_dir) {
             let _ = std::fs::remove_dir_all(&tmp_dir);
-            let msg = format!("failed to swap directories: {}", e);
-            log_error("DEPLOY", &format!("{} {}", ip, msg));
-            let response = Response::from_string(msg).with_status_code(500);
+            log_error("DEPLOY", &format!("{} {}", ip, e));
+            let response = Response::from_string("deploy failed").with_status_code(500);
             request.respond(response)?;
             return Ok(());
         }
@@ -1339,9 +1416,8 @@ fn handle_upload(
             let _ = std::fs::rename(&bak_dir, &deploy_dir);
         }
         let _ = std::fs::remove_dir_all(&tmp_dir);
-        let msg = format!("failed to finalize update: {}", e);
-        log_error("DEPLOY", &format!("{} {}", ip, msg));
-        let response = Response::from_string(msg).with_status_code(500);
+        log_error("DEPLOY", &format!("{} {}", ip, e));
+        let response = Response::from_string("deploy failed").with_status_code(500);
         request.respond(response)?;
         return Ok(());
     }
@@ -1394,7 +1470,7 @@ pub(crate) fn mime_type(path: &Path) -> &'static str {
 }
 
 fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &str) -> Result<()> {
-    let ip = request_ip(&request);
+    let ip = request_ip_trusted(&request);
     let method = request.method().to_string();
     let raw_path = request.url().to_string();
     let path_no_query = raw_path.split('?').next().unwrap_or(&raw_path).to_string();
