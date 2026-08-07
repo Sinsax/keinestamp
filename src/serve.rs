@@ -342,130 +342,67 @@ fn index_page_html() -> String {
 --shadow-lg:0 16px 48px rgba(0,0,0,0.55);
 }}
 *{{box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);overflow:hidden;animation:fade-in .5s ease;cursor:default}}
+body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);overflow:hidden;animation:fade-in .4s ease;cursor:default}}
 @keyframes fade-in{{from{{opacity:0}}to{{opacity:1}}}}
-.glow{{position:fixed;border-radius:50%;pointer-events:none;filter:blur(70px)}}
-.glow-tl{{width:380px;height:380px;left:-130px;top:-130px;background:color-mix(in srgb,var(--accent) 9%,transparent)}}
-.glow-br{{width:440px;height:440px;right:-150px;bottom:-150px;background:color-mix(in srgb,var(--ice) 9%,transparent)}}
+.glow{{position:fixed;border-radius:50%;pointer-events:none;filter:blur(80px)}}
+.glow-tl{{width:420px;height:420px;left:-140px;top:-140px;background:color-mix(in srgb,var(--accent) 8%,transparent)}}
+.glow-br{{width:480px;height:480px;right:-160px;bottom:-160px;background:color-mix(in srgb,var(--ice) 8%,transparent)}}
+.bg-art{{position:fixed;inset:0;pointer-events:none;overflow:hidden}}
+.bg-arc{{position:absolute;top:-18vw;right:-16vw;width:56vw;height:56vw;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 16%,transparent);border-top-color:color-mix(in srgb,var(--accent) 55%,transparent);border-left-color:color-mix(in srgb,var(--accent) 28%,transparent)}}
+.bg-arc2{{position:absolute;top:-10vw;right:-8vw;width:42vw;height:42vw;border-radius:50%;border:1px solid color-mix(in srgb,var(--accent) 10%,transparent);border-bottom-color:color-mix(in srgb,var(--accent) 32%,transparent)}}
+.bg-sweep{{position:absolute;left:-18vw;bottom:-22vw;width:78vw;height:62vw;transform:rotate(-6deg)}}
+.bg-sweep path{{fill:none;stroke-linecap:round}}
 .brand{{position:fixed;top:22px;left:26px;font-size:12px;font-weight:600;letter-spacing:2px;color:var(--text-dim);opacity:.8}}
 .stage{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}}
-#moon{{width:150px;height:150px;filter:drop-shadow(0 8px 24px color-mix(in srgb,var(--text) 18%,transparent))}}
-.bow-wrap{{margin-top:-2px;display:flex;flex-direction:column;align-items:center}}
-.bow-svg{{width:150px;height:62px;display:block}}
-.connector{{width:2px;height:18px;background:linear-gradient(to bottom,color-mix(in srgb,var(--accent) 40%,transparent),var(--accent))}}
-.moon-info{{margin-top:18px;font-size:13px;color:var(--text-dim);letter-spacing:1px}}
+.bow{{position:relative;display:flex;align-items:center;justify-content:center}}
+.bow svg{{position:absolute;top:50%;transform:translateY(-50%);pointer-events:none}}
+.bow-left{{left:50%;width:210px;height:120px;margin-left:-240px}}
+.bow-right{{left:50%;width:210px;height:120px;margin-left:30px}}
+.knot{{width:72px;height:72px;border-radius:18px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;position:relative;z-index:2}}
+.knot img{{width:48px;height:48px;border-radius:12px}}
+.moon-info{{margin-top:26px;font-size:13px;color:var(--text-dim);letter-spacing:1px}}
 .moon-info b{{color:var(--text);font-weight:600}}
-.hint{{position:fixed;right:24px;bottom:20px;font-size:11px;color:var(--text-dim);opacity:.55;letter-spacing:1px;animation:bob 3s ease-in-out infinite}}
-@keyframes bob{{0%,100%{{transform:translateY(0)}}50%{{transform:translateY(-4px)}}}}
-.quote{{position:fixed;pointer-events:none;font-size:14px;color:var(--text);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;box-shadow:var(--shadow-lg);transform:translate(-50%,-110%);opacity:0;transition:opacity .3s ease,transform .3s ease;z-index:10;white-space:nowrap;max-width:70vw}}
-.quote.show{{opacity:1;transform:translate(-50%,-120%)}}
-.dot{{position:fixed;width:10px;height:10px;border-radius:50%;background:var(--accent);mix-blend-mode:multiply;pointer-events:none;z-index:5}}
-[data-theme="night"] .dot{{mix-blend-mode:screen}}
 </style>
 </head>
 <body>
 <div class="glow glow-tl"></div>
 <div class="glow glow-br"></div>
+<div class="bg-art">
+  <div class="bg-arc"></div>
+  <div class="bg-arc2"></div>
+  <svg class="bg-sweep" viewBox="0 0 780 620" xmlns="http://www.w3.org/2000/svg">
+    <path d="M-20 200 C 200 40, 560 60, 800 320" stroke="color-mix(in srgb,var(--accent) 26%,transparent)" stroke-width="2.5"/>
+    <path d="M-20 260 C 240 120, 600 130, 800 380" stroke="color-mix(in srgb,var(--ice) 22%,transparent)" stroke-width="2"/>
+    <path d="M-20 330 C 260 200, 560 220, 800 460" stroke="color-mix(in srgb,var(--ze) 20%,transparent)" stroke-width="1.6"/>
+    <path d="M-20 410 C 280 300, 600 310, 800 540" stroke="color-mix(in srgb,var(--ice) 14%,transparent)" stroke-width="1.2"/>
+    <path d="M-20 490 C 300 400, 620 410, 800 620" stroke="color-mix(in srgb,var(--accent) 12%,transparent)" stroke-width="1"/>
+  </svg>
+</div>
 <div class="brand">KEINESTAMP</div>
-<div class="dot" id="dot"></div>
-<div class="quote" id="quote"></div>
 <main class="stage">
-  <canvas id="moon" width="150" height="150"></canvas>
-  <div class="bow-wrap">
-    <div class="connector"></div>
-    <svg class="bow-svg" viewBox="0 0 150 62" xmlns="http://www.w3.org/2000/svg">
-      <path d="M75 30 C 55 4, 12 8, 12 30 C 12 52, 55 56, 75 30Z" fill="var(--accent)"/>
-      <path d="M75 30 C 95 4, 138 8, 138 30 C 138 52, 95 56, 75 30Z" fill="var(--accent)"/>
-      <rect x="67" y="21" width="16" height="18" rx="5" fill="var(--accent-hover)"/>
-      <path d="M12 30 C 2 24, -2 40, 6 50" stroke="var(--ice)" stroke-width="2" fill="none" opacity="0.65"/>
-      <path d="M138 30 C 148 24, 152 40, 144 50" stroke="var(--ze)" stroke-width="2" fill="none" opacity="0.65"/>
+  <div class="bow">
+    <svg class="bow-left" viewBox="0 0 210 120" xmlns="http://www.w3.org/2000/svg">
+      <path d="M200 60 C 150 18, 70 30, 30 78" stroke="color-mix(in srgb,var(--accent) 85%,transparent)" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <path d="M200 60 C 150 32, 80 44, 42 82" stroke="color-mix(in srgb,var(--accent) 50%,transparent)" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M200 60 C 158 46, 96 56, 58 86" stroke="color-mix(in srgb,var(--accent) 25%,transparent)" stroke-width="2" fill="none" stroke-linecap="round"/>
+    </svg>
+    <div class="knot"><img src="data:image/png;base64,{favicon}" alt="Keinestamp logo"></div>
+    <svg class="bow-right" viewBox="0 0 210 120" xmlns="http://www.w3.org/2000/svg">
+      <path d="M10 60 C 60 18, 140 30, 180 78" stroke="color-mix(in srgb,var(--ice) 85%,transparent)" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <path d="M10 60 C 60 32, 130 44, 168 82" stroke="color-mix(in srgb,var(--ice) 50%,transparent)" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <path d="M10 60 C 52 46, 114 56, 152 86" stroke="color-mix(in srgb,var(--ice) 25%,transparent)" stroke-width="2" fill="none" stroke-linecap="round"/>
     </svg>
   </div>
   <div class="moon-info"><b id="phaseName">—</b> · <span>d</span><b id="phaseAge">—</b></div>
 </main>
-<div class="hint">✦ 点一下页面</div>
 <script>
 (function(){{
   var synodic = 29.53058867;
   var ref = Date.UTC(2000,0,6,18,14);
   var age = ((Date.now() - ref) % (synodic*864e5) + synodic*864e5) % (synodic*864e5) / 864e5;
-  var p = age / synodic;
   var name = age < 1.8 ? '新月' : age < 5.5 ? '娥眉月' : age < 9.2 ? '上弦月' : age < 12.7 ? '盈凸月' : age < 16.4 ? '满月' : age < 20.1 ? '亏凸月' : age < 23.8 ? '下弦月' : age < 27.5 ? '残月' : '新月';
   document.getElementById('phaseName').textContent = name;
   document.getElementById('phaseAge').textContent = age.toFixed(1);
-
-  function drawMoon(phase) {{
-    var cv = document.getElementById('moon');
-    var ctx = cv.getContext('2d');
-    var cs = getComputedStyle(document.documentElement);
-    var light = cs.getPropertyValue('--text').trim() || '#1e2833';
-    var dark = cs.getPropertyValue('--bg').trim() || '#f4f6f8';
-    var border = cs.getPropertyValue('--border').trim() || '#e3e7ed';
-    var R = 68, xc = 75, yc = 75;
-    ctx.clearRect(0, 0, 150, 150);
-    ctx.beginPath();
-    ctx.arc(xc, yc, R, 0, Math.PI*2);
-    ctx.fillStyle = light;
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = border;
-    ctx.stroke();
-    ctx.beginPath();
-    var t = 2 * Math.PI * phase;
-    var rx = R * Math.sin(t);
-    if (phase < 0.5) {{
-      var tx = xc + R * Math.cos(t);
-      ctx.moveTo(tx, yc - R);
-      ctx.ellipse(tx, yc, rx, R, 0, -Math.PI/2, Math.PI/2);
-      ctx.arc(xc, yc, R, Math.PI/2, -Math.PI/2, true);
-    }} else {{
-      var tx = xc - R * Math.cos(t);
-      ctx.moveTo(tx, yc - R);
-      ctx.ellipse(tx, yc, rx, R, 0, Math.PI*1.5, Math.PI/2, true);
-      ctx.arc(xc, yc, R, Math.PI/2, -Math.PI/2, false);
-    }}
-    ctx.closePath();
-    ctx.fillStyle = dark;
-    ctx.fill();
-  }}
-  drawMoon(p);
-
-  var quotes = [
-    '模型不改个十版，都不好意思叫建模',
-    '又是满月，记得休息，别熬成白泽',
-    '今天也好好记录进度了吗？',
-    '撤回是悔恨，提交是勇气',
-    '贴图一时爽，UV 火葬场',
-    '这个版本一定没问题的……大概',
-    '进度不一定有，记录一定要有',
-    '满月夜的代码总比白天靠谱（并没有）',
-    '夜已深，进度条还差一点',
-    '好版本都是记录出来的，不是猜出来的',
-    '时间线不会说谎，只有你的进度会说谎',
-  ];
-  document.addEventListener('click', function(e){{
-    var q = document.getElementById('quote');
-    q.textContent = quotes[Math.floor(Math.random()*quotes.length)];
-    q.style.left = e.clientX + 'px';
-    q.style.top = e.clientY + 'px';
-    q.classList.add('show');
-    clearTimeout(q._t);
-    q._t = setTimeout(function(){{ q.classList.remove('show'); }}, 1600);
-  }});
-
-  var dot = document.getElementById('dot');
-  var mx = -100, my = -100, dx = -100, dy = -100;
-  document.addEventListener('mousemove', function(e){{
-    mx = e.clientX; my = e.clientY;
-    if (dx < -50) {{ dx = mx; dy = my; }}
-  }});
-  (function loop(){{
-    dx += (mx - dx) * 0.12;
-    dy += (my - dy) * 0.12;
-    dot.style.left = dx + 'px';
-    dot.style.top = dy + 'px';
-    requestAnimationFrame(loop);
-  }})();
 }})();
 </script>
 </body>
@@ -1165,13 +1102,15 @@ mod tests {
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");
-        assert!(html.contains("bow-svg"), "red bow present");
+        assert!(html.contains("knot"), "logo knot present");
+        assert!(html.contains("bow-left"), "moon-arc left wing present");
+        assert!(html.contains("bow-right"), "moon-arc right wing present");
+        assert!(html.contains("bg-sweep"), "large background art present");
+        assert!(html.contains("bg-arc"), "giant moon arc present");
         assert!(html.contains("phaseName"), "moon phase name present");
-        assert!(html.contains("drawMoon"), "real moon phase canvas present");
-        assert!(html.contains("quotes"), "click quotes present");
-        assert!(html.contains("mix-blend-mode"), "cursor dot present");
-        assert!(!html.contains("card-icon"), "no generic feature cards");
-        assert!(!html.contains("tagline"), "no tagline text element");
+        assert!(!html.contains("id=\"quote\""), "no click quotes");
+        assert!(!html.contains("id=\"dot\""), "no cursor dot");
+        assert!(!html.contains("id=\"moon\""), "no canvas moon");
     }
 
     #[test]
