@@ -332,60 +332,6 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
 <script>
   document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day'
 </script>
-<script>
-  (function () {
-    var RAD = Math.PI / 180;
-    function elongation(jd) {
-      var T = (jd - 2451545.0) / 36525.0;
-      var D = 297.8501921 + 445267.1114034 * T - 0.0018819 * T * T + 0.0000004 * T * T * T;
-      var M = 357.5291092 + 35999.0502909 * T - 0.0001536 * T * T;
-      var Mp = 134.9634114 + 477198.8676313 * T + 0.0089970 * T * T;
-      var F = 93.2720993 + 483202.0175273 * T - 0.0034029 * T * T;
-      var Lp = 218.3164477 + 481267.88123421 * T - 0.0015786 * T * T;
-      Lp += 6.288774 * Math.sin(Mp * RAD);
-      Lp += 1.274018 * Math.sin((2 * D - Mp) * RAD);
-      Lp += 0.658309 * Math.sin(2 * D * RAD);
-      Lp += 0.213616 * Math.sin(2 * Mp * RAD);
-      Lp -= 0.185596 * Math.sin(M * RAD);
-      Lp -= 0.114336 * Math.sin(2 * F * RAD);
-      Lp += 0.058793 * Math.sin((2 * D - 2 * Mp) * RAD);
-      Lp += 0.057212 * Math.sin((2 * D - M - Mp) * RAD);
-      Lp += 0.053320 * Math.sin((2 * D + Mp) * RAD);
-      Lp += 0.045877 * Math.sin((2 * D - M) * RAD);
-      Lp += 0.041033 * Math.sin((M - Mp) * RAD);
-      var L = 280.46646 + 36000.76983 * T + 0.0003032 * T * T;
-      var e = (Lp - L) % 360;
-      if (e < 0) e += 360;
-      return e;
-    }
-    function moonInfo(date) {
-      var jd = date.getTime() / 86400000 + 2440587.5;
-      var elong = elongation(jd);
-      var phase = elong / 360;
-      var illum = (1 - Math.cos(elong * RAD)) / 2;
-      return { phase: phase, illum: illum };
-    }
-    function moonName(p, i) {
-      if (i < 0.02) return '新月';
-      if (i < 0.40) return p < 0.5 ? '蛾眉月' : '残月';
-      if (i <= 0.60) return p < 0.5 ? '上弦月' : '下弦月';
-      if (i < 0.95) return p < 0.5 ? '盈凸月' : '亏凸月';
-      return '满月';
-    }
-    function moonPath(p) {
-      var waxing = p < 0.5;
-      var k = Math.cos(2 * Math.PI * p);
-      var kx = Math.abs(k) * 42;
-      if (kx < 0.6) kx = 0;
-      return 'M 50 8 A 42 42 0 0 ' + (waxing ? 1 : 0) + ' 50 92 A ' + kx.toFixed(3) + ' 42 0 0 ' + (waxing ? 0 : 1) + ' 50 8 Z';
-    }
-    var now = new Date();
-    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
-    var info = moonInfo(day);
-    document.getElementById('moonLight').setAttribute('d', moonPath(info.phase));
-    document.getElementById('moonName').textContent = moonName(info.phase, info.illum);
-  })();
-</script>
 <style>
 :root {
   --bg: #f5f6f8;
@@ -515,8 +461,8 @@ h1 {
 .ha-scale i { display: block; width: 2px; background: var(--text-dim); border-radius: 1px; }
 .ha-tag {
   position: absolute; bottom: -16px; right: 6%;
-  font-family: ui-monospace, Consolas, monospace; font-size: 10px;
-  color: var(--text-dim); opacity: 0.6; letter-spacing: 1px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  color: var(--text-dim); opacity: 0.8; letter-spacing: 1px;
 }
 
 /* ---- 特性卡（错落） ---- */
@@ -627,7 +573,7 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
     <div class="ha-scale">
       <i style="height:4px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:7px"></i><i style="height:4px"></i>
     </div>
-    <div class="ha-tag"><span id="moonName">月相</span> · moon phase</div>
+    <div class="ha-tag"><span id="moonName">月相</span></div>
   </div>
 </main>
 
@@ -654,7 +600,60 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
 
 <footer>Keinestamp © 2026</footer>
 
-
+<script>
+  (function () {
+    var RAD = Math.PI / 180;
+    function elongation(jd) {
+      var T = (jd - 2451545.0) / 36525.0;
+      var D = 297.8501921 + 445267.1114034 * T - 0.0018819 * T * T + 0.0000004 * T * T * T;
+      var M = 357.5291092 + 35999.0502909 * T - 0.0001536 * T * T;
+      var Mp = 134.9634114 + 477198.8676313 * T + 0.0089970 * T * T;
+      var F = 93.2720993 + 483202.0175273 * T - 0.0034029 * T * T;
+      var Lp = 218.3164477 + 481267.88123421 * T - 0.0015786 * T * T;
+      Lp += 6.288774 * Math.sin(Mp * RAD);
+      Lp += 1.274018 * Math.sin((2 * D - Mp) * RAD);
+      Lp += 0.658309 * Math.sin(2 * D * RAD);
+      Lp += 0.213616 * Math.sin(2 * Mp * RAD);
+      Lp -= 0.185596 * Math.sin(M * RAD);
+      Lp -= 0.114336 * Math.sin(2 * F * RAD);
+      Lp += 0.058793 * Math.sin((2 * D - 2 * Mp) * RAD);
+      Lp += 0.057212 * Math.sin((2 * D - M - Mp) * RAD);
+      Lp += 0.053320 * Math.sin((2 * D + Mp) * RAD);
+      Lp += 0.045877 * Math.sin((2 * D - M) * RAD);
+      Lp += 0.041033 * Math.sin((M - Mp) * RAD);
+      var L = 280.46646 + 36000.76983 * T + 0.0003032 * T * T;
+      var e = (Lp - L) % 360;
+      if (e < 0) e += 360;
+      return e;
+    }
+    function moonInfo(date) {
+      var jd = date.getTime() / 86400000 + 2440587.5;
+      var elong = elongation(jd);
+      var phase = elong / 360;
+      var illum = (1 - Math.cos(elong * RAD)) / 2;
+      return { phase: phase, illum: illum };
+    }
+    function moonName(p, i) {
+      if (i < 0.02) return '新月';
+      if (i < 0.40) return p < 0.5 ? '蛾眉月' : '残月';
+      if (i <= 0.60) return p < 0.5 ? '上弦月' : '下弦月';
+      if (i < 0.95) return p < 0.5 ? '盈凸月' : '亏凸月';
+      return '满月';
+    }
+    function moonPath(p) {
+      var waxing = p < 0.5;
+      var k = Math.cos(2 * Math.PI * p);
+      var kx = Math.abs(k) * 42;
+      if (kx < 0.6) kx = 0;
+      return 'M 50 8 A 42 42 0 0 ' + (waxing ? 1 : 0) + ' 50 92 A ' + kx.toFixed(3) + ' 42 0 0 ' + (waxing ? 0 : 1) + ' 50 8 Z';
+    }
+    var now = new Date();
+    var day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
+    var info = moonInfo(day);
+    document.getElementById('moonLight').setAttribute('d', moonPath(info.phase));
+    document.getElementById('moonName').textContent = moonName(info.phase, info.illum);
+  })();
+</script>
 
 </body>
 </html>
@@ -1361,7 +1360,7 @@ mod tests {
         assert!(html.contains("ha-moon"), "moon art present");
         assert!(html.contains("ha-scale"), "progress scale present");
         assert!(html.contains("ha-ring"), "ring decoration present");
-        assert!(html.contains("· moon phase"), "moon phase label present");
+        assert!(html.contains("ha-tag"), "moon phase label present");
         assert!(html.contains("moonLight"), "client-side moon path element");
         assert!(html.contains("elongation"), "client-side moon algorithm");
         assert!(html.contains("moonName"), "client-side moon name element");
