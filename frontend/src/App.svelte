@@ -455,6 +455,7 @@
               siteLocked={siteLocked}
               onSiteNameChange={handleSiteNameChange}
               onOpenSite={handleOpenSite}
+              onMilestoneChange={() => loadProject(activePath)}
             />
           </div>
         {/if}

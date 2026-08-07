@@ -88,6 +88,49 @@ pub fn get_git_author(project_root: &Path) -> String {
         .unwrap_or_default()
 }
 
+const MAX_IMAGE_BYTES: usize = 8 * 1024 * 1024;
+
+pub fn is_image_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif")
+}
+
+pub fn image_mime(path: &str) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".jpg") || lower.ends_with(".jpeg") {
+        "image/jpeg"
+    } else if lower.ends_with(".webp") {
+        "image/webp"
+    } else if lower.ends_with(".gif") {
+        "image/gif"
+    } else {
+        "image/png"
+    }
+}
+
+pub fn image_to_data_uri(project_root: &Path, commit_hash: &str, file_path: &str) -> anyhow::Result<String> {
+    let output = std::process::Command::new("git")
+        .args(["-c", "core.quotepath=false", "show", &format!("{}:{}", commit_hash, file_path)])
+        .current_dir(project_root)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git show failed for {}: {}", file_path, stderr.trim());
+    }
+    if output.stdout.len() > MAX_IMAGE_BYTES {
+        anyhow::bail!("image too large: {} bytes", output.stdout.len());
+    }
+
+    use base64::Engine;
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&output.stdout);
+    Ok(format!("data:{};base64,{}", image_mime(file_path), b64))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

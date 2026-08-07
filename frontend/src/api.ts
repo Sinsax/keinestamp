@@ -101,6 +101,14 @@ export async function getFileDiff(path: string, entryId: string, filePath: strin
   return invoke<string>('get_file_diff', { path, entryId, filePath })
 }
 
+export async function getImagePreview(path: string, entryId: string, filePath: string): Promise<string> {
+  return invoke<string>('get_image_preview', { path, entryId, filePath })
+}
+
+export async function setEntryMilestone(path: string, entryId: string, milestone: boolean): Promise<void> {
+  return invoke<void>('set_entry_milestone', { path, entryId, milestone })
+}
+
 export async function getGlbPreview(path: string, entryId: string, filePath: string): Promise<string> {
   return invoke<string>('get_glb_preview', { path, entryId, filePath })
 }

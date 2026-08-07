@@ -20,6 +20,8 @@ pub struct TimelineEntry {
     pub preview: String,
     #[serde(default)]
     pub tag: Option<String>,
+    #[serde(default)]
+    pub milestone: bool,
 }
 
 pub fn read_timeline(path: &Path) -> Result<Timeline> {
@@ -69,6 +71,18 @@ pub fn append_entry(path: &Path, entry: TimelineEntry) -> Result<()> {
     write_timeline(path, &timeline)
 }
 
+pub fn set_entry_milestone(path: &Path, entry_id: &str, milestone: bool) -> Result<()> {
+    eprintln!("[debug] set_entry_milestone: {:?}, id={}, milestone={}", path, entry_id, milestone);
+    let mut timeline = read_timeline(path)?;
+    let entry = timeline
+        .entries
+        .iter_mut()
+        .find(|e| e.id == entry_id || e.id.starts_with(entry_id))
+        .context("entry not found")?;
+    entry.milestone = milestone;
+    write_timeline(path, &timeline)
+}
+
 pub fn remove_entry(path: &Path, entry_id: &str) -> Result<TimelineEntry> {
     eprintln!("[debug] remove_entry: {:?}, id={}", path, entry_id);
     let mut timeline = read_timeline(path)?;
@@ -114,7 +128,41 @@ mod tests {
             file_status: vec!["A".to_string()],
             preview: format!("previews/{}.png", id),
             tag: None,
+            milestone: false,
         }
+    }
+
+    #[test]
+    fn test_set_entry_milestone() -> Result<()> {
+        let path = tmp_path("milestone");
+        let mut timeline = Timeline {
+            project: "P".to_string(),
+            entries: vec![make_entry("abc123def456")],
+        };
+        write_timeline(&path, &timeline)?;
+
+        set_entry_milestone(&path, "abc123def456", true)?;
+        let read = read_timeline(&path)?;
+        assert!(read.entries[0].milestone);
+
+        set_entry_milestone(&path, "abc123", false)?;
+        let read = read_timeline(&path)?;
+        assert!(!read.entries[0].milestone);
+
+        assert!(set_entry_milestone(&path, "nope", true).is_err());
+        std::fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_old_timeline_without_milestone_parses() -> Result<()> {
+        let path = tmp_path("old_milestone");
+        let old_json = r#"{"project":"P","entries":[{"id":"abc","timestamp":"2026-06-13T12:00:00Z","author":"a","message":"m","files":["f.blend"],"preview":"p"}]}"#;
+        std::fs::write(&path, old_json)?;
+        let read = read_timeline(&path)?;
+        assert!(!read.entries[0].milestone);
+        std::fs::remove_file(&path)?;
+        Ok(())
     }
 
     #[test]

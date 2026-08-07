@@ -1,4 +1,4 @@
-use serde::Serialize;
+﻿use serde::Serialize;
 use std::path::{Path, PathBuf};
 
 fn map_err<T>(r: anyhow::Result<T>) -> Result<T, String> {
@@ -147,6 +147,7 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             file_status,
             preview: preview_path.unwrap_or_default(),
             tag,
+            milestone: false,
         };
 
         map_err(keinestamp::timeline::append_entry(&timeline_path, entry))?;
@@ -542,6 +543,16 @@ fn remove_recent(path: String) {
 }
 
 #[tauri::command]
+fn set_entry_milestone(path: String, entry_id: String, milestone: bool) -> Result<(), String> {
+    eprintln!("[debug] set_entry_milestone({}, entry_id={}, milestone={})", path, entry_id, milestone);
+    let p = PathBuf::from(&path);
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    let timeline_path = meta.web_root.join("timeline.json");
+    map_err(keinestamp::timeline::set_entry_milestone(&timeline_path, &entry_id, milestone))
+}
+
+#[tauri::command]
 fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
     eprintln!("[debug] delete_entry({}, entry_id={})", path, entry_id);
     let p = PathBuf::from(&path);
@@ -609,6 +620,19 @@ fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<St
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(stdout)
+}
+
+#[tauri::command]
+fn get_image_preview(path: String, entry_id: String, file_path: String) -> Result<String, String> {
+    eprintln!("[debug] get_image_preview({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
+    let p = PathBuf::from(&path);
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    map_err(keinestamp::git_helpers::image_to_data_uri(
+        &meta.project_root,
+        &entry_id,
+        &file_path,
+    ))
 }
 
 #[tauri::command]
@@ -864,10 +888,12 @@ pub fn run() {
             open_web_timeline,
             open_site,
             delete_entry,
+            set_entry_milestone,
             get_project_log,
             get_tracked_files,
             get_file_diff,
             get_glb_preview,
+            get_image_preview,
             download_blender,
             list_blender_versions,
             list_installed_blender_versions,

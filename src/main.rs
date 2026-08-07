@@ -1,4 +1,4 @@
-use clap::{Parser, Subcommand};
+﻿use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -230,6 +230,7 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
         file_status: changed_files_status.clone(),
         preview: preview_path.unwrap_or_default(),
         tag: tag.map(|s| s.to_string()),
+        milestone: false,
     };
 
     keinestamp::timeline::append_entry(&timeline_path, entry)?;

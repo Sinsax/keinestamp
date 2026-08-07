@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use std::path::Path;
+use std::sync::OnceLock;
 
 const THREE_CJS: &[u8] = include_bytes!("three-src/three.cjs");
 
@@ -8,6 +9,16 @@ pub(crate) const ORBIT_CONTROLS_SRC: &[u8] = include_bytes!("three-src/controls/
 pub(crate) const GLTF_LOADER_SRC: &[u8] = include_bytes!("three-src/loaders/GLTFLoader.js");
 
 const BUFFER_GEOMETRY_UTILS_SRC: &[u8] = include_bytes!("three-src/utils/BufferGeometryUtils.js");
+
+const LOGO_PNG: &[u8] = include_bytes!("../frontend/public/keinestamp.png");
+
+pub fn logo_favicon_b64() -> &'static str {
+    static B64: OnceLock<String> = OnceLock::new();
+    B64.get_or_init(|| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(LOGO_PNG)
+    })
+}
 
 pub fn ensure_threejs(three_dir: &Path) -> Result<()> {
     let old_files = ["three.module.js"];

@@ -100,7 +100,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (31)
+### Tauri commands (33)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -130,6 +130,8 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `get_blender_path` / `set_blender_path` | `String` / `()` | AppConfig |
 | `get_deploy_token` / `set_deploy_token` | `String` / `()` | AppConfig deploy_token |
 | `get_auto_connect` / `set_auto_connect` | `bool` / `()` | AppConfig auto_connect |
+| `get_image_preview` | `String` data URI | `git show <entry>:<file>` image bytes → base64 (≤8MB), thumbnails in EntryList |
+| `set_entry_milestone` | `()` | toggles `milestone` on timeline.json entry (atomic write) |
 
 ### Frontend components
 
@@ -137,7 +139,7 @@ All in `frontend/src/`. Key files:
 
 - `App.svelte` — Main layout, state, 3s status polling
 - `SettingsDialog.svelte` — deploy_server_url/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle (app-level). Save does not close dialog.
-- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. Site name + access token sections at bottom (token only after deploy).
+- `EntryList.svelte` — Timeline cards with collapsible files/diff/images/3D sections. ★ milestone toggle per card (`set_entry_milestone`). Site name + access token sections at bottom (token only after deploy).
 - `StatusPanel.svelte` — Changes panel: directory-tree view of working files (`git status --porcelain -uall` so untracked dirs are not collapsed). Per-row checkboxes (default all = full commit; unchecking some → record commits only selected via `files` param, selection persists across 3s auto-refresh). Dir checkbox = select/deselect all files under it (indeterminate when partial), dir row click collapses/expands, file row click toggles. Header shows `selected/total` count + 全选/全不选 buttons.
 - `CommitDialog.svelte` — record dialog: message/tag/3D-preview only (file selection lives in StatusPanel); closes after each commit (batch = re-open, selection persists on main panel).
 - `statusParse.ts` — shared `parseStatus(output)` used by StatusPanel + CommitDialog.
@@ -160,7 +162,7 @@ All in `frontend/src/`. Key files:
 - **Day/night dual theme**: Day = 人形 (white bg + deep blue + ice blue + red), Night = 白泽 (green-black bg + dark green + green-white + red). `[data-theme="night"]` override block at end of app.scss. Manual ☀/🌙 toggle, localStorage key `keinestamp_theme` (desktop) / `keinestamp_web_theme` (web). Inline pre-read script in `frontend/index.html` head prevents white flash. No system-follow, no animations.
 - **Theme toggle location**: ☀/🌙 sits in ProjectTabs fixed right actions area; TitleBar is pure window controls (no theme button).
 - **Tag badges**: inline `--tag-c` + CSS `color-mix` — auto-adapts to both themes, no `tagSoft`.
-- **Web page theme**: `html_gen.rs` template has `:root`/`[data-theme="night"]` dual palettes; 3D viewer and calendar heat colors stay dark/hardcoded. Login page (`serve.rs login_page_html`) uses the same dual palettes and shares the `keinestamp_web_theme` localStorage key (same origin → theme carries over between login and timeline pages). Timeline page extras: entry card hover lift, empty state with ice-blue clock icon, diff-row hover brightness. Web pages have NO logo (removed; desktop TitleBar keeps it).
+- **Web page theme**: `html_gen.rs` template has `:root`/`[data-theme="night"]` dual palettes; 3D viewer and calendar heat colors stay dark/hardcoded. Login page (`serve.rs login_page_html`) uses the same dual palettes and shares the `keinestamp_web_theme` localStorage key (same origin → theme carries over between login and timeline pages). Timeline page extras: entry card hover lift, empty state with ice-blue clock icon, diff-row hover brightness, ★ milestone badge + red left border (`entry.milestone`). Web pages have NO logo (removed; desktop TitleBar keeps it) but both pages embed the logo as a data-URI favicon (`three_assets::logo_favicon_b64`, compiled via `include_bytes!`).
 
 ## Integration tests
 

@@ -277,6 +277,7 @@ button{{margin-top:16px;padding:10px 32px;border:none;border-radius:8px;backgrou
 button:hover{{background:var(--accent-hover)}}
 .error{{color:var(--accent);font-size:13px;margin-top:12px;display:none}}
 </style>
+<link rel="icon" href="data:image/png;base64,{favicon}">
 </head>
 <body>
 <div class="card">
@@ -300,7 +301,7 @@ button:hover{{background:var(--accent-hover)}}
 }})();
 </script>
 </body>
-</html>"##, project = project_name)
+</html>"##, project = project_name, favicon = crate::three_assets::logo_favicon_b64())
 }
 
 fn serve_login_page(request: tiny_http::Request, project_name: &str) -> Result<()> {

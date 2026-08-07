@@ -27,6 +27,7 @@ export interface TimelineEntry {
   file_status: string[]
   preview: string
   tag?: string | null
+  milestone?: boolean
 }
 
 export interface Timeline {

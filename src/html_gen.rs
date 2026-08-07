@@ -82,7 +82,8 @@ pub fn generate_index_html(
         .replace("{{GLB_JSON}}", &glb_json)
         .replace("{{DIFFS_JSON}}", &diffs_json)
         .replace("{{CALENDAR_JSON}}", &calendar_json)
-        .replace("{{PAGE_TITLE}}", page_title);
+        .replace("{{PAGE_TITLE}}", page_title)
+        .replace("{{FAVICON_B64}}", crate::three_assets::logo_favicon_b64());
 
     std::fs::write(web_root.join("index.html"), &html)
         .with_context(|| format!("failed to write index.html to {:?}", web_root))?;
@@ -98,6 +99,7 @@ const TEMPLATE: &str = r##"<!DOCTYPE html>
 <meta charset="UTF-8">
 <script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" href="data:image/png;base64,{{FAVICON_B64}}">
 <title>{{PAGE_TITLE}} - Keinestamp</title>
 <script>var module = {exports: {}}; var exports = module.exports;</script>
 <script src="./three/three.cjs"></script>
@@ -141,6 +143,8 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .entry { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .entry:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
 .entry.tagged { border-left-color: var(--tag-color, var(--accent)); }
+.entry.milestone { border-left-color: var(--accent); }
+.milestone-star { color: var(--accent); margin-right: 4px; }
 .entry-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .entry-id { font-size: 12px; color: var(--text-dim); font-family: monospace; }
 .entry-date { font-size: 14px; color: var(--text-dim); }
@@ -332,11 +336,14 @@ function render() {
 
       var tagClass = tag ? ' tagged' : '';
       var tagStyle = tag ? ';--tag-color:' + tagColor(tag) : '';
+      var msClass = e.milestone ? ' milestone' : '';
       var dateId = e.timestamp ? e.timestamp.substring(0,10) : '';
-      h += '<div class="entry' + tagClass + '" style="' + tagStyle + '"' + (dateId ? ' id="d-' + dateId + '"' : '') + '>';
+      h += '<div class="entry' + tagClass + msClass + '" style="' + tagStyle + '"' + (dateId ? ' id="d-' + dateId + '"' : '') + '>';
       h += '<div class="entry-header">';
       h += '<span class="entry-id">' + esc(e.id.substring(0,7)) + '</span>';
-      h += '<span class="entry-date">' + esc(e.timestamp ? e.timestamp.substring(0,19).replace('T',' ') : '') + '</span>';
+      h += '<span class="entry-date">';
+      if (e.milestone) h += '<span class="milestone-star">★</span> ';
+      h += esc(e.timestamp ? e.timestamp.substring(0,19).replace('T',' ') : '') + '</span>';
       h += '</div>';
       h += '<div class="entry-message">' + esc(e.message || '');
       if (tag) h += '<span class="tag-badge" style="--tag-c:' + tagColor(tag) + '">' + esc(tag) + '</span>';
@@ -868,7 +875,7 @@ mod tests {
                 files: vec!["char.blend".to_string(), "textures/diffuse.png".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
-                tag: Some("建模".to_string()),
+                tag: Some("建模".to_string()), milestone: false,
             }],
         };
 
@@ -881,6 +888,36 @@ mod tests {
         assert!(html.contains("建模"));
         assert!(html.contains("tag-badge"));
         assert!(html.contains("var diffsData ="));
+        assert!(!html.contains("\"milestone\": true"), "non-milestone entry has milestone false");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_milestone() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_milestone");
+        std::fs::create_dir_all(&dir)?;
+
+        let timeline = Timeline {
+            project: "Ms".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "milestone done".to_string(),
+                files: vec!["char.blend".to_string()],
+                file_status: vec![],
+                preview: "previews/abc123.png".to_string(),
+                tag: None,
+                milestone: true,
+            }],
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "Ms")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(html.contains("\"milestone\": true"), "milestone flag in timeline json");
+        assert!(html.contains("milestone-star"), "star render code present");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -902,7 +939,7 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None,
+                tag: None, milestone: false,
             }],
         };
 
@@ -935,7 +972,7 @@ mod tests {
                 files: vec!["fix.txt".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None,
+                tag: None, milestone: false,
             }],
         };
 
