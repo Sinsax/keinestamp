@@ -199,65 +199,76 @@ fn push(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn deploy(path: String) -> Result<(), String> {
+async fn deploy(path: String) -> Result<(), String> {
     eprintln!("[debug] deploy({})", path);
-    let p = PathBuf::from(&path);
-    let meta_p = keinestamp::config::meta_path(&p);
-    let mut meta = map_err(keinestamp::config::read_meta(&meta_p))?;
+    tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_p = keinestamp::config::meta_path(&p);
+        let mut meta = map_err(keinestamp::config::read_meta(&meta_p))?;
 
-    if meta.project_id.is_none() {
-        meta.project_id = Some(keinestamp::config::generate_project_id());
-        map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
-    }
+        if meta.project_id.is_none() {
+            meta.project_id = Some(keinestamp::config::generate_project_id());
+            map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
+        }
 
-    let server = keinestamp::app_config::get_deploy_server_url()
-        .filter(|s| !s.is_empty());
+        let server = keinestamp::app_config::get_deploy_server_url()
+            .filter(|s| !s.is_empty());
 
-    if let Some(ref server) = server {
-        eprintln!("[debug] deploy: server={}", server);
-        let deploy_token = keinestamp::app_config::get_deploy_token();
-        let project_name = keinestamp::config::resolve_site_name(&meta);
-        let project_id = meta.project_id.as_deref().unwrap_or("");
-        map_err(keinestamp::push::deploy_to_server(
-            &meta.web_root, server, deploy_token.as_deref(), meta.access_token.as_deref(), &project_name, project_id,
-        ))?;
-        meta.site_name = Some(project_name);
-        meta.site_locked = true;
-        map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
-        eprintln!("[debug] deploy → ok");
-        Ok(())
-    } else {
-        Err("未设置服务器地址".to_string())
-    }
+        if let Some(ref server) = server {
+            eprintln!("[debug] deploy: server={}", server);
+            let deploy_token = keinestamp::app_config::get_deploy_token();
+            let project_name = keinestamp::config::resolve_site_name(&meta);
+            let project_id = meta.project_id.as_deref().unwrap_or("");
+            map_err(keinestamp::push::deploy_to_server(
+                &meta.web_root, server, deploy_token.as_deref(), meta.access_token.as_deref(), &project_name, project_id,
+            ))?;
+            meta.site_name = Some(project_name);
+            meta.site_locked = true;
+            map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
+            eprintln!("[debug] deploy → ok");
+            Ok(())
+        } else {
+            Err("未设置服务器地址".to_string())
+        }
+    })
+    .await
+    .map_err(|e| format!("deploy task failed: {}", e))?
 }
 
 #[tauri::command]
-fn test_connection(server_url: String, deploy_token: Option<String>) -> Result<bool, String> {
+async fn test_connection(server_url: String, deploy_token: Option<String>) -> Result<bool, String> {
     eprintln!("[debug] test_connection(server_url={:?})", server_url);
-    if server_url.is_empty() {
-        return Ok(false);
-    }
-    let health_url = format!("{}/health", server_url.trim_end_matches('/'));
-    eprintln!("[debug] test_connection: GET {}", health_url);
+    tokio::task::spawn_blocking(move || {
+        if server_url.is_empty() {
+            return Ok(false);
+        }
+        let health_url = format!("{}/health", server_url.trim_end_matches('/'));
+        eprintln!("[debug] test_connection: GET {}", health_url);
 
-    let mut req = ureq::get(&health_url);
-    if let Some(ref token) = deploy_token {
-        if !token.is_empty() {
-            req = req.set("Authorization", &format!("Bearer {}", token));
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(15))
+            .build();
+        let mut req = agent.get(&health_url);
+        if let Some(ref token) = deploy_token {
+            if !token.is_empty() {
+                req = req.set("Authorization", &format!("Bearer {}", token));
+            }
         }
-    }
 
-    match req.call() {
-        Ok(resp) => {
-            let ok = resp.status() == 200;
-            eprintln!("[debug] test_connection → {}", if ok { "connected" } else { "failed" });
-            Ok(ok)
+        match req.call() {
+            Ok(resp) => {
+                let ok = resp.status() == 200;
+                eprintln!("[debug] test_connection → {}", if ok { "connected" } else { "failed" });
+                Ok(ok)
+            }
+            Err(e) => {
+                eprintln!("[debug] test_connection → error: {}", e);
+                Ok(false)
+            }
         }
-        Err(e) => {
-            eprintln!("[debug] test_connection → error: {}", e);
-            Ok(false)
-        }
-    }
+    })
+    .await
+    .map_err(|e| format!("test_connection task failed: {}", e))?
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -267,33 +278,40 @@ struct DeployStatus {
 }
 
 #[tauri::command]
-fn get_deploy_status(
+async fn get_deploy_status(
     server_url: String,
     deploy_token: Option<String>,
     path: String,
 ) -> Result<DeployStatus, String> {
     eprintln!("[debug] get_deploy_status({})", path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let local = keinestamp::git_web::get_web_commit_count(&meta.web_root);
-    let site = keinestamp::config::resolve_site_name(&meta);
-    let url = format!("{}/{}/version", server_url.trim_end_matches('/'), site);
-    eprintln!("[debug] get_deploy_status: local={}, GET {}", local, url);
-    let mut req = ureq::get(&url);
-    if let Some(ref token) = deploy_token {
-        if !token.is_empty() {
-            req = req.set("Authorization", &format!("Bearer {}", token));
+    tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let local = keinestamp::git_web::get_web_commit_count(&meta.web_root);
+        let site = keinestamp::config::resolve_site_name(&meta);
+        let url = format!("{}/{}/version", server_url.trim_end_matches('/'), site);
+        eprintln!("[debug] get_deploy_status: local={}, GET {}", local, url);
+        let agent = ureq::AgentBuilder::new()
+            .timeout(std::time::Duration::from_secs(15))
+            .build();
+        let mut req = agent.get(&url);
+        if let Some(ref token) = deploy_token {
+            if !token.is_empty() {
+                req = req.set("Authorization", &format!("Bearer {}", token));
+            }
         }
-    }
-    let remote = req
-        .call()
-        .ok()
-        .and_then(|r| r.into_string().ok())
-        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("count").and_then(|c| c.as_u64()));
-    eprintln!("[debug] get_deploy_status → remote={:?}", remote);
-    Ok(DeployStatus { local, remote })
+        let remote = req
+            .call()
+            .ok()
+            .and_then(|r| r.into_string().ok())
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.get("count").and_then(|c| c.as_u64()));
+        eprintln!("[debug] get_deploy_status → remote={:?}", remote);
+        Ok(DeployStatus { local, remote })
+    })
+    .await
+    .map_err(|e| format!("get_deploy_status task failed: {}", e))?
 }
 
 #[tauri::command]
@@ -644,19 +662,6 @@ fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<St
 }
 
 #[tauri::command]
-fn get_image_preview(path: String, entry_id: String, file_path: String) -> Result<String, String> {
-    eprintln!("[debug] get_image_preview({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    map_err(keinestamp::git_helpers::image_to_data_uri(
-        &meta.project_root,
-        &entry_id,
-        &file_path,
-    ))
-}
-
-#[tauri::command]
 fn get_glb_preview(path: String, entry_id: String, file_path: String) -> Result<String, String> {
     eprintln!("[debug] get_glb_preview({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
     let p = PathBuf::from(&path);
@@ -914,7 +919,6 @@ pub fn run() {
             get_tracked_files,
             get_file_diff,
             get_glb_preview,
-            get_image_preview,
             download_blender,
             list_blender_versions,
             list_installed_blender_versions,

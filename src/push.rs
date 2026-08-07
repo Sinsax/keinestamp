@@ -33,7 +33,11 @@ pub fn deploy_to_server(
     eprintln!("[debug] deploy_to_server: posting to {}", upload_url);
 
     let web_count = crate::git_web::get_web_commit_count(web_root);
-    let mut req = ureq::post(&upload_url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout(std::time::Duration::from_secs(120))
+        .build();
+    let mut req = agent
+        .post(&upload_url)
         .set("Content-Type", "application/zip")
         .set("X-Project-Name", &safe_project_name)
         .set("X-Project-Id", project_id)

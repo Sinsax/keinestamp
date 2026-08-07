@@ -1,7 +1,7 @@
 <script lang="ts">
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
-  import { getFileDiff, getImagePreview, openWebTimeline, setEntryMilestone, updateConfig } from '../api'
+  import { getFileDiff, openWebTimeline, setEntryMilestone, updateConfig } from '../api'
   import { tagColor } from './tags'
 
   let {
@@ -111,8 +111,6 @@
   let expandedSections = $state<Record<string, Record<string, boolean>>>({})
   let diffs = $state<Record<string, Record<string, string>>>({})
   let diffLoading = $state<Record<string, boolean>>({})
-  let images = $state<Record<string, Record<string, string>>>({})
-  let imageLoading = $state<Record<string, boolean>>({})
 
   function hasSection(entryId: string, section: string): boolean {
     const e = entries.find(x => x.id === entryId)
@@ -127,29 +125,7 @@
     expandedSections = next
     if (next[entryId][section]) {
       if (section === 'diff') loadDiffs(entryId)
-      if (section === 'images') loadImages(entryId)
     }
-  }
-
-  function isImageFile(f: string): boolean {
-    const lower = f.toLowerCase()
-    return lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg') || lower.endsWith('.webp') || lower.endsWith('.gif')
-  }
-
-  async function loadImages(entryId: string) {
-    if (imageLoading[entryId]) return
-    imageLoading = { ...imageLoading, [entryId]: true }
-    const e = entries.find(x => x.id === entryId)
-    if (!e || !activePath) { imageLoading = { ...imageLoading, [entryId]: false }; return }
-    const files = e.files.filter(isImageFile)
-    const results: Record<string, string> = {}
-    for (const f of files) {
-      try {
-        results[f] = await getImagePreview(activePath, entryId, f)
-      } catch { /* ignore */ }
-    }
-    images = { ...images, [entryId]: results }
-    imageLoading = { ...imageLoading, [entryId]: false }
   }
 
   function statusIcon(s: string): string {
@@ -175,12 +151,6 @@
     const e = entries.find(x => x.id === entryId)
     if (!e) return []
     return e.files.filter(f => f.endsWith('.blend'))
-  })
-
-  let imageFiles = $derived((entryId: string) => {
-    const e = entries.find(x => x.id === entryId)
-    if (!e) return []
-    return e.files.filter(isImageFile)
   })
 
   interface GroupedEntry {
@@ -304,6 +274,7 @@
         class="entry-card"
         class:active={entry.id === selectedId}
         class:tagged={!!entryTag}
+        class:milestone={!!entry.milestone}
         style={entryTag ? `--tag-color:${tagColor(entryTag)}` : ''}
         onclick={(e) => { e.stopPropagation(); onSelect(entry.id); }}
         ondblclick={(e) => { e.stopPropagation(); onDblClick(entry); }}
@@ -377,30 +348,6 @@
         {/if}
 
         <!-- Section 3: Blend Models -->
-        {#if imageFiles(entry.id).length > 0}
-          <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'images'); }}>
-            <span class="arr">{hasSection(entry.id, 'images') ? '▾' : '▸'}</span>
-            <span>图片预览 ({imageFiles(entry.id).length})</span>
-          </div>
-          {#if hasSection(entry.id, 'images')}
-            <div class="section-body">
-              {#if imageLoading[entry.id]}
-                <div class="section-loading">加载中...</div>
-              {:else}
-                <div class="img-grid">
-                  {#each imageFiles(entry.id) as f}
-                    {@const src = images[entry.id]?.[f]}
-                    {#if src}
-                      <img class="img-thumb" src={src} alt={f} title={f} loading="lazy" />
-                    {:else}
-                      <div class="img-empty" title={f}>{f}</div>
-                    {/if}
-                  {/each}
-                </div>
-              {/if}
-            </div>
-          {/if}
-        {/if}
         {#if blendF.length > 0}
           <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'model'); }}>
             <span class="arr">{hasSection(entry.id, 'model') ? '▾' : '▸'}</span>
@@ -525,6 +472,13 @@
   .ms-btn.active {
     color: var(--accent);
   }
+  .entry-card.milestone {
+    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+    border-color: var(--accent);
+  }
+  .entry-card.milestone:hover {
+    border-color: var(--accent);
+  }
   .section-header {
     display: flex;
     align-items: center;
@@ -588,33 +542,6 @@
   .dl.del .dl-num { color: var(--error); }
   .dl.mod { background: var(--blue-soft); color: var(--blue); }
   .dl.mod .dl-num { color: var(--blue); }
-
-  .img-grid {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    padding: 4px 0;
-  }
-  .img-thumb {
-    width: 80px;
-    height: 80px;
-    object-fit: cover;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    cursor: pointer;
-    transition: border-color 0.12s, transform 0.12s;
-  }
-  .img-thumb:hover {
-    border-color: var(--accent);
-    transform: scale(1.03);
-  }
-  .img-empty {
-    font-size: 10px;
-    color: var(--text-dim);
-    font-family: var(--mono);
-    word-break: break-all;
-    padding: 2px 4px;
-  }
 
   .model-err { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; background: var(--surface2); border-radius: 6px; }
   .open-web-btn {

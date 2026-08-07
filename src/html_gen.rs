@@ -143,7 +143,11 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .entry { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
 .entry:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
 .entry.tagged { border-left-color: var(--tag-color, var(--accent)); }
-.entry.milestone { border-left-color: var(--accent); }
+.entry.milestone {
+  border-left-color: var(--accent);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+}
 .milestone-star { color: var(--accent); margin-right: 4px; }
 .entry-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .entry-id { font-size: 12px; color: var(--text-dim); font-family: monospace; }
