@@ -319,97 +319,293 @@ fn handle_index(request: tiny_http::Request) -> Result<()> {
 }
 
 fn index_page_html() -> String {
-    format!(
-        r##"<!DOCTYPE html>
+    INDEX_HTML_TEMPLATE.replace("{favicon}", crate::three_assets::logo_favicon_b64())
+}
+
+const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
 <link rel="icon" href="data:image/png;base64,{favicon}">
 <title>Keinestamp</title>
+<script>
+  document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day'
+</script>
 <style>
-:root{{
---bg:#f4f6f8;--surface:#ffffff;--border:#e3e7ed;--text:#1e2833;--text-dim:#6b7684;
---accent:#d94747;--accent-hover:#c63b3b;
---ice:#7fa8ce;--ze:#3e6b52;
---shadow-lg:0 16px 48px rgba(30,40,51,0.18);
-}}
-[data-theme="night"]{{
---bg:#141d18;--surface:#1b2620;--border:#3b4f45;--text:#f4faf6;--text-dim:#bccac4;
---accent:#ec6262;--accent-hover:#d94f4f;
---ice:#c3ecd4;--ze:#63b58b;
---shadow-lg:0 16px 48px rgba(0,0,0,0.55);
-}}
-*{{box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;margin:0;min-height:100vh;background:var(--bg);color:var(--text);overflow:hidden;animation:fade-in .4s ease;cursor:default}}
-@keyframes fade-in{{from{{opacity:0}}to{{opacity:1}}}}
-.glow{{position:fixed;border-radius:50%;pointer-events:none;filter:blur(80px)}}
-.glow-tl{{width:420px;height:420px;left:-140px;top:-140px;background:color-mix(in srgb,var(--accent) 8%,transparent)}}
-.glow-br{{width:480px;height:480px;right:-160px;bottom:-160px;background:color-mix(in srgb,var(--ice) 8%,transparent)}}
-.bg-art{{position:fixed;inset:0;pointer-events:none;overflow:hidden}}
-.bg-arc{{position:absolute;top:-18vw;right:-16vw;width:56vw;height:56vw;border-radius:50%;border:1.5px solid color-mix(in srgb,var(--accent) 16%,transparent);border-top-color:color-mix(in srgb,var(--accent) 55%,transparent);border-left-color:color-mix(in srgb,var(--accent) 28%,transparent)}}
-.bg-arc2{{position:absolute;top:-10vw;right:-8vw;width:42vw;height:42vw;border-radius:50%;border:1px solid color-mix(in srgb,var(--accent) 10%,transparent);border-bottom-color:color-mix(in srgb,var(--accent) 32%,transparent)}}
-.bg-sweep{{position:absolute;left:-18vw;bottom:-22vw;width:78vw;height:62vw;transform:rotate(-6deg)}}
-.bg-sweep path{{fill:none;stroke-linecap:round}}
-.brand{{position:fixed;top:22px;left:26px;font-size:12px;font-weight:600;letter-spacing:2px;color:var(--text-dim);opacity:.8}}
-.stage{{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}}
-.bow{{position:relative;display:flex;align-items:center;justify-content:center}}
-.bow svg{{position:absolute;top:50%;transform:translateY(-50%);pointer-events:none}}
-.bow-left{{left:50%;width:210px;height:120px;margin-left:-240px}}
-.bow-right{{left:50%;width:210px;height:120px;margin-left:30px}}
-.knot{{width:72px;height:72px;border-radius:18px;background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-lg);display:flex;align-items:center;justify-content:center;position:relative;z-index:2}}
-.knot img{{width:48px;height:48px;border-radius:12px}}
-.moon-info{{margin-top:26px;font-size:13px;color:var(--text-dim);letter-spacing:1px}}
-.moon-info b{{color:var(--text);font-weight:600}}
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --text: #1b222b;
+  --text-dim: #69727c;
+  --line: #d9dee5;
+  --accent: #d94747;
+  --deco-a: #9aafc4;
+  --deco-b: #8fa694;
+  --deco-c: #c7a9a9;
+  --shadow-lg: 0 16px 48px rgba(27, 34, 43, 0.14);
+  --shadow-sm: 0 1px 2px rgba(27, 34, 43, 0.06);
+}
+[data-theme="night"] {
+  --bg: #14171a;
+  --surface: #1b1f22;
+  --text: #e9efeb;
+  --text-dim: #9aa5a0;
+  --line: #2a3237;
+  --accent: #e05a5a;
+  --deco-a: #6e8498;
+  --deco-b: #6e8478;
+  --deco-c: #8a6e6e;
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+* { box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  overflow-x: hidden;
+  animation: fade-in 0.4s ease;
+}
+@keyframes fade-in { from { opacity: 0 } to { opacity: 1 } }
+
+/* ---- 装饰层 ---- */
+.deco { position: fixed; pointer-events: none; }
+.glow-tl { width: 420px; height: 420px; left: -140px; top: -140px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-a) 14%, transparent), transparent 70%); filter: blur(40px); }
+.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-b) 12%, transparent), transparent 70%); filter: blur(40px); }
+.wave { top: 0; left: 0; right: 0; height: 140px; opacity: 0.07; }
+.wave svg { width: 100%; height: 100%; }
+.code-tex { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: var(--deco-a); opacity: 0.05; letter-spacing: 0.5px; }
+.c1 { left: 4%; bottom: 14%; }
+.c2 { right: 5%; bottom: 40%; }
+.c3 { left: 32%; bottom: 6%; }
+.c4 { right: 10%; top: 30%; }
+
+/* ---- 顶部品牌条 ---- */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 26px 48px; position: relative; z-index: 2;
+}
+.brand-mini { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; letter-spacing: 0.3px; }
+.brand-mini .bm-logo { width: 26px; height: 26px; border-radius: 7px; }
+.topbar-right { font-size: 11px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
+
+/* ---- Hero 区：左文右画 ---- */
+.hero {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  align-items: center;
+  min-height: 58vh;
+  padding: 0 60px;
+  gap: 40px;
+  position: relative; z-index: 2;
+}
+.eyebrow {
+  font-size: 10px; font-weight: 600; letter-spacing: 4px; color: var(--text-dim);
+  text-transform: uppercase; margin-bottom: 18px;
+  display: flex; align-items: center; gap: 10px;
+}
+.eyebrow::before {
+  content: ""; width: 28px; height: 1px; background: var(--accent);
+}
+.eyebrow .dot { color: var(--accent); }
+h1 {
+  font-size: clamp(52px, 7.5vw, 84px);
+  font-weight: 800;
+  letter-spacing: -2px;
+  margin: 0 0 10px;
+  line-height: 1;
+}
+.hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; }
+.hero-code {
+  display: inline-block;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+  border-radius: 8px;
+  padding: 7px 12px;
+  letter-spacing: 0.2px;
+}
+.hero-code .ok { color: var(--deco-b); }
+.hero-code .cursor {
+  display: inline-block; width: 6px; height: 13px; margin-left: 6px;
+  background: var(--accent); vertical-align: -2px; border-radius: 1px;
+}
+
+/* Hero 装饰画：月相 + 圆环层叠 */
+.hero-art { position: relative; height: 300px; display: flex; align-items: center; justify-content: center; }
+.ha-ring { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.12; }
+.ha-ring svg { width: 300px; height: 300px; }
+.ha-dot {
+  position: absolute; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--accent);
+  left: 50%; top: 50%;
+  transform: translate(38px, -132px);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+}
+.ha-moon { position: relative; display: flex; gap: 12px; align-items: flex-end; opacity: 0.8; }
+.ha-moon svg { height: 90px; }
+.ha-moon::before {
+  content: ""; position: absolute; inset: -40px;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%);
+  border-radius: 50%;
+}
+.ha-scale {
+  position: absolute; left: 50%; bottom: 6px; transform: translateX(-50%);
+  display: flex; gap: 4px; align-items: flex-end; opacity: 0.5;
+}
+.ha-scale i { display: block; width: 2px; background: var(--text-dim); border-radius: 1px; }
+.ha-tag {
+  position: absolute; bottom: -16px; right: 6%;
+  font-family: ui-monospace, Consolas, monospace; font-size: 10px;
+  color: var(--text-dim); opacity: 0.6; letter-spacing: 1px;
+}
+
+/* ---- 特性卡（错落） ---- */
+.cards {
+  display: flex; gap: 16px; justify-content: center;
+  padding: 0 60px 40px;
+  position: relative; z-index: 2;
+}
+.card {
+  width: 200px; padding: 24px 18px;
+  background: var(--surface); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow-sm);
+  position: relative;
+  transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.card:hover { transform: translateY(-3px); box-shadow: var(--shadow-lg); border-color: var(--accent); }
+.card:hover .card-icon { background: color-mix(in srgb, var(--accent) 15%, transparent); transform: scale(1.05); }
+.card-icon { transition: background 0.15s ease, transform 0.15s ease; }
+.card:hover .card-num { color: var(--accent); opacity: 1; }
+.card-num {
+  position: absolute; top: 12px; right: 14px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 10px;
+  color: var(--text-dim); opacity: 0.6; letter-spacing: 1px;
+  transition: color 0.15s ease, opacity 0.15s ease;
+}
+.card-icon {
+  width: 40px; height: 40px; margin-bottom: 14px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+}
+.card h3 { font-size: 14px; margin: 0 0 6px; font-weight: 600; }
+.card p { font-size: 11.5px; color: var(--text-dim); margin: 0; line-height: 1.55; }
+
+footer {
+  padding: 8px 48px 30px;
+  font-size: 11px; color: var(--text-dim); opacity: 0.7;
+  position: relative; z-index: 2;
+  display: flex; align-items: center; gap: 8px;
+}
+footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; background: var(--accent); }
+
+
+
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; padding: 20px 28px; }
+  .hero-art { height: 200px; }
+  .cards { flex-wrap: wrap; padding: 0 28px 30px; }
+  .topbar { padding: 20px 28px; }
+}
 </style>
 </head>
 <body>
-<div class="glow glow-tl"></div>
-<div class="glow glow-br"></div>
-<div class="bg-art">
-  <div class="bg-arc"></div>
-  <div class="bg-arc2"></div>
-  <svg class="bg-sweep" viewBox="0 0 780 620" xmlns="http://www.w3.org/2000/svg">
-    <path d="M-20 200 C 200 40, 560 60, 800 320" stroke="color-mix(in srgb,var(--accent) 26%,transparent)" stroke-width="2.5"/>
-    <path d="M-20 260 C 240 120, 600 130, 800 380" stroke="color-mix(in srgb,var(--ice) 22%,transparent)" stroke-width="2"/>
-    <path d="M-20 330 C 260 200, 560 220, 800 460" stroke="color-mix(in srgb,var(--ze) 20%,transparent)" stroke-width="1.6"/>
-    <path d="M-20 410 C 280 300, 600 310, 800 540" stroke="color-mix(in srgb,var(--ice) 14%,transparent)" stroke-width="1.2"/>
-    <path d="M-20 490 C 300 400, 620 410, 800 620" stroke="color-mix(in srgb,var(--accent) 12%,transparent)" stroke-width="1"/>
+
+<div class="deco glow-tl"></div>
+<div class="deco glow-br"></div>
+
+<div class="deco wave">
+  <svg viewBox="0 0 1440 140" preserveAspectRatio="none">
+    <defs>
+      <linearGradient id="wg" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0" stop-color="var(--accent)" stop-opacity="0"/>
+        <stop offset="0.5" stop-color="var(--accent)"/>
+        <stop offset="1" stop-color="var(--accent)" stop-opacity="0"/>
+      </linearGradient>
+    </defs>
+    <path d="M0 90 Q180 30 360 70 T720 60 T1080 70 T1440 50 V0 H0 Z" fill="url(#wg)"/>
   </svg>
 </div>
-<div class="brand">KEINESTAMP</div>
-<main class="stage">
-  <div class="bow">
-    <svg class="bow-left" viewBox="0 0 210 120" xmlns="http://www.w3.org/2000/svg">
-      <path d="M200 60 C 150 18, 70 30, 30 78" stroke="color-mix(in srgb,var(--accent) 85%,transparent)" stroke-width="7" fill="none" stroke-linecap="round"/>
-      <path d="M200 60 C 150 32, 80 44, 42 82" stroke="color-mix(in srgb,var(--accent) 50%,transparent)" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <path d="M200 60 C 158 46, 96 56, 58 86" stroke="color-mix(in srgb,var(--accent) 25%,transparent)" stroke-width="2" fill="none" stroke-linecap="round"/>
-    </svg>
-    <div class="knot"><img src="data:image/png;base64,{favicon}" alt="Keinestamp logo"></div>
-    <svg class="bow-right" viewBox="0 0 210 120" xmlns="http://www.w3.org/2000/svg">
-      <path d="M10 60 C 60 18, 140 30, 180 78" stroke="color-mix(in srgb,var(--ice) 85%,transparent)" stroke-width="7" fill="none" stroke-linecap="round"/>
-      <path d="M10 60 C 60 32, 130 44, 168 82" stroke="color-mix(in srgb,var(--ice) 50%,transparent)" stroke-width="4" fill="none" stroke-linecap="round"/>
-      <path d="M10 60 C 52 46, 114 56, 152 86" stroke="color-mix(in srgb,var(--ice) 25%,transparent)" stroke-width="2" fill="none" stroke-linecap="round"/>
-    </svg>
+
+<div class="deco code-tex c1">timeline 42 · entries 7</div>
+<div class="deco code-tex c2">revert d9f2ab</div>
+<div class="deco code-tex c3">glb export ✓</div>
+<div class="deco code-tex c4">tag: 建模</div>
+
+<header class="topbar">
+  <div class="brand-mini">
+    <img class="bm-logo" src="data:image/png;base64,{favicon}" alt="logo">
+      <rect width="100" height="100" rx="22" fill="var(--accent)"/>
+    Keinestamp
   </div>
-  <div class="moon-info"><b id="phaseName">—</b> · <span>d</span><b id="phaseAge">—</b></div>
+  <div class="topbar-right">Blender Git Progress Board</div>
+</header>
+
+<main class="hero">
+  <div class="hero-text">
+    <div class="eyebrow">Blender · Git · Timeline <span class="dot">●</span></div>
+    <h1>Keinestamp</h1>
+    <p class="hero-sub">Blender Git Progress Board</p>
+    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record 3a1f9c2 <span class="ok">✓ 已记录</span><span class="cursor"></span></code>
+  </div>
+  <div class="hero-art">
+    <div class="ha-ring">
+      <svg viewBox="0 0 300 300" fill="none">
+        <circle cx="150" cy="150" r="140" stroke="var(--deco-a)" stroke-width="1"/>
+        <circle cx="150" cy="150" r="112" stroke="var(--deco-b)" stroke-width="1" stroke-dasharray="3 9"/>
+        <path d="M10 150 Q150 30 290 150" stroke="var(--deco-c)" stroke-width="1"/>
+        <path d="M60 260 Q150 140 260 60" stroke="var(--deco-a)" stroke-width="1" opacity="0.7"/>
+      </svg>
+    </div>
+    <div class="ha-moon">
+      <svg viewBox="0 0 80 52" fill="none">
+        <path d="M4 48 A36 36 0 0 1 76 48" stroke="var(--deco-a)" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
+        <path d="M16 48 A24 24 0 0 1 64 48" stroke="var(--deco-b)" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
+        <path d="M28 48 A12 12 0 0 1 52 48" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="ha-dot"></div>
+    <div class="ha-scale">
+      <i style="height:4px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:7px"></i><i style="height:4px"></i>
+    </div>
+    <div class="ha-tag">moon phase = progress</div>
+  </div>
 </main>
-<script>
-(function(){{
-  var synodic = 29.53058867;
-  var ref = Date.UTC(2000,0,6,18,14);
-  var age = ((Date.now() - ref) % (synodic*864e5) + synodic*864e5) % (synodic*864e5) / 864e5;
-  var name = age < 1.8 ? '新月' : age < 5.5 ? '娥眉月' : age < 9.2 ? '上弦月' : age < 12.7 ? '盈凸月' : age < 16.4 ? '满月' : age < 20.1 ? '亏凸月' : age < 23.8 ? '下弦月' : age < 27.5 ? '残月' : '新月';
-  document.getElementById('phaseName').textContent = name;
-  document.getElementById('phaseAge').textContent = age.toFixed(1);
-}})();
-</script>
+
+<section class="cards">
+  <div class="card">
+    <span class="card-num">01</span>
+    <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M12.854.146a.5.5 0 00-.707 0L10.5 1.793 14.207 5.5l1.647-1.646a.5.5 0 000-.708l-3-3zm.646 6.061L9.793 2.5 3.293 9H3.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.5h.5a.5.5 0 01.5.5v.207l6.5-6.5zm-7.468 7.468A.5.5 0 016 13.5V13h-.5a.5.5 0 01-.5-.5V12h-.5a.5.5 0 01-.5-.5V11h-.5a.5.5 0 01-.5-.5V10h-.5a.499.499 0 01-.175-.032l-.179.178a.5.5 0 00-.11.168l-2 5a.5.5 0 00.65.65l5-2a.5.5 0 00.168-.11l.178-.178z"/></svg></div>
+    <h3>进度记录</h3>
+    <p>将 Blender 项目进展逐条记录为版本</p>
+  </div>
+  <div class="card">
+    <span class="card-num">02</span>
+    <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M3.5 0a.5.5 0 01.5.5V1h8V.5a.5.5 0 011 0V1h1a2 2 0 012 2v11a2 2 0 01-2 2H2a2 2 0 01-2-2V3a2 2 0 012-2h1V.5a.5.5 0 01.5-.5zM1 4v10a1 1 0 001 1h12a1 1 0 001-1V4H1z"/><path d="M4 7h3v1H4zM9 7h3v1H9zM4 10h3v1H4zM9 10h3v1H9z"/></svg></div>
+    <h3>版本时间线</h3>
+    <p>自动生成时间线与日历热力图</p>
+  </div>
+  <div class="card">
+    <span class="card-num">03</span>
+    <div class="card-icon"><svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8.186 1.113a.5.5 0 00-.372 0L1.846 3.5l1.064 3.739L1.336 14.5h13.328L13.09 7.239 14.154 3.5 8.186 1.113zM8 2.18l4.53 1.79-1.22 4.287a4.5 4.5 0 01-1.242-.42l1.09-3.827a.5.5 0 00-.946-.32L9.2 7.18a4.5 4.5 0 01-2.4 0L7.79 5.69a.5.5 0 00-.947.32l1.09 3.827a4.5 4.5 0 01-1.242.42L5.47 5.97 8 2.18z"/></svg></div>
+    <h3>3D 预览</h3>
+    <p>模型预览直接内嵌网页</p>
+  </div>
+</section>
+
+<footer>Keinestamp © 2026</footer>
+
+
+
 </body>
-</html>"##,
-        favicon = crate::three_assets::logo_favicon_b64()
-    )
-}
+</html>
+ + "##;
 
 pub fn sanitize_project_name(name: &str) -> String {
     name.chars()
@@ -1098,19 +1294,21 @@ mod tests {
     #[test]
     fn index_page_has_brand_and_features() {
         let html = index_page_html();
-        assert!(html.contains("KEINESTAMP"));
+        assert!(html.contains("Keinestamp"));
+        assert!(html.contains("Blender Git Progress Board"));
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");
-        assert!(html.contains("knot"), "logo knot present");
-        assert!(html.contains("bow-left"), "moon-arc left wing present");
-        assert!(html.contains("bow-right"), "moon-arc right wing present");
-        assert!(html.contains("bg-sweep"), "large background art present");
-        assert!(html.contains("bg-arc"), "giant moon arc present");
-        assert!(html.contains("phaseName"), "moon phase name present");
-        assert!(!html.contains("id=\"quote\""), "no click quotes");
-        assert!(!html.contains("id=\"dot\""), "no cursor dot");
-        assert!(!html.contains("id=\"moon\""), "no canvas moon");
+        assert!(html.contains("进度记录"));
+        assert!(html.contains("版本时间线"));
+        assert!(html.contains("3D 预览"));
+        assert!(html.contains("card-icon"), "feature cards present");
+        assert!(html.contains("eyebrow"), "eyebrow label present");
+        assert!(html.contains("hero-code"), "code block present");
+        assert!(html.contains("ha-moon"), "moon art present");
+        assert!(html.contains("ha-scale"), "progress scale present");
+        assert!(html.contains("ha-ring"), "ring decoration present");
+        assert!(!html.contains("theme-toggle"), "no preview-only toggle in production");
     }
 
     #[test]
