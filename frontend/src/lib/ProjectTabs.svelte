@@ -224,6 +224,7 @@
     color: var(--accent);
   }
   .add-tab, .settings-tab, .theme-tab {
+    width: auto;
     padding: 5px 8px;
     background: transparent;
     color: var(--text-dim);
