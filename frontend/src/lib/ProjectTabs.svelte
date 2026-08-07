@@ -129,8 +129,8 @@
     flex: 1;
     min-width: 0;
     display: flex;
-    align-items: center;
-    gap: 4px;
+    align-items: stretch;
+    gap: 2px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: thin;
@@ -165,29 +165,35 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    padding: 4px 12px;
+    padding: 5px 12px;
     font-size: 11px;
     background: transparent;
-    border: 1px solid transparent;
-    border-radius: 999px;
+    border: none;
+    border-radius: 8px 8px 0 0;
+    position: relative;
     cursor: pointer;
     color: var(--text-dim);
     white-space: nowrap;
     max-width: 160px;
-    transition: background 0.15s var(--ease), color 0.15s var(--ease),
-      border-color 0.15s var(--ease), transform 0.15s var(--ease);
+    transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
   .project-tab:hover {
-    background: var(--surface);
-    border-color: var(--border);
+    background: var(--surface2);
     color: var(--text);
-    transform: translateY(-1px);
   }
   .project-tab.active {
     background: var(--surface);
-    border-color: var(--border);
     color: var(--accent);
-    box-shadow: var(--shadow-sm);
+  }
+  .project-tab.active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 3px;
+    border-radius: 2px 2px 0 0;
+    background: linear-gradient(90deg, var(--accent), transparent);
   }
   .tab-name {
     overflow: hidden;
@@ -215,16 +221,15 @@
     color: var(--accent);
   }
   .add-tab, .settings-tab, .theme-tab {
-    padding: 4px 8px;
+    padding: 5px 8px;
     background: transparent;
-    border-color: transparent;
     color: var(--text-dim);
     flex-shrink: 0;
+    align-self: center;
+    border-radius: 8px;
   }
   .add-tab:hover, .settings-tab:hover, .theme-tab:hover {
-    background: var(--surface);
-    border-color: var(--border);
+    background: var(--surface2);
     color: var(--accent);
-    transform: none;
   }
 </style>
