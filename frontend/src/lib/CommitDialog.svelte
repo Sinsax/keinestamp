@@ -3,10 +3,12 @@
     onConfirm,
     onCancel,
     lastTag = '',
+    canRestore = false,
   }: {
     onConfirm: (msg: string, tag: string | null, noPreview: boolean) => Promise<boolean>
     onCancel: () => void
     lastTag?: string
+    canRestore?: boolean
   } = $props()
 
   const TAG_PRESETS = ['建模', 'UV拆分', '绑定', '贴图', '修复']
@@ -60,6 +62,12 @@
 <div class="dialog-overlay" onclick={onCancel} role="dialog">
   <div class="dialog commit-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
     <h3>记录进度</h3>
+    {#if canRestore}
+      <div class="restore-warn">
+        <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10z"/><path d="M7.2 4.6h1.6v4.4H7.2zM7.2 10.4h1.6v1.2H7.2z"/></svg>
+        <span>当前处于撤回状态——继续记录将合并上次撤回的内容且无法再恢复原记录。建议取消后先点击「恢复」。</span>
+      </div>
+    {/if}
     <div class="field">
       <label>记录说明</label>
       <textarea
@@ -109,6 +117,26 @@
 <style>
   :global(.commit-dialog) {
     width: 460px;
+  }
+  .restore-warn {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    margin-bottom: 14px;
+    background: var(--accent-soft);
+    border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent);
+    border-radius: 8px;
+    color: var(--accent);
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .restore-warn svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+  .field textarea {
+    resize: none;
   }
   .tag-row {
     display: flex;

@@ -212,19 +212,6 @@
     }
   }
 
-  async function openCommitDialog() {
-    if (canRestore) {
-      const ok = await ask('上次撤回的记录尚未恢复。继续记录将把其内容合并进新记录，且无法再恢复原记录。\n\n建议先点击「恢复」，或确认继续记录。', {
-        title: '⚠️ 当前处于撤回状态',
-        kind: 'warning',
-        okLabel: '继续记录',
-        cancelLabel: '取消',
-      })
-      if (!ok) return
-    }
-    showCommit = true
-  }
-
   async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false): Promise<boolean> {
     statusText = '记录中...'
     const unlisten = await listen<CommitProgress>('commit-progress', (event) => {
@@ -497,7 +484,7 @@
 
       <ActionBar
         {projectType}
-        onRecord={openCommitDialog}
+        onRecord={() => showCommit = true}
         onExport={handleExport}
         onRevert={handleRevert}
         onRestore={handleRestore}
@@ -519,7 +506,7 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} />
 {/if}
 
 {#if showSettings}

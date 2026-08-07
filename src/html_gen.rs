@@ -109,7 +109,7 @@ const TEMPLATE: &str = r##"<!DOCTYPE html>
 <script src="./three/loaders/GLTFLoader.js"></script>
 <style>
 :root {
-  --bg: #f5f6f8; --surface: #ffffff; --surface2: #eef1f4; --surface3: #dfe4ea;
+  --bg: #f2f5f9; --surface: #ffffff; --surface2: #eef1f4; --surface3: #dfe4ea;
   --border: #d9dee5; --text: #1b222b; --text-dim: #69727c; --text-2: #506070;
   --accent: #d94747; --accent-hover: #c63b3b; --accent-soft: #fbeded;
   --tint: #7fa8ce; --tint-soft: #eff5fb;
@@ -121,8 +121,8 @@ const TEMPLATE: &str = r##"<!DOCTYPE html>
   --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 [data-theme="night"] {
-  --bg: #151a18; --surface: #1b211f; --surface2: #242c29; --surface3: #2f3a35;
-  --border: #2a3237; --text: #e9efeb; --text-dim: #9aa5a0; --text-2: #c3cdc7;
+  --bg: #151719; --surface: #1c1f21; --surface2: #26292b; --surface3: #2f3234;
+  --border: #2a2d30; --text: #e9efeb; --text-dim: #9aa5a0; --text-2: #c3cdc7;
   --accent: #e05a5a; --accent-hover: #cf4a4a; --accent-soft: #4a2b2d;
   --tint: #6fc49a; --tint-soft: #25362e;
   --deco-a: #6e8498; --deco-b: #6e8478; --deco-c: #8a6e6e;
@@ -135,7 +135,8 @@ const TEMPLATE: &str = r##"<!DOCTYPE html>
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
 .deco { position: fixed; pointer-events: none; }
 .glow-tl { width: 420px; height: 420px; left: -140px; top: -140px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-a) 14%, transparent), transparent 70%); filter: blur(40px); }
-.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tint) 12%, transparent), transparent 70%); filter: blur(40px); }
+.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tint) 22%, transparent), transparent 70%); filter: blur(40px); }
+[data-theme="night"] .glow-br { background: radial-gradient(circle, color-mix(in srgb, var(--tint) 5%, transparent), transparent 70%); }
 .wave { position: fixed; top: 0; left: 0; right: 0; height: 140px; opacity: 0.07; pointer-events: none; }
 .wave svg { width: 100%; height: 100%; }
 .page { display: flex; min-height: 100vh; position: relative; z-index: 1; padding: 40px 60px 60px; gap: 24px; align-items: flex-start; max-width: 1440px; margin: 0 auto; }
@@ -234,6 +235,18 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .left-footer-btn { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 8px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); color: var(--text); cursor: pointer; font-size: 12px; font-weight: 600; transition: background 0.12s; }
 .left-footer-btn:hover { background: var(--surface3); }
 .left-footer-btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+.theme-btn {
+  width: 30px; height: 30px; padding: 0; margin: 6px auto 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim);
+  border-radius: 8px; cursor: pointer;
+  transition: color 0.12s var(--ease), border-color 0.12s var(--ease), background 0.12s var(--ease);
+}
+.theme-btn svg { width: 15px; height: 15px; display: block; }
+.theme-btn .icon-moon { display: none; }
+[data-theme="night"] .theme-btn .icon-sun { display: none; }
+[data-theme="night"] .theme-btn .icon-moon { display: block; }
+.theme-btn:hover { background: var(--surface3); border-color: var(--accent); color: var(--accent); }
 .model-placeholder { font-size: 11px; color: #6c7086; padding: 8px; text-align: center; background: #181825; border-radius: 6px; }
 .model-box { width: 100%; border-radius: 6px; overflow: hidden; background: #1a1a2e; position: relative; }
 .model-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: rgba(17,17,27,0.82); z-index: 10; font-size: 11px; }
@@ -265,7 +278,10 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
     <div class="cal-header"><span class="cal-title">进度日历</span></div>
     <div id="cal-sidebar"></div>
     <div class="left-footer">
-      <button id="theme-toggle" class="left-footer-btn" style="margin-top:6px">☀ 切换日/夜</button>
+      <button id="theme-toggle" class="theme-btn" title="切换日/夜">
+        <svg class="icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></svg>
+        <svg class="icon-moon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 9.2A6.5 6.5 0 1 1 6.8 2a5.3 5.3 0 0 0 7.2 7.2z"/></svg>
+      </button>
       <span style="font-size:10px;color:var(--text-dim);text-align:center;margin-top:8px">Keinestamp</span>
     </div>
   </div>

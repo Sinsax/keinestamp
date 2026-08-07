@@ -334,7 +334,7 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
 </script>
 <style>
 :root {
-  --bg: #f5f6f8;
+  --bg: #f2f5f9;
   --surface: #ffffff;
   --text: #1b222b;
   --text-dim: #69727c;
@@ -349,15 +349,15 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
   --shadow-sm: 0 1px 2px rgba(27, 34, 43, 0.06);
 }
 [data-theme="night"] {
-  --bg: #151a18;
-  --surface: #1b211f;
+  --bg: #151719;
+  --surface: #1c1f21;
   --text: #e9efeb;
   --text-dim: #9aa5a0;
-  --line: #2a3237;
+  --line: #2a2d30;
   --accent: #e05a5a;
   --tint: #6fc49a;
   --tint-soft: #25362e;
-  --deco-a: #7fa08d;
+  --deco-a: #6b7478;
   --deco-b: #6e8478;
   --deco-c: #8a6e6e;
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
@@ -378,7 +378,8 @@ body {
 /* ---- 装饰层 ---- */
 .deco { position: fixed; pointer-events: none; }
 .glow-tl { width: 420px; height: 420px; left: -140px; top: -140px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-a) 14%, transparent), transparent 70%); filter: blur(40px); }
-.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tint) 12%, transparent), transparent 70%); filter: blur(40px); }
+.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tint) 22%, transparent), transparent 70%); filter: blur(40px); }
+[data-theme="night"] .glow-br { background: radial-gradient(circle, color-mix(in srgb, var(--tint) 5%, transparent), transparent 70%); }
 .wave { top: 0; left: 0; right: 0; height: 140px; opacity: 0.07; }
 .wave svg { width: 100%; height: 100%; }
 .code-tex { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 10px; color: var(--tint); opacity: 0.05; letter-spacing: 0.5px; }
@@ -395,6 +396,18 @@ body {
 .brand-mini { display: flex; align-items: center; gap: 10px; font-size: 14px; font-weight: 700; letter-spacing: 0.3px; }
 .brand-mini .bm-logo { width: 26px; height: 26px; border-radius: 7px; }
 .topbar-right { font-size: 11px; color: var(--text-dim); letter-spacing: 2px; text-transform: uppercase; }
+.theme-btn {
+  width: 30px; height: 30px; padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: none; border: 1px solid var(--line); color: var(--text-dim);
+  border-radius: 8px; cursor: pointer;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.theme-btn svg { width: 15px; height: 15px; display: block; }
+.theme-btn .icon-moon { display: none; }
+[data-theme="night"] .theme-btn .icon-sun { display: none; }
+[data-theme="night"] .theme-btn .icon-moon { display: block; }
+.theme-btn:hover { color: var(--accent); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
 
 /* ---- Hero 区：左文右画 ---- */
 .hero {
@@ -453,6 +466,8 @@ h1 {
 }
 .ha-moon { position: relative; display: flex; align-items: center; justify-content: center; }
 .ha-moon svg { display: block; }
+.ha-moon svg circle { opacity: 0.30; }
+[data-theme="night"] .ha-moon svg circle { opacity: 0.10; }
 .ha-moon::before {
   content: ""; position: absolute; inset: -40px;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%);
@@ -548,7 +563,12 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
       <rect width="100" height="100" rx="22" fill="var(--accent)"/>
     Keinestamp
   </div>
-  <div class="topbar-right">Blender Git Progress Board</div>
+  <div class="topbar-right">
+    <button id="theme-toggle" class="theme-btn" title="切换日/夜">
+      <svg class="icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></svg>
+      <svg class="icon-moon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 9.2A6.5 6.5 0 1 1 6.8 2a5.3 5.3 0 0 0 7.2 7.2z"/></svg>
+    </button>
+  </div>
 </header>
 
 <main class="hero">
@@ -569,7 +589,7 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
     </div>
     <div class="ha-moon">
       <svg width="170" height="170" viewBox="0 0 100 100">
-        <circle cx="50" cy="50" r="42" fill="var(--deco-b)" opacity="0.22"/>
+        <circle cx="50" cy="50" r="42" fill="var(--tint)"/>
         <path id="moonLight" fill="var(--accent)"/>
       </svg>
     </div>
@@ -657,6 +677,13 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
     document.getElementById('moonLight').setAttribute('d', moonPath(info.phase));
     document.getElementById('moonName').textContent = moonName(info.phase, info.illum);
   })();
+</script>
+<script>
+  document.getElementById('theme-toggle').addEventListener('click', function () {
+    var next = document.documentElement.dataset.theme === 'night' ? 'day' : 'night';
+    document.documentElement.dataset.theme = next;
+    localStorage.setItem('keinestamp_web_theme', next);
+  });
 </script>
 
 </body>
@@ -1368,7 +1395,7 @@ mod tests {
         assert!(html.contains("moonLight"), "client-side moon path element");
         assert!(html.contains("elongation"), "client-side moon algorithm");
         assert!(html.contains("moonName"), "client-side moon name element");
-        assert!(!html.contains("theme-toggle"), "no preview-only toggle in production");
+        assert!(html.contains("theme-toggle"), "theme toggle button present");
     }
 
     #[test]
