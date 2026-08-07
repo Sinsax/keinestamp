@@ -549,7 +549,28 @@ fn set_entry_milestone(path: String, entry_id: String, milestone: bool) -> Resul
     let meta_path = keinestamp::config::meta_path(&p);
     let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     let timeline_path = meta.web_root.join("timeline.json");
-    map_err(keinestamp::timeline::set_entry_milestone(&timeline_path, &entry_id, milestone))
+    map_err(keinestamp::timeline::set_entry_milestone(&timeline_path, &entry_id, milestone))?;
+
+    let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
+    let project_name = meta
+        .project_root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_default();
+    map_err(keinestamp::html_gen::generate_index_html(
+        &meta.web_root,
+        &meta.project_root,
+        &timeline,
+        &project_name,
+    ))?;
+
+    let _ = keinestamp::git_web::web_commit_and_push(
+        &meta.web_root,
+        &format!("milestone {}", &entry_id[..7.min(entry_id.len())]),
+        false,
+    );
+
+    Ok(())
 }
 
 #[tauri::command]
