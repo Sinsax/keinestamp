@@ -60,8 +60,15 @@
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="dialog-overlay" onclick={onCancel} role="dialog">
-  <div class="dialog commit-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
-    <h3>记录进度</h3>
+  <div class="dialog commit-dialog" class:restore-mode={canRestore} onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
+    <h3>
+      {#if canRestore}
+        <span class="restore-mark">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10z"/><path d="M7.2 4.6h1.6v4.4H7.2zM7.2 10.4h1.6v1.2H7.2z"/></svg>
+        </span>
+      {/if}
+      记录进度
+    </h3>
     {#if canRestore}
       <div class="restore-warn">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10z"/><path d="M7.2 4.6h1.6v4.4H7.2zM7.2 10.4h1.6v1.2H7.2z"/></svg>
@@ -117,6 +124,18 @@
 <style>
   :global(.commit-dialog) {
     width: 460px;
+  }
+  :global(.commit-dialog.restore-mode) {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), 0 8px 32px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+  .restore-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    vertical-align: -2px;
+    margin-right: 4px;
+    color: var(--accent);
   }
   .restore-warn {
     display: flex;
