@@ -279,16 +279,18 @@
         onclick={(e) => { e.stopPropagation(); onSelect(entry.id); }}
         ondblclick={(e) => { e.stopPropagation(); onDblClick(entry); }}
       >
+        <button
+          class="ms-badge"
+          class:active={!!entry.milestone}
+          title={entry.milestone ? '取消里程碑' : '标记为里程碑'}
+          onclick={(e) => { e.stopPropagation(); toggleMilestone(entry); }}
+        >
+          <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M8 .6l1.9 4.6 4.9.4-3.7 3.2 1.1 4.8L8 11.2 3.8 13.6l1.1-4.8L1.2 5.6l4.9-.4L8 .6z"/></svg>
+        </button>
         <div class="top">
           <span class="hash">{entry.id.slice(0, 7)}</span>
           <span class="top-right">
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
-            <button
-              class="ms-btn"
-              class:active={!!entry.milestone}
-              title={entry.milestone ? '取消里程碑' : '标记为里程碑'}
-              onclick={(e) => { e.stopPropagation(); toggleMilestone(entry); }}
-            >★</button>
           </span>
         </div>
         <div class="msg">
@@ -454,30 +456,63 @@
     align-items: center;
     gap: 4px;
   }
-  .ms-btn {
-    background: none;
-    border: none;
+  .entry-card {
+    position: relative;
+  }
+  .ms-badge {
+    position: absolute;
+    top: -6px;
+    left: -6px;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--surface);
+    border: 1px solid var(--border);
     color: var(--text-dim);
     cursor: pointer;
-    font-size: 13px;
-    line-height: 1;
-    padding: 0 2px;
-    border-radius: 4px;
-    transition: color 0.12s, transform 0.1s;
+    padding: 0;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(0.8);
+    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+    box-shadow: var(--shadow-sm);
+    z-index: 2;
   }
-  .ms-btn:hover {
-    color: var(--accent);
-    transform: scale(1.15);
+  .entry-card:hover .ms-badge,
+  .entry-card.milestone .ms-badge {
+    opacity: 1;
+    visibility: visible;
+    transform: scale(1);
   }
-  .ms-btn.active {
+  .ms-badge:hover {
     color: var(--accent);
+    border-color: var(--accent);
+  }
+  .ms-badge.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
+  }
+  .ms-badge.active:hover {
+    background: var(--accent-hover);
+    border-color: var(--accent-hover);
+    color: #fff;
   }
   .entry-card.milestone {
-    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+    background: color-mix(in srgb, var(--accent) 11%, var(--surface));
     border-color: var(--accent);
+    border-left: 5px solid var(--accent);
+    box-shadow: 0 2px 16px color-mix(in srgb, var(--accent) 25%, transparent);
   }
   .entry-card.milestone:hover {
     border-color: var(--accent);
+  }
+  .entry-card.milestone .msg {
+    font-weight: 600;
   }
   .section-header {
     display: flex;

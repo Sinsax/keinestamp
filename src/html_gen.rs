@@ -145,10 +145,26 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .entry.tagged { border-left-color: var(--tag-color, var(--accent)); }
 .entry.milestone {
   border-left-color: var(--accent);
+  border-left-width: 5px;
   border-color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  background: color-mix(in srgb, var(--accent) 11%, var(--surface));
+  box-shadow: 0 2px 16px color-mix(in srgb, var(--accent) 25%, transparent);
 }
-.milestone-star { color: var(--accent); margin-right: 4px; }
+.entry.milestone .entry-message { font-weight: 600; }
+.milestone-star {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9px;
+  line-height: 16px;
+  text-align: center;
+  margin-right: 5px;
+  vertical-align: 1px;
+  box-shadow: 0 0 6px color-mix(in srgb, var(--accent) 50%, transparent);
+}
 .entry-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .entry-id { font-size: 12px; color: var(--text-dim); font-family: monospace; }
 .entry-date { font-size: 14px; color: var(--text-dim); }
@@ -922,6 +938,8 @@ mod tests {
         let html = std::fs::read_to_string(dir.join("index.html"))?;
         assert!(html.contains("\"milestone\": true"), "milestone flag in timeline json");
         assert!(html.contains("milestone-star"), "star render code present");
+        assert!(html.contains("11%"), "deepened milestone background");
+        assert!(html.contains("border-left-width: 5px"), "thick milestone border");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
