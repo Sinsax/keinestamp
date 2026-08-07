@@ -9,12 +9,14 @@
   import ActionBar from './lib/ActionBar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import CommitDialog from './lib/CommitDialog.svelte'
+  import ConfirmDialog from './lib/ConfirmDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
   import Toast from './lib/Toast.svelte'
   import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress } from './types'
   import * as api from './api'
   import { openFolder } from './api'
-  import { open, ask } from '@tauri-apps/plugin-dialog'
+  import { open } from '@tauri-apps/plugin-dialog'
+  import { parseStatus } from './lib/statusParse'
   import { listen } from '@tauri-apps/api/event'
 
   function cleanPath(p: string): string {
@@ -38,6 +40,7 @@
   let toasts = $state<{ id: number; msg: string; type: string }[]>([])
   let showCommit = $state(false)
   let showSettings = $state(false)
+  let pendingRemove = $state<string | null>(null)
   let cachedVersions = $state<string[]>([])
   let hasRemote = $state(false)
   let connected = $state(false)
@@ -193,6 +196,7 @@
   }
 
   async function selectRecent(path: string) {
+    if (normalizePath(path) === activePath) return
     await loadProject(path)
   }
 
@@ -218,7 +222,36 @@
       statusText = event.payload.message
     })
     try {
-      const hash = await api.record(activePath, msg, tag, noPreview, commitSelection)
+      let files: string[] | null = commitSelection
+      try {
+        const info = await api.getIgnoreInfo(activePath)
+        const ignoredSet = new Set(info.ignored)
+        const isIgnoredPath = (p: string): boolean => {
+          if (ignoredSet.has(p)) return true
+          const parts = p.split('/')
+          for (let i = 1; i < parts.length; i++) {
+            if (ignoredSet.has(parts.slice(0, i).join('/'))) return true
+          }
+          return false
+        }
+        if (files === null) {
+          const hiddenPrefixes = ['.gitignore', '.gitattributes', '.keinestamp.toml', 'web-timeline']
+          const isHiddenPath = (p: string): boolean =>
+            hiddenPrefixes.some((h) => p === h || p.startsWith(h + '/'))
+          files = parseStatus(statusOutput)
+            .filter((f) => !isIgnoredPath(f.path) && !isHiddenPath(f.path))
+            .map((f) => f.path)
+        } else {
+          for (const f of files) {
+            if (isIgnoredPath(f)) {
+              await api.removeIgnore(activePath, f)
+            }
+          }
+        }
+      } catch {
+        /* ignore info unavailable — fall back to raw selection */
+      }
+      const hash = await api.record(activePath, msg, tag, noPreview, files)
       pushToast(`已记录 ${hash}`, 'success')
       commitSelection = null
       await loadProject(activePath)
@@ -345,15 +378,14 @@
     handleCloseProject()
   }
 
-  async function handleRemoveRecent(recentPath: string) {
-    const name = recentPath.split(/[/\\]/).pop()
-    const ok = await ask(`从最近项目中移除「${name}」？\n项目文件不会被删除。`, {
-      title: '移除项目',
-      kind: 'warning',
-      okLabel: '移除',
-      cancelLabel: '取消',
-    })
-    if (!ok) return
+  function handleRemoveRecent(recentPath: string) {
+    pendingRemove = recentPath
+  }
+
+  async function confirmRemoveRecent() {
+    const recentPath = pendingRemove
+    pendingRemove = null
+    if (!recentPath) return
     try {
       await api.removeRecent(recentPath)
       pushToast('Project removed from recent list', 'success')
@@ -363,6 +395,14 @@
       }
     } catch (e: any) {
       pushToast(`Remove failed: ${e}`, 'error')
+    }
+  }
+
+  async function handleReorder(paths: string[]) {
+    try {
+      recentProjects = await api.reorderRecent(paths)
+    } catch (e: any) {
+      pushToast(`Reorder failed: ${e}`, 'error')
     }
   }
 
@@ -397,7 +437,7 @@
   <TitleBar />
 
   <ProjectTabs
-    entries={recentProjects.toReversed()}
+    entries={recentProjects}
     activePath={activePath}
     onSelect={selectRecent}
     onNewProject={handleNewProject}
@@ -405,6 +445,7 @@
     theme={theme}
     onToggleTheme={() => theme = theme === 'day' ? 'night' : 'day'}
     onRemoveRecent={handleRemoveRecent}
+    onReorder={handleReorder}
   />
 
   <div class="body" onclick={() => selectedEntryId = ''}>
@@ -507,6 +548,17 @@
 
 {#if showCommit}
   <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} />
+{/if}
+
+{#if pendingRemove}
+  <ConfirmDialog
+    title="移除项目"
+    message={`从最近项目中移除「${pendingRemove.split(/[/\\]/).pop()}」？\n项目文件不会被删除。`}
+    okLabel="移除"
+    cancelLabel="取消"
+    onConfirm={confirmRemoveRecent}
+    onCancel={() => pendingRemove = null}
+  />
 {/if}
 
 {#if showSettings}

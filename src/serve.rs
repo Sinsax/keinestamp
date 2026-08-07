@@ -532,6 +532,22 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
   .cards { flex-wrap: wrap; padding: 0 28px 30px; }
   .topbar { padding: 20px 28px; }
 }
+
+/* ---- 满月形态（月圆时红→绿、冰蓝→淡青、夜间青黑） ---- */
+html[data-moon="full"] {
+  --accent: #2f9e63;
+  --tint: #6fbdbd;
+  --tint-soft: #e6f5f5;
+}
+html[data-moon="full"][data-theme="night"] {
+  --accent: #4fd08a;
+  --tint: #63c9c9;
+  --tint-soft: #1e2f3a;
+  --bg: #0e1724;
+  --surface: #15202e;
+  --line: #2a3848;
+  --text-dim: #90a4b8;
+}
 </style>
 </head>
 <body>
@@ -576,7 +592,7 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
     <div class="eyebrow">Blender · Git · Timeline <span class="dot">●</span></div>
     <h1>Keinestamp</h1>
     <p class="hero-sub">Blender Git Progress Board</p>
-    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record 3a1f9c2 <span class="ok">✓ 已记录</span><span class="cursor"></span></code>
+    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok">✓ 已记录</span><span class="cursor"></span></code>
   </div>
   <div class="hero-art">
     <div class="ha-ring">
@@ -676,6 +692,9 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
     var info = moonInfo(day);
     document.getElementById('moonLight').setAttribute('d', moonPath(info.phase));
     document.getElementById('moonName').textContent = moonName(info.phase, info.illum);
+    if (info.illum >= 0.95) {
+      document.documentElement.dataset.moon = 'full';
+    }
   })();
 </script>
 <script>

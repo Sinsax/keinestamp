@@ -10,6 +10,7 @@
     theme = 'day',
     onToggleTheme = () => {},
     onRemoveRecent = (_p: string) => {},
+    onReorder = (_paths: string[]) => {},
   }: {
     entries: RecentEntry[]
     activePath: string
@@ -19,7 +20,84 @@
     theme?: 'day' | 'night'
     onToggleTheme?: () => void
     onRemoveRecent?: (path: string) => void
+    onReorder?: (paths: string[]) => void
   } = $props()
+
+  let dragOrder = $state<string[] | null>(null)
+  let draggedPath = $state<string | null>(null)
+  let dragging = $state(false)
+  let ghostPos = $state<{ x: number; y: number } | null>(null)
+  let suppressClick = $state(false)
+  let dragStartX = 0
+  let dragStartY = 0
+
+  const displayEntries = $derived.by(() => {
+    if (!dragOrder) return entries
+    const byPath = new Map(entries.map((e) => [e.path, e]))
+    return dragOrder
+      .map((p) => byPath.get(p))
+      .filter((e): e is RecentEntry => e !== undefined)
+  })
+
+  function handlePointerDown(e: PointerEvent, path: string) {
+    if (e.button !== 0) return
+    dragOrder = entries.map((x) => x.path)
+    draggedPath = path
+    dragStartX = e.clientX
+    dragStartY = e.clientY
+    dragging = false
+    ghostPos = null
+    window.addEventListener('pointermove', handlePointerMove)
+    window.addEventListener('pointerup', handlePointerUp)
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (!dragOrder) return
+    if (!dragging) {
+      if (Math.hypot(e.clientX - dragStartX, e.clientY - dragStartY) < 5) return
+      dragging = true
+    }
+    ghostPos = { x: e.clientX + 10, y: e.clientY + 14 }
+    const el = document
+      .elementFromPoint(e.clientX, e.clientY)
+      ?.closest<HTMLElement>('.project-tab[data-idx]')
+    if (!el) return
+    const targetIdx = Number(el.dataset.idx)
+    const targetPath = displayEntries[targetIdx]?.path
+    if (!targetPath || targetPath === draggedPath) return
+    const from = dragOrder.indexOf(draggedPath ?? '')
+    const to = dragOrder.indexOf(targetPath)
+    if (from === -1 || to === -1 || from === to) return
+    const next = [...dragOrder]
+    const [moved] = next.splice(from, 1)
+    next.splice(to, 0, moved)
+    dragOrder = next
+  }
+
+  function handlePointerUp() {
+    window.removeEventListener('pointermove', handlePointerMove)
+    window.removeEventListener('pointerup', handlePointerUp)
+    if (dragOrder && dragging) {
+      const changed =
+        dragOrder.length === entries.length &&
+        dragOrder.some((p, i) => entries[i]?.path !== p)
+      if (changed) onReorder(dragOrder)
+    }
+    if (dragging) suppressClick = true
+    dragOrder = null
+    draggedPath = null
+    dragging = false
+    ghostPos = null
+  }
+
+  function handleTabClick(e: MouseEvent, path: string) {
+    if (suppressClick) {
+      suppressClick = false
+      return
+    }
+    if (path === activePath) return
+    onSelect(path)
+  }
 
   function cleanPath(p: string): string {
     return p.replace(/^\\\\\?\\/, '')
@@ -78,12 +156,15 @@
 
 <div class="project-tabs">
   <div class="tabs-scroll" class:scrollable={isScrollable} use:wheelScroll bind:this={scrollEl}>
-    {#each entries as e}
+    {#each displayEntries as e, i (e.path)}
       <button
         class="project-tab"
         class:active={e.path === activePath}
-        onclick={() => onSelect(e.path)}
+        class:dragging={dragging && draggedPath === e.path}
+        data-idx={i}
+        onclick={(ev) => handleTabClick(ev, e.path)}
         onauxclick={(ev) => { if (ev.button === 1) handleTabClose(ev, e.path) }}
+        onpointerdown={(ev) => handlePointerDown(ev, e.path)}
         title={cleanPath(e.path)}
       >
         <span class="tab-name">{projectName(e.path)}</span>
@@ -114,6 +195,10 @@
     </button>
   </div>
 </div>
+
+{#if ghostPos && draggedPath}
+  <div class="drag-ghost" style="left: {ghostPos.x}px; top: {ghostPos.y}px">{projectName(draggedPath)}</div>
+{/if}
 
 <style>
   .project-tabs {
@@ -180,6 +265,25 @@
   .project-tab:hover {
     background: var(--surface2);
     color: var(--text);
+  }
+  .project-tab.dragging {
+    opacity: 0.4;
+  }
+  .drag-ghost {
+    position: fixed;
+    z-index: 200;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: 8px 8px 0 0;
+    padding: 5px 12px;
+    font-size: 11px;
+    color: var(--accent);
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+    white-space: nowrap;
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .project-tab.active {
     background: var(--surface);

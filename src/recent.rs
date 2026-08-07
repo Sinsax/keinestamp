@@ -87,6 +87,27 @@ impl RecentProjects {
         Self::remove_path_from(path, &recent_path);
     }
 
+    pub fn reorder_paths(paths: &[String]) {
+        let recent_path = default_recent_path();
+        Self::reorder_paths_to(paths, &recent_path);
+    }
+
+    pub fn reorder_paths_to(paths: &[String], recent_path: &Path) {
+        let mut recent = Self::load_from(recent_path);
+        let mut by_path: std::collections::HashMap<String, RecentEntry> =
+            recent.entries.into_iter().map(|e| (e.path.clone(), e)).collect();
+        let mut out: Vec<RecentEntry> = Vec::new();
+        for p in paths {
+            if let Some(e) = by_path.remove(p) {
+                out.push(e);
+            }
+        }
+        let mut rest: Vec<RecentEntry> = by_path.into_values().collect();
+        out.append(&mut rest);
+        recent.entries = out;
+        recent.save_to(recent_path);
+    }
+
     pub fn remove_path_from(path: &Path, recent_path: &Path) {
         let mut recent = Self::load_from(recent_path);
         let path_str = Self::normalize(path).to_string_lossy().to_string();

@@ -2,7 +2,7 @@
   import { parseStatus, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
-  import { openFolder, addToGitignore } from '../api'
+  import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore } from '../api'
 
   let {
     statusOutput,
@@ -18,13 +18,41 @@
     onSelectionChange?: (sel: string[] | null) => void
   } = $props()
 
-  const files = $derived(parseStatus(statusOutput))
-  const statusMap = $derived(Object.fromEntries(files.map((f) => [f.path, f])) as Record<string, StatusFile>)
-  const tree = $derived(buildFileTree(files.map((f) => f.path)))
-  const fileSet = $derived(new Set(files.map((f) => f.path)))
+  const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp.toml', 'web-timeline']
+
+  function isHiddenPath(p: string): boolean {
+    return HIDDEN_PREFIXES.some((h) => p === h || p.startsWith(h + '/'))
+  }
+
+  const statusFiles = $derived(
+    parseStatus(statusOutput).filter((f) => !isHiddenPath(f.path))
+  )
+  const statusMap = $derived(Object.fromEntries(statusFiles.map((f) => [f.path, f])) as Record<string, StatusFile>)
+  const visibleFiles = $derived.by(() => {
+    const seen = new Set<string>()
+    const out: string[] = []
+    for (const f of statusFiles) {
+      if (!seen.has(f.path)) {
+        seen.add(f.path)
+        out.push(f.path)
+      }
+    }
+    for (const p of ignoredSet) {
+      if (isHiddenPath(p)) continue
+      if (!seen.has(p)) {
+        seen.add(p)
+        out.push(p)
+      }
+    }
+    return out
+  })
+  const tree = $derived(buildFileTree(visibleFiles))
+  const fileSet = $derived(new Set(statusFiles.map((f) => f.path)))
   const selectionSet = $derived(selection === null ? null : new Set(selection))
-  const selectedCount = $derived(selection === null ? files.length : selection.filter((p) => fileSet.has(p)).length)
-  const allSelected = $derived(selection === null || selectedCount === files.length)
+  const selectedCount = $derived(
+    selection === null ? statusFiles.length : selection.filter((p) => fileSet.has(p)).length
+  )
+  const allSelected = $derived(selection === null || selectedCount === statusFiles.length)
 
   const dirFilesMap = $derived.by(() => {
     const map: Record<string, string[]> = {}
@@ -33,8 +61,9 @@
         if (n.children.length === 0) continue
         const collected: string[] = []
         const collect = (nn: FileTreeNode) => {
-          if (nn.children.length === 0) collected.push(nn.path)
-          else nn.children.forEach(collect)
+          if (nn.children.length === 0) {
+            if (!isIgnored(nn.path)) collected.push(nn.path)
+          } else nn.children.forEach(collect)
         }
         collect(n)
         map[n.path] = collected
@@ -59,23 +88,21 @@
   }
 
   function isChecked(path: string): boolean {
+    if (isIgnored(path)) return selectionSet !== null && selectionSet.has(path)
     return selectionSet === null || selectionSet.has(path)
   }
 
   function toggleFile(path: string) {
-    if (selection === null) {
-      const next = files.filter((f) => f.path !== path).map((f) => f.path)
-      onSelectionChange(next)
-    } else {
-      const next = selection.includes(path)
-        ? selection.filter((p) => p !== path)
-        : [...selection, path]
-      if (next.length === files.length) {
-        onSelectionChange(null)
-      } else {
-        onSelectionChange(next)
-      }
-    }
+    const base = selection === null
+      ? statusFiles.map((f) => f.path)
+      : [...selection]
+    const next = base.includes(path)
+      ? base.filter((p) => p !== path)
+      : [...base, path]
+    const allSel =
+      statusFiles.length === next.length &&
+      statusFiles.every((f) => next.includes(f.path))
+    onSelectionChange(allSel ? null : next)
   }
 
   function dirState(node: FileTreeNode): 'all' | 'none' | 'partial' {
@@ -90,13 +117,16 @@
 
   function toggleDir(node: FileTreeNode) {
     const fs = dirFilesMap[node.path] || []
-    const base = selection === null ? files.map((f) => f.path) : [...selection]
+    const base = selection === null ? statusFiles.map((f) => f.path) : [...selection]
     const baseSet = new Set(base)
     const allIn = fs.every((p) => baseSet.has(p))
     const next = allIn
       ? base.filter((p) => !fs.includes(p))
       : Array.from(new Set([...base, ...fs]))
-    onSelectionChange(next.length === files.length ? null : next)
+    const allSel =
+      statusFiles.length === next.length &&
+      statusFiles.every((f) => next.includes(f.path))
+    onSelectionChange(allSel ? null : next)
   }
 
   function selectAll() {
@@ -111,10 +141,78 @@
     return statusMap[path]
   }
 
-  let contextMenu = $state<{ x: number; y: number; path: string; isDir: boolean } | null>(null)
+  let contextMenu = $state<{
+    cursorX: number
+    cursorY: number
+    x?: number
+    y?: number
+    path: string
+    isDir: boolean
+  } | null>(null)
+  let trackedSet = $state<Set<string>>(new Set())
+  let ignoredSet = $state<Set<string>>(new Set())
+  let menuEl = $state<HTMLElement | null>(null)
 
   function openContextMenu(path: string, isDir: boolean, x: number, y: number) {
-    contextMenu = { x, y, path, isDir }
+    contextMenu = { cursorX: x, cursorY: y, path, isDir }
+  }
+
+  $effect(() => {
+    const cm = contextMenu
+    const el = menuEl
+    if (!cm || !el) return
+    const w = el.offsetWidth
+    const h = el.offsetHeight
+    const margin = 8
+    const vw = window.innerWidth
+    const vh = window.innerHeight
+    const px = Math.max(margin, Math.min(cm.cursorX, vw - w - margin))
+    const py = Math.max(margin, Math.min(cm.cursorY, vh - h - margin))
+    if (cm.x !== px || cm.y !== py) {
+      cm.x = px
+      cm.y = py
+    }
+  })
+
+  $effect(() => {
+    if (!activePath) {
+      trackedSet = new Set()
+      ignoredSet = new Set()
+      return
+    }
+    getIgnoreInfo(activePath)
+      .then((info) => {
+        trackedSet = new Set(info.tracked)
+        ignoredSet = new Set(info.ignored)
+      })
+      .catch(() => {})
+  })
+
+  function isIgnored(path: string): boolean {
+    if (ignoredSet.has(path)) return true
+    const parts = path.split('/')
+    for (let i = 1; i < parts.length; i++) {
+      if (ignoredSet.has(parts.slice(0, i).join('/'))) return true
+    }
+    return false
+  }
+
+  function isTracked(path: string): boolean {
+    if (trackedSet.has(path)) return true
+    const parts = path.split('/')
+    for (let i = 1; i < parts.length; i++) {
+      if (trackedSet.has(parts.slice(0, i).join('/'))) return true
+    }
+    return false
+  }
+
+  async function refreshIgnoreInfo() {
+    if (!activePath) return
+    try {
+      const info = await getIgnoreInfo(activePath)
+      trackedSet = new Set(info.tracked)
+      ignoredSet = new Set(info.ignored)
+    } catch {}
   }
 
   function closeContextMenu() {
@@ -155,16 +253,45 @@
     await navigator.clipboard.writeText(name)
   }
 
-  async function menuIgnore() {
+  async function menuIgnore(kind: 'file' | 'ext' | 'dir') {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    let rule: string
+    if (kind === 'dir') {
+      rule = `${menu.path}/`
+    } else if (kind === 'ext') {
+      const name = menu.path.split('/').pop() || ''
+      const dot = name.lastIndexOf('.')
+      const ext = dot >= 0 ? name.slice(dot + 1) : ''
+      rule = `*.${ext}`
+    } else {
+      rule = menu.path
+    }
+    try {
+      if (kind === 'file' && isTracked(menu.path)) {
+        await addSkipWorktree(activePath, menu.path)
+      } else {
+        await addToGitignore(activePath, rule)
+      }
+      await refreshIgnoreInfo()
+      onRefresh()
+    } catch (e) {
+      console.error('add ignore failed', e)
+    }
+  }
+
+  async function menuUnignore() {
     const menu = contextMenu
     closeContextMenu()
     if (!menu) return
     const rule = menu.isDir ? `${menu.path}/` : menu.path
     try {
-      await addToGitignore(activePath, rule)
+      await removeIgnore(activePath, rule)
+      await refreshIgnoreInfo()
       onRefresh()
     } catch (e) {
-      console.error('add to gitignore failed', e)
+      console.error('remove ignore failed', e)
     }
   }
 </script>
@@ -174,7 +301,7 @@
 <div class="status-panel">
   <div class="sp-header">
     <span class="sp-title">Changes</span>
-    <span class="sp-count">{selectedCount}/{files.length} file{files.length !== 1 ? 's' : ''}</span>
+    <span class="sp-count">{selectedCount}/{statusFiles.length} file{statusFiles.length !== 1 ? 's' : ''}</span>
     <div class="sp-spacer"></div>
     {#if !allSelected}
       <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
@@ -187,7 +314,7 @@
     </button>
   </div>
 
-  {#if files.length === 0}
+  {#if statusFiles.length === 0 && ignoredSet.size === 0}
     <div class="sp-empty">
       <div class="sp-empty-icon"><svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor" opacity="0.5"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg></div>
       <div>无变更 — 工作区干净</div>
@@ -206,6 +333,8 @@
           {isCollapsed}
           onToggleCollapse={toggleCollapse}
           onContextMenu={openContextMenu}
+          ignored={isIgnored(node.path)}
+          isIgnoredFn={isIgnored}
         />
       {/each}
     </div>
@@ -213,12 +342,21 @@
 
   {#if contextMenu}
     <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu() }}></div>
-    <div class="ctx-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px">
+    <div class="ctx-menu" bind:this={menuEl} style="left: {contextMenu.x ?? contextMenu.cursorX}px; top: {contextMenu.y ?? contextMenu.cursorY}px">
       <button onclick={menuOpenFolder}>打开所在文件夹</button>
       <button onclick={menuCopyPath}>复制路径</button>
       <button onclick={menuCopyName}>复制名称</button>
       <div class="ctx-sep"></div>
-      <button class="ctx-danger" onclick={menuIgnore}>加入忽略</button>
+      {#if isIgnored(contextMenu.path)}
+        <button onclick={menuUnignore}>取消忽略</button>
+      {:else if contextMenu.isDir}
+        <button onclick={() => menuIgnore('dir')}>忽略目录</button>
+      {:else if isTracked(contextMenu.path)}
+        <button onclick={() => menuIgnore('file')} title="本地忽略，可随时恢复">忽略文件</button>
+      {:else}
+        <button onclick={() => menuIgnore('file')}>忽略文件</button>
+        <button onclick={() => menuIgnore('ext')}>忽略格式</button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -344,6 +482,8 @@
     position: fixed;
     z-index: 91;
     min-width: 150px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -368,12 +508,10 @@
     background: var(--surface2);
     color: var(--accent);
   }
-  .ctx-menu .ctx-danger {
-    color: var(--error);
-  }
-  .ctx-menu .ctx-danger:hover {
-    background: var(--accent-soft);
-    color: var(--accent);
+  .ctx-menu button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    pointer-events: none;
   }
   .ctx-sep {
     height: 1px;

@@ -23,13 +23,13 @@ function unquoteC(p: string): string {
 export function parseStatus(output: string): StatusFile[] {
   return output
     .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0)
-    .map((l) => ({
-      x: l[0] || ' ',
-      y: l[1] || ' ',
-      path: unquoteC(l.substring(3).trim()),
-    }))
+    .filter((l) => l.trim().length > 0)
+    .map((l) => {
+      const x = l[0] ?? ' '
+      const y = l[1] ?? ' '
+      const path = l.length > 3 ? l.substring(3) : ''
+      return { x, y, path: unquoteC(path.trim()) }
+    })
 }
 
 export function statusLabel(x: string, y: string): string {

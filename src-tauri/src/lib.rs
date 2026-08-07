@@ -371,10 +371,127 @@ fn open_folder(path: String) -> Result<(), String> {
     Ok(())
 }
 
+fn git_ls(project_root: &str, args: &[&str]) -> Result<Vec<String>, String> {
+    let output = std::process::Command::new("git")
+        .args(["-c", "core.quotepath=false", "ls-files"])
+        .args(args)
+        .current_dir(project_root)
+        .output()
+        .map_err(|e| format!("failed to run git ls-files: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git ls-files failed: {}", stderr.trim()));
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(stdout
+        .lines()
+        .map(|s| s.trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
 #[tauri::command]
-fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
-    eprintln!("[debug] add_to_gitignore(root={}, entry={})", project_root, entry);
-    let entry_path = std::path::Path::new(&entry);
+fn get_ignore_info(project_root: String) -> Result<serde_json::Value, String> {
+    eprintln!("[debug] get_ignore_info({})", project_root);
+    let tracked = git_ls(&project_root, &[])?;
+    let mut ignored = git_ls(&project_root, &["-o", "-i", "--exclude-standard"])?;
+    let verbose = git_ls(&project_root, &["-v"])?;
+    for line in verbose {
+        if let Some(rest) = line.strip_prefix('S') {
+            let p = rest.trim_start();
+            if !p.is_empty() && !ignored.contains(&p.to_string()) {
+                ignored.push(p.to_string());
+            }
+        }
+    }
+    Ok(serde_json::json!({ "tracked": tracked, "ignored": ignored }))
+}
+
+fn git_update_index(project_root: &str, args: &[&str]) -> Result<(), String> {
+    let output = std::process::Command::new("git")
+        .args(["update-index"])
+        .args(args)
+        .current_dir(project_root)
+        .output()
+        .map_err(|e| format!("failed to run git update-index: {}", e))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("git update-index failed: {}", stderr.trim()));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn add_skip_worktree(project_root: String, path: String) -> Result<(), String> {
+    eprintln!("[debug] add_skip_worktree(root={}, path={})", project_root, path);
+    validate_entry(&path)?;
+    let tracked = git_ls(&project_root, &[])?;
+    let normalized = path.trim_end_matches('/');
+    if !tracked.iter().any(|t| t == normalized) {
+        return Err("仅已跟踪文件支持本地忽略".into());
+    }
+    git_update_index(&project_root, &["--skip-worktree", &normalized])
+}
+
+fn rule_matches(line: &str, needle: &str) -> bool {
+    let raw = line.trim_end();
+    let base = raw.trim_end_matches('/');
+    if base == needle {
+        return true;
+    }
+    if raw.ends_with('/') {
+        let dir = base;
+        if needle.starts_with(&format!("{}/", dir)) {
+            return true;
+        }
+    }
+    if let Some(line_ext) = base.strip_prefix("*.") {
+        if let Some(dot) = needle.rfind('.') {
+            if &needle[dot + 1..] == line_ext {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[tauri::command]
+fn remove_ignore(project_root: String, entry: String) -> Result<(), String> {
+    eprintln!("[debug] remove_ignore(root={}, entry={})", project_root, entry);
+    validate_entry(&entry)?;
+    let root = PathBuf::from(&project_root);
+    let needle = entry.trim_end_matches('/');
+    let content = read_gitignore(&root);
+    let mut kept: Vec<&str> = Vec::new();
+    let mut removed = false;
+    for line in content.lines() {
+        if rule_matches(line, needle) {
+            removed = true;
+            continue;
+        }
+        kept.push(line);
+    }
+    if removed {
+        let mut out = kept.join("\n");
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        write_gitignore(&root, &out)?;
+    }
+    let verbose = git_ls(&project_root, &["-v"])?;
+    let skip_targets: Vec<String> = verbose
+        .iter()
+        .filter_map(|l| l.strip_prefix('S').map(|s| s.trim_start().to_string()))
+        .filter(|p| p == needle || p.starts_with(&format!("{}/", needle)))
+        .collect();
+    for target in skip_targets {
+        let _ = git_update_index(&project_root, &["--no-skip-worktree", &target]);
+    }
+    Ok(())
+}
+
+fn validate_entry(entry: &str) -> Result<(), String> {
+    let entry_path = std::path::Path::new(entry);
     if entry.trim().is_empty() || entry_path.is_absolute() {
         return Err("invalid entry".into());
     }
@@ -383,18 +500,40 @@ fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
             return Err("invalid entry path".into());
         }
     }
-    let root = PathBuf::from(&project_root);
+    Ok(())
+}
+
+fn read_gitignore(root: &Path) -> String {
+    std::fs::read_to_string(root.join(".gitignore")).unwrap_or_default()
+}
+
+fn write_gitignore(root: &Path, content: &str) -> Result<(), String> {
     let gitignore = root.join(".gitignore");
-    let mut content = std::fs::read_to_string(&gitignore).unwrap_or_default();
+    let tmp = gitignore.with_extension(format!("tmp{}", std::process::id()));
+    std::fs::write(&tmp, content).map_err(|e| format!("failed to write gitignore: {}", e))?;
+    std::fs::rename(&tmp, &gitignore).map_err(|e| format!("failed to save gitignore: {}", e))?;
+    Ok(())
+}
+
+#[tauri::command]
+fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
+    eprintln!("[debug] add_to_gitignore(root={}, entry={})", project_root, entry);
+    validate_entry(&entry)?;
+    let root = PathBuf::from(&project_root);
+    if !entry.ends_with('/') {
+        let tracked = git_ls(&project_root, &[])?;
+        let rule_path = entry.trim_end_matches('/');
+        if tracked.iter().any(|t| t == rule_path || t.starts_with(&format!("{}/", rule_path))) {
+            return Err("已跟踪文件无法忽略".into());
+        }
+    }
+    let mut content = read_gitignore(&root);
     if !content.is_empty() && !content.ends_with('\n') {
         content.push('\n');
     }
     content.push_str(&entry);
     content.push('\n');
-    let tmp = gitignore.with_extension(format!("tmp{}", std::process::id()));
-    std::fs::write(&tmp, &content).map_err(|e| format!("failed to write gitignore: {}", e))?;
-    std::fs::rename(&tmp, &gitignore).map_err(|e| format!("failed to save gitignore: {}", e))?;
-    Ok(())
+    write_gitignore(&root, &content)
 }
 
 #[tauri::command]
@@ -663,6 +802,13 @@ fn add_recent(path: String) {
 fn remove_recent(path: String) {
     eprintln!("[debug] remove_recent({})", path);
     keinestamp::recent::RecentProjects::remove_path(Path::new(&path));
+}
+
+#[tauri::command]
+fn reorder_recent(paths: Vec<String>) -> Vec<keinestamp::recent::RecentEntry> {
+    eprintln!("[debug] reorder_recent({:?})", paths);
+    keinestamp::recent::RecentProjects::reorder_paths(&paths);
+    keinestamp::recent::RecentProjects::load().entries
 }
 
 #[tauri::command]
@@ -1017,8 +1163,12 @@ pub fn run() {
             get_recent,
             add_recent,
             remove_recent,
+            reorder_recent,
             open_folder,
             add_to_gitignore,
+            get_ignore_info,
+            add_skip_worktree,
+            remove_ignore,
             open_web_timeline,
             open_site,
             delete_entry,

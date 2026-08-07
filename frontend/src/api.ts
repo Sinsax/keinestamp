@@ -89,12 +89,32 @@ export async function removeRecent(path: string): Promise<void> {
   return invoke<void>('remove_recent', { path })
 }
 
+export async function reorderRecent(paths: string[]): Promise<RecentEntry[]> {
+  return invoke<RecentEntry[]>('reorder_recent', { paths })
+}
+
 export async function openFolder(path: string): Promise<void> {
   return invoke<void>('open_folder', { path })
 }
 
 export async function addToGitignore(projectRoot: string, entry: string): Promise<void> {
   return invoke<void>('add_to_gitignore', { projectRoot, entry })
+}
+
+export async function removeFromGitignore(projectRoot: string, rule: string): Promise<void> {
+  return invoke<void>('remove_from_gitignore', { projectRoot, rule })
+}
+
+export async function getIgnoreInfo(projectRoot: string): Promise<{ tracked: string[]; ignored: string[] }> {
+  return invoke<{ tracked: string[]; ignored: string[] }>('get_ignore_info', { projectRoot })
+}
+
+export async function addSkipWorktree(projectRoot: string, path: string): Promise<void> {
+  return invoke<void>('add_skip_worktree', { projectRoot, path })
+}
+
+export async function removeIgnore(projectRoot: string, entry: string): Promise<void> {
+  return invoke<void>('remove_ignore', { projectRoot, entry })
 }
 
 export async function deleteEntry(path: string, entryId: string): Promise<void> {

@@ -26,7 +26,7 @@ Build order (crate): config → detect → init → git_project → git_web → 
 
 ## Constraints
 
-- **Git safety**: Only `add/commit/push/pull/reset --soft`. No checkout/branch/merge/rebase/reset --hard.
+- **Git safety**: Only `add/commit/push/pull/reset --soft`. No checkout/branch/merge/rebase/reset --hard. Exception: `git update-index --skip-worktree/--no-skip-worktree` (local index flag only, used for tracked-file local ignore, zero repo impact, fully reversible).
 - **revert guard**: Checks commit count >= 2 before `reset --soft HEAD~1`. `get_commit_count()` in git_project.
 - **pull**: Always `git pull --rebase` to avoid merge commits.
 - **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.

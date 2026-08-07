@@ -15,6 +15,8 @@
     isCollapsed,
     onToggleCollapse,
     onContextMenu = (_path: string, _isDir: boolean, _x: number, _y: number) => {},
+    ignored = false,
+    isIgnoredFn = (_path: string) => false,
   }: {
     node: FileTreeNode
     depth?: number
@@ -26,6 +28,8 @@
     isCollapsed: (path: string) => boolean
     onToggleCollapse: (path: string) => void
     onContextMenu?: (path: string, isDir: boolean, x: number, y: number) => void
+    ignored?: boolean
+    isIgnoredFn?: (path: string) => boolean
   } = $props()
 
   let indet = $state(false)
@@ -36,12 +40,13 @@
 </script>
 
 {#if isDir}
-  <div class="sp-item sp-dir" onclick={() => onToggleDir(node)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title="点击 = 选择/取消目录内所有文件">
+  <div class="sp-item sp-dir" class:sp-ignored={ignored} onclick={() => onToggleDir(node)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title="点击 = 选择/取消目录内所有文件">
     <input
       type="checkbox"
       class="sp-check"
       checked={dirState(node) !== 'none'}
       bind:indeterminate={indet}
+      disabled={ignored}
       onclick={(e) => e.stopPropagation()}
       onchange={() => onToggleDir(node)}
     />
@@ -68,18 +73,21 @@
         {isCollapsed}
         {onToggleCollapse}
         {onContextMenu}
+        ignored={ignored || isIgnoredFn(child.path)}
+        {isIgnoredFn}
       />
     {/each}
   {/if}
 {:else}
-  <div class="sp-item" onclick={() => onToggleFile(node.path)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
+  <div class="sp-item" class:sp-ignored={ignored} onclick={() => onToggleFile(node.path)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
     <input
       type="checkbox"
       class="sp-check"
       checked={isChecked(node.path)}
+      disabled={ignored}
       onclick={(e) => e.stopPropagation()}
       onchange={() => onToggleFile(node.path)}
-      title="取消勾选可单独提交其余文件"
+      title={ignored ? '已忽略，不参与提交' : '取消勾选可单独提交其余文件'}
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
       <span class="sp-icon" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
@@ -95,6 +103,9 @@
       </span>
       <span class="sp-ext-badge">{ext(node.path)}</span>
       <span class="sp-path">{node.name}</span>
+      {#if ignored}
+        <span class="sp-ignored-badge">已忽略</span>
+      {/if}
       <span class="sp-label" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
         {statusLabel(status?.x || ' ', status?.y || ' ')}
       </span>
@@ -129,5 +140,25 @@
   }
   .sp-dir-name {
     font-weight: 600;
+  }
+  :global(.sp-item.sp-ignored) {
+    opacity: 0.5;
+  }
+  :global(.sp-item.sp-ignored .sp-path) {
+    text-decoration: line-through;
+    color: var(--text-dim);
+  }
+  :global(.sp-item.sp-ignored .sp-check) {
+    opacity: 0.4;
+  }
+  .sp-ignored-badge {
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0 5px;
+    flex-shrink: 0;
+    letter-spacing: 0.5px;
   }
 </style>
