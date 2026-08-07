@@ -189,7 +189,7 @@ fn check_deploy_auth(
     deploy_token: Option<&str>,
     rate_limiter: &RateLimiter,
 ) -> AuthResult {
-    let ip = request_ip(request);
+    let ip = request_ip_trusted(request);
     if !rate_limiter.check(&ip) {
         return AuthResult::RateLimited;
     }
@@ -239,7 +239,7 @@ fn check_browser_static_auth(
     project_name: &str,
     project_tokens: &RwLock<HashMap<String, String>>,
 ) -> AuthResult {
-    let ip = request_ip(request);
+    let ip = request_ip_trusted(request);
     if !rate_limiter.check(&ip) {
         return AuthResult::RateLimited;
     }
