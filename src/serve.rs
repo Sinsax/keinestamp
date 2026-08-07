@@ -319,7 +319,44 @@ fn handle_index(request: tiny_http::Request) -> Result<()> {
 }
 
 fn index_page_html() -> String {
-    INDEX_HTML_TEMPLATE.replace("{favicon}", crate::three_assets::logo_favicon_b64())
+    let phase = moon_phase(chrono::Utc::now());
+    INDEX_HTML_TEMPLATE
+        .replace("{favicon}", crate::three_assets::logo_favicon_b64())
+        .replace("{moon_svg}", &moon_svg(phase))
+        .replace("{moon_name}", moon_phase_name(phase))
+}
+
+const SYNODIC_MONTH_SECS: f64 = 29.53058867 * 86400.0;
+
+fn moon_phase(now: chrono::DateTime<chrono::Utc>) -> f64 {
+    let ref_new_moon = chrono::DateTime::parse_from_rfc3339("2000-01-06T18:14:00Z")
+        .map(|d| d.with_timezone(&chrono::Utc))
+        .unwrap_or_else(|_| chrono::Utc::now());
+    let seconds = (now - ref_new_moon).num_seconds() as f64;
+    let phase = seconds % SYNODIC_MONTH_SECS / SYNODIC_MONTH_SECS;
+    if phase < 0.0 { phase + 1.0 } else { phase }
+}
+
+fn moon_phase_name(phase: f64) -> &'static str {
+    const NAMES: [&str; 8] = ["新月", "蛾眉月", "上弦月", "盈凸月", "满月", "亏凸月", "下弦月", "残月"];
+    let idx = (((phase + 0.0625) % 1.0) * 8.0).floor() as usize;
+    NAMES[idx.min(7)]
+}
+
+fn moon_svg(phase: f64) -> String {
+    let waxing = phase < 0.5;
+    let k = (2.0 * std::f64::consts::PI * phase).cos();
+    let mut kx = k.abs() * 42.0;
+    if kx < 0.6 { kx = 0.0; }
+    let sweep1 = if waxing { 1 } else { 0 };
+    let sweep2 = if waxing { 0 } else { 1 };
+    format!(
+        r#"<svg width="170" height="170" viewBox="0 0 100 100">
+  <circle cx="50" cy="50" r="42" fill="var(--deco-b)" opacity="0.22"/>
+  <path d="M 50 8 A 42 42 0 0 {} 50 92 A {} 42 0 0 {} 50 8 Z" fill="var(--accent)"/>
+</svg>"#,
+        sweep1, format!("{:.3}", kx), sweep2,
+    )
 }
 
 const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
@@ -447,8 +484,8 @@ h1 {
   transform: translate(38px, -132px);
   box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent);
 }
-.ha-moon { position: relative; display: flex; gap: 12px; align-items: flex-end; opacity: 0.8; }
-.ha-moon svg { height: 90px; }
+.ha-moon { position: relative; display: flex; align-items: center; justify-content: center; }
+.ha-moon svg { display: block; }
 .ha-moon::before {
   content: ""; position: absolute; inset: -40px;
   background: radial-gradient(circle, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%);
@@ -564,17 +601,13 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
       </svg>
     </div>
     <div class="ha-moon">
-      <svg viewBox="0 0 80 52" fill="none">
-        <path d="M4 48 A36 36 0 0 1 76 48" stroke="var(--deco-a)" stroke-width="8" stroke-linecap="round" opacity="0.55"/>
-        <path d="M16 48 A24 24 0 0 1 64 48" stroke="var(--deco-b)" stroke-width="8" stroke-linecap="round" opacity="0.6"/>
-        <path d="M28 48 A12 12 0 0 1 52 48" stroke="var(--accent)" stroke-width="8" stroke-linecap="round"/>
-      </svg>
+      {moon_svg}
     </div>
     <div class="ha-dot"></div>
     <div class="ha-scale">
       <i style="height:4px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:7px"></i><i style="height:4px"></i>
     </div>
-    <div class="ha-tag">moon phase = progress</div>
+    <div class="ha-tag">{moon_name} · moon phase</div>
   </div>
 </main>
 
@@ -1308,7 +1341,47 @@ mod tests {
         assert!(html.contains("ha-moon"), "moon art present");
         assert!(html.contains("ha-scale"), "progress scale present");
         assert!(html.contains("ha-ring"), "ring decoration present");
+        assert!(html.contains("· moon phase"), "moon phase label present");
+        assert!(
+            ["新月", "蛾眉月", "上弦月", "盈凸月", "满月", "亏凸月", "下弦月", "残月"]
+                .iter()
+                .any(|n| html.contains(n)),
+            "current moon phase name embedded"
+        );
         assert!(!html.contains("theme-toggle"), "no preview-only toggle in production");
+    }
+
+    #[test]
+    fn moon_phase_known_values() {
+        let t = |s: &str| {
+            chrono::DateTime::parse_from_rfc3339(s)
+                .unwrap()
+                .with_timezone(&chrono::Utc)
+        };
+        let new_moon = moon_phase(t("2000-01-06T18:14:00Z"));
+        assert!((new_moon - 0.0).abs() < 0.01, "new moon at reference: {}", new_moon);
+        let quarter = moon_phase(t("2000-01-13T22:53:00Z"));
+        assert!((quarter - 0.25).abs() < 0.02, "first quarter ~0.25: {}", quarter);
+        let full = moon_phase(t("2000-01-21T08:00:00Z"));
+        assert!((full - 0.5).abs() < 0.02, "full moon ~0.5: {}", full);
+        assert!(moon_phase_name(0.0) == "新月");
+        assert!(moon_phase_name(0.25) == "上弦月");
+        assert!(moon_phase_name(0.5) == "满月");
+        assert!(moon_phase_name(0.75) == "下弦月");
+    }
+
+    #[test]
+    fn moon_svg_shapes() {
+        let new_m = moon_svg(0.0);
+        assert!(new_m.contains("0 0 1 50 92") && new_m.contains("A 42.000 42 0 0 0 50 8"),
+            "new moon = two opposing half discs (zero area)");
+        let full = moon_svg(0.5);
+        assert!(full.contains("A 42.000 42"), "full disc at full moon");
+        let wax = moon_svg(0.125);
+        let wan = moon_svg(0.875);
+        assert_ne!(wax, wan, "waxing vs waning differ");
+        assert!(wax.contains("0 0 1 50 92"), "waxing right-half sweep");
+        assert!(wan.contains("0 0 0 50 92"), "waning left-half sweep");
     }
 
     #[test]
