@@ -541,15 +541,15 @@
     flex-shrink: 0;
   }
   .status-path { color: var(--text); }
-  .st-add { color: var(--ze); background: var(--ze-soft); }
+  .st-add { color: var(--success); background: var(--success-soft); }
   .st-del { color: var(--error); background: var(--accent-soft); }
   .st-mod { color: var(--warning); background: var(--warning-soft); }
 
   .diff-entry, .model-entry { margin-bottom: 6px; }
   .diff-path {
     font-size: 11px; font-family: var(--mono);
-    color: var(--blue); padding: 2px 6px;
-    background: var(--blue-soft); border-radius: 4px; margin-bottom: 3px;
+    color: var(--tint); padding: 2px 6px;
+    background: var(--tint-soft); border-radius: 4px; margin-bottom: 3px;
   }
   .diff-empty { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
 
@@ -571,12 +571,12 @@
     user-select: none;
   }
   .dl-text { white-space: pre; flex: 1; }
-  .dl.add { background: var(--ze-soft); color: var(--ze); }
-  .dl.add .dl-num { color: var(--ze); }
+  .dl.add { background: var(--success-soft); color: var(--success); }
+  .dl.add .dl-num { color: var(--success); }
   .dl.del { background: var(--accent-soft); color: var(--error); }
   .dl.del .dl-num { color: var(--error); }
-  .dl.mod { background: var(--blue-soft); color: var(--blue); }
-  .dl.mod .dl-num { color: var(--blue); }
+  .dl.mod { background: var(--tint-soft); color: var(--tint); }
+  .dl.mod .dl-num { color: var(--tint); }
 
   .model-err { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; background: var(--surface2); border-radius: 6px; }
   .open-web-btn {
@@ -655,8 +655,8 @@
     border-color: var(--accent);
   }
   .at-masked.copied {
-    color: var(--ze);
-    border-color: var(--ze);
+    color: var(--success);
+    border-color: var(--success);
   }
   .at-empty {
     flex: 1;

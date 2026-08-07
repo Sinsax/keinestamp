@@ -285,7 +285,7 @@
   .percent { font-weight: 600; }
 
   .dl-status { font-size: 11px; color: var(--text-dim); margin-top: 4px; display: block; }
-  .dl-status.success { color: var(--ze); }
+  .dl-status.success { color: var(--success); }
   .dl-status.error { color: var(--error); }
   .toggle-field label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
   .toggle-field input[type="checkbox"] { width: auto; }
@@ -295,7 +295,7 @@
   .connect-btn:hover:not(:disabled) { background: var(--surface2); }
   .connect-btn:disabled { opacity: 0.4; cursor: default; }
   .conn-result { display: block; font-size: 11px; margin-top: 4px; }
-  .conn-result.ok { color: var(--ze); }
+  .conn-result.ok { color: var(--success); }
   .conn-result.fail { color: var(--error); }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 </style>

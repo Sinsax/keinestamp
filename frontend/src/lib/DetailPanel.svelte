@@ -96,7 +96,7 @@
     color: color-mix(in srgb, var(--tag-c) 45%, var(--text));
     background: color-mix(in srgb, var(--tag-c) 14%, transparent);
   }
-  .blend-item { font-family: var(--mono); font-size: 11px; color: var(--blue); margin-bottom: 4px; }
+  .blend-item { font-family: var(--mono); font-size: 11px; color: var(--tint); margin-bottom: 4px; }
   .open-web-btn {
     margin-top: 8px;
     padding: 6px 16px;

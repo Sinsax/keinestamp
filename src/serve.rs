@@ -340,7 +340,7 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
   --text-dim: #69727c;
   --line: #d9dee5;
   --accent: #d94747;
-  --deco-a: #9aafc4;
+  --deco-a: #9ab3cd;
   --deco-b: #8fa694;
   --deco-c: #c7a9a9;
   --shadow-lg: 0 16px 48px rgba(27, 34, 43, 0.14);
@@ -353,7 +353,7 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
   --text-dim: #9aa5a0;
   --line: #2a3237;
   --accent: #e05a5a;
-  --deco-a: #6e8498;
+  --deco-a: #7fa08d;
   --deco-b: #6e8478;
   --deco-c: #8a6e6e;
   --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);

@@ -255,7 +255,7 @@ input:focus, textarea:focus, select:focus {
   gap: 8px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-left: 3px solid var(--ice);
+  border-left: 3px solid var(--tint);
   border-radius: var(--radius);
   padding: 10px 14px;
   font-size: 12px;
@@ -265,7 +265,7 @@ input:focus, textarea:focus, select:focus {
 }
 .toast.success { border-left-color: var(--success); }
 .toast.error { border-left-color: var(--error); }
-.toast.info { border-left-color: var(--ice); }
+.toast.info { border-left-color: var(--tint); }
 
 @keyframes fade-in {
   from { opacity: 0; }
@@ -297,7 +297,7 @@ input:focus, textarea:focus, select:focus {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--ice-soft);
+  background: var(--tint-soft);
   border-radius: 50%;
 }
 

@@ -28,8 +28,8 @@
     align-items: center;
     flex-shrink: 0;
   }
-  .toast.success .toast-icon { color: var(--ze); }
+  .toast.success .toast-icon { color: var(--success); }
   .toast.error .toast-icon { color: var(--error); }
-  .toast.info .toast-icon { color: var(--ice); }
+  .toast.info .toast-icon { color: var(--tint); }
   .toast-msg { flex: 1; }
 </style>

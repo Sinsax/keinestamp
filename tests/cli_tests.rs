@@ -197,11 +197,11 @@ fn html_gen_contains_daynight_theme() {
     assert!(html.contains("keinestamp_web_theme"), "missing theme storage key");
     assert!(html.contains("theme-toggle"), "missing toggle button id");
     assert!(html.contains("color-mix"), "missing color-mix badge styles");
-    assert!(html.contains("--bg: #141d18"), "night palette drifted");
+    assert!(html.contains("--bg: #151a18"), "night palette drifted");
     assert!(html.contains("localStorage.getItem('keinestamp_web_theme')"), "missing pre-read script");
     assert!(!html.contains("class=\"brand\""), "web logo should be removed");
     assert!(html.contains("shadow-hover"), "missing hover shadow token");
-    assert!(html.contains("--ice-soft"), "missing ice tokens");
+    assert!(html.contains("--tint-soft"), "missing tint tokens");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

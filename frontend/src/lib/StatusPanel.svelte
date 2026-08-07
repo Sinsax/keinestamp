@@ -240,10 +240,10 @@
   :global(.sp-ext-badge) {
     font-size: 9px;
     font-weight: 600;
-    background: var(--ice-soft);
+    background: var(--tint-soft);
     padding: 1px 6px;
     border-radius: 4px;
-    color: var(--blue);
+    color: var(--tint);
     flex-shrink: 0;
     letter-spacing: 0.3px;
   }

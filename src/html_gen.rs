@@ -109,38 +109,48 @@ const TEMPLATE: &str = r##"<!DOCTYPE html>
 <script src="./three/loaders/GLTFLoader.js"></script>
 <style>
 :root {
-  --bg: #f4f6f8; --surface: #ffffff; --surface2: #edf0f4; --surface3: #dce1e8;
-  --border: #e3e7ed; --text: #1e2833; --text-dim: #6b7684; --text-2: #506070;
-  --accent: #d94747; --accent-soft: #fbeded;
-  --blue: #2e4a6b; --blue-soft: #ebf1f7;
-  --ze: #3e6b52; --ze-soft: #eaf2ec;
-  --ice: #7fa8ce; --ice-soft: #eff5fb;
-  --warning: #b0803a; --error: #c94343; --warning-soft: rgba(176,128,58,0.12);
-  --card-active: #fffdfd;
-  --shadow-sm: 0 1px 2px rgba(30,40,51,0.06);
-  --shadow-hover: 0 4px 12px rgba(30,40,51,0.10);
+  --bg: #f5f6f8; --surface: #ffffff; --surface2: #eef1f4; --surface3: #dfe4ea;
+  --border: #d9dee5; --text: #1b222b; --text-dim: #69727c; --text-2: #506070;
+  --accent: #d94747; --accent-hover: #c63b3b; --accent-soft: #fbeded;
+  --tint: #7fa8ce; --tint-soft: #eff5fb;
+  --deco-a: #9ab3cd; --deco-b: #8fa694; --deco-c: #c7a9a9;
+  --success: #5d8a75; --warning: #b0803a; --error: #c94343;
+  --shadow-lg: 0 16px 48px rgba(27, 34, 43, 0.14);
+  --shadow-sm: 0 1px 2px rgba(27, 34, 43, 0.06);
+  --shadow-hover: 0 8px 24px rgba(27, 34, 43, 0.10);
+  --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 [data-theme="night"] {
-  --bg: #141d18; --surface: #1b2620; --surface2: #273830; --surface3: #35483e;
-  --border: #3b4f45; --text: #f4faf6; --text-dim: #bccac4; --text-2: #c9d6d0;
-  --accent: #ec6262; --accent-soft: #4a2b2d;
-  --blue: #6fc49a; --blue-soft: #24392f;
-  --ze: #63b58b; --ze-soft: #223a2e;
-  --ice: #c3ecd4; --ice-soft: #25362e;
-  --warning: #ddb25e; --error: #e96868; --warning-soft: rgba(221,178,94,0.18);
-  --card-active: #233129;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
-  --shadow-hover: 0 4px 12px rgba(0,0,0,0.45);
+  --bg: #151a18; --surface: #1b211f; --surface2: #242c29; --surface3: #2f3a35;
+  --border: #2a3237; --text: #e9efeb; --text-dim: #9aa5a0; --text-2: #c3cdc7;
+  --accent: #e05a5a; --accent-hover: #cf4a4a; --accent-soft: #4a2b2d;
+  --tint: #6fc49a; --tint-soft: #25362e;
+  --deco-a: #6e8498; --deco-b: #6e8478; --deco-c: #8a6e6e;
+  --success: #63b58b; --warning: #ddb25e; --error: #e96868;
+  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-hover: 0 8px 24px rgba(0, 0, 0, 0.45);
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
-.page { display: flex; min-height: 100vh; }
-.left-col { width: 270px; flex-shrink: 0; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; padding: 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
-.right-col { flex: 1; min-width: 0; max-width: 800px; margin: 0 auto; padding: 40px 24px; }
-h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
-.subtitle { color: var(--text-dim); margin-bottom: 32px; padding-bottom: 16px; }
-.subtitle::after { content: ''; display: block; height: 2px; margin-top: 16px; border-radius: 1px; background: linear-gradient(to right, var(--accent), transparent); }
-.entry { background: var(--surface); border-radius: 12px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease; }
+.deco { position: fixed; pointer-events: none; }
+.glow-tl { width: 420px; height: 420px; left: -140px; top: -140px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--deco-a) 14%, transparent), transparent 70%); filter: blur(40px); }
+.glow-br { width: 460px; height: 460px; right: -160px; bottom: -160px; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--tint) 12%, transparent), transparent 70%); filter: blur(40px); }
+.wave { position: fixed; top: 0; left: 0; right: 0; height: 140px; opacity: 0.07; pointer-events: none; }
+.wave svg { width: 100%; height: 100%; }
+.page { display: flex; min-height: 100vh; position: relative; z-index: 1; padding: 40px 60px 60px; gap: 24px; align-items: flex-start; max-width: 1440px; margin: 0 auto; }
+.left-col { width: 240px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; padding: 20px; position: sticky; top: 20px; box-shadow: var(--shadow-sm); }
+.right-col { flex: 1; min-width: 0; max-width: 780px; }
+.right-head { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 16px; padding: 22px 24px 18px; box-shadow: var(--shadow-sm); margin-bottom: 26px; }
+.head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 4px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+.eyebrow::before { content: ""; width: 28px; height: 1px; background: var(--accent); }
+.eyebrow .dot { color: var(--accent); }
+h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; margin: 0; line-height: 1.1; }
+.head-meta { display: flex; gap: 16px; padding-bottom: 6px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--text-dim); letter-spacing: 0.5px; }
+.meta-ms { color: var(--accent); }
+.cal-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
+.entry { background: var(--surface); border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s var(--ease), box-shadow .15s var(--ease), transform .15s var(--ease); }
 .entry:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
 .entry.tagged { border-left-color: var(--tag-color, var(--accent)); }
 .entry.milestone {
@@ -172,7 +182,7 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .tag-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 10px; margin-left: 8px; vertical-align: middle; color: color-mix(in srgb, var(--tag-c) 45%, var(--text)); background: color-mix(in srgb, var(--tag-c) 14%, transparent); }
 .entry-files { margin-top: 6px; }
 .empty { text-align: center; color: var(--text-dim); padding: 80px 0; font-size: 15px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
-.empty-icon { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; background: var(--ice-soft); border-radius: 50%; color: var(--ice); }
+.empty-icon { width: 72px; height: 72px; display: flex; align-items: center; justify-content: center; background: var(--tint-soft); border-radius: 50%; color: var(--tint); }
 .tag-group { display: flex; align-items: center; gap: 8px; margin: 20px 0 8px; }
 .tag-group-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .tag-group-label { font-size: 13px; font-weight: 700; color: var(--text); }
@@ -185,25 +195,24 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 .fs-line { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-family: monospace; font-size: 12px; }
 .fs-badge { width: 18px; text-align: center; font-weight: 700; font-size: 13px; flex-shrink: 0; }
 .fs-path { color: var(--text); }
-.st-add { color: var(--ze); }
+.st-add { color: var(--success); }
 .st-del { color: var(--error); }
 .st-mod { color: var(--warning); }
 .diff-entry { margin-bottom: 6px; }
-.diff-path { font-size: 11px; font-family: monospace; color: var(--blue); padding: 2px 6px; background: var(--blue-soft); border-radius: 3px; margin-bottom: 3px; }
+.diff-path { font-size: 11px; font-family: monospace; color: var(--tint); padding: 2px 6px; background: var(--tint-soft); border-radius: 3px; margin-bottom: 3px; }
 .diff-empty { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
 .diff-loading { font-size: 11px; color: var(--text-dim); padding: 4px 6px; }
 .dl { display: flex; gap: 8px; font-family: monospace; font-size: 11px; line-height: 1.6; padding: 0 4px; border-radius: 2px; }
 .dl-num { width: 32px; text-align: right; flex-shrink: 0; color: var(--text-dim); font-size: 10px; user-select: none; }
 .dl-text { white-space: pre; flex: 1; }
-.dl.add { background: var(--ze-soft); color: var(--ze); }
-.dl.add .dl-num { color: var(--ze); }
+.dl.add { background: var(--tint-soft); color: var(--success); }
+.dl.add .dl-num { color: var(--success); }
 .dl.del { background: var(--accent-soft); color: var(--error); }
 .dl.del .dl-num { color: var(--error); }
-.dl.mod { background: var(--blue-soft); color: var(--blue); }
-.dl.mod .dl-num { color: var(--blue); }
+.dl.mod { background: color-mix(in srgb, var(--tint) 10%, transparent); color: var(--tint); }
+.dl.mod .dl-num { color: var(--tint); }
 .dl:hover { filter: brightness(1.15); }
 .cal { }
-.cal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
 .cal-title { font-size: 14px; font-weight: 700; color: var(--text); }
 .cal-month { margin-bottom: 14px; }
 .cal-mlabel { font-size: 13px; font-weight: 600; color: var(--text-2); display: block; margin-bottom: 6px; }
@@ -244,8 +253,16 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
 </style>
 </head>
 <body>
+<div class="deco glow-tl"></div>
+<div class="deco glow-br"></div>
+<div class="wave">
+  <svg viewBox="0 0 1440 140" preserveAspectRatio="none">
+    <path d="M0,70 C240,140 480,0 720,60 C960,120 1200,20 1440,80 L1440,0 L0,0 Z" fill="var(--accent)"/>
+  </svg>
+</div>
 <div class="page">
   <div class="left-col">
+    <div class="cal-header"><span class="cal-title">进度日历</span></div>
     <div id="cal-sidebar"></div>
     <div class="left-footer">
       <button id="theme-toggle" class="left-footer-btn" style="margin-top:6px">☀ 切换日/夜</button>
@@ -253,6 +270,18 @@ h1 { font-size: 28px; font-weight: 700; margin-bottom: 8px; color: var(--text); 
     </div>
   </div>
   <div class="right-col">
+    <div class="right-head">
+      <div class="head-row">
+        <div>
+          <div class="eyebrow">进度时间线 <span class="dot">●</span></div>
+          <h1 id="project-title"></h1>
+        </div>
+        <div class="head-meta">
+          <span id="meta-count"></span>
+          <span class="meta-ms" id="meta-ms"></span>
+        </div>
+      </div>
+    </div>
     <div id="app"></div>
   </div>
 </div>
@@ -329,8 +358,12 @@ function parseDiff(diffText, fileStatus) {
 }
 
 function render() {
-  var h = '<h1>' + esc(data.project || 'Keinestamp') + '</h1>';
-  h += '<p class="subtitle">Progress Timeline</p>';
+  document.getElementById('project-title').textContent = data.project || 'Keinestamp';
+  var total = (data.entries || []).length;
+  var msCount = (data.entries || []).filter(function(e) { return e.milestone; }).length;
+  document.getElementById('meta-count').textContent = '共 ' + total + ' 条记录';
+  document.getElementById('meta-ms').textContent = '★ ' + msCount + ' 里程碑';
+  var h = '';
   if (data.entries && data.entries.length > 0) {
     var entries = data.entries.slice().reverse();
     var currentTag = null;

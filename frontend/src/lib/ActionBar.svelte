@@ -116,17 +116,17 @@
     box-shadow: 0 2px 8px rgba(217, 71, 71, 0.35);
   }
   .deploy-btn {
-    border-color: var(--ze) !important;
-    color: var(--ze) !important;
+    border-color: var(--success) !important;
+    color: var(--success) !important;
     background: transparent !important;
   }
   .deploy-btn:hover:not(:disabled) {
-    background: var(--ze-soft) !important;
-    border-color: var(--ze) !important;
-    color: var(--ze-hover) !important;
+    background: var(--success-soft) !important;
+    border-color: var(--success) !important;
+    color: var(--success) !important;
   }
   .deploy-btn .ab-hint {
-    color: var(--ze);
+    color: var(--success);
     opacity: 0.75;
   }
   .deploy-btn.ahead {
