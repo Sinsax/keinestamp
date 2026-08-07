@@ -165,6 +165,7 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    width: 140px;
     padding: 5px 12px;
     font-size: 11px;
     background: transparent;
@@ -174,7 +175,6 @@
     cursor: pointer;
     color: var(--text-dim);
     white-space: nowrap;
-    max-width: 160px;
     transition: background 0.15s var(--ease), color 0.15s var(--ease);
   }
   .project-tab:hover {
@@ -196,9 +196,12 @@
     background: linear-gradient(90deg, var(--accent), transparent);
   }
   .tab-name {
+    flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
   }
   .tab-close {
     display: inline-flex;
