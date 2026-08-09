@@ -127,7 +127,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `export_entry` | `()` | 导出 entry 文件到指定目录 (`git ls-tree` + `git show`) |
 | `get_recent` / `add_recent` / `remove_recent` / `reorder_recent` | recent mgmt | |
 | `open_folder` / `open_web_timeline` / `open_site` | `()` | platform-specific shell cmds; `open_site(url)` requires http(s):// prefix |
-| `get_ignore_info` | `{tracked, ignored}` | tracked via `git ls-files`; ignored = ignore 规则命中 + skip-worktree (S 前缀) |
+| `get_ignore_info` | `{tracked, ignored, rule_ignored}` | tracked via `git ls-files`; ignored = ignore 规则命中 + skip-worktree (S 前缀); rule_ignored = 传入 status 文件中命中 .gitignore 规则者 (`git check-ignore -v --no-index`, 含已跟踪文件, 前端据此隐藏) |
 | `add_to_gitignore` / `add_skip_worktree` / `remove_ignore` | `()` | 忽略管理: .gitignore 规则 / 已跟踪文件本地忽略 (skip-worktree, 零 repo 影响) / 移除忽略 |
 | `delete_entry` | `()` | timeline.json only, not git |
 | `get_project_log` | `String[]` | git log lines |

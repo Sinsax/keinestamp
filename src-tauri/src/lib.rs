@@ -421,7 +421,7 @@ fn git_ls(project_root: &str, args: &[&str]) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
-fn get_ignore_info(project_root: String) -> Result<serde_json::Value, String> {
+fn get_ignore_info(project_root: String, files: Option<Vec<String>>) -> Result<serde_json::Value, String> {
     eprintln!("[debug] get_ignore_info({})", project_root);
     let tracked = git_ls(&project_root, &[])?;
     let mut ignored = git_ls(&project_root, &["-o", "-i", "--exclude-standard"])?;
@@ -434,7 +434,13 @@ fn get_ignore_info(project_root: String) -> Result<serde_json::Value, String> {
             }
         }
     }
-    Ok(serde_json::json!({ "tracked": tracked, "ignored": ignored }))
+    // 传入的 status 文件中命中 .gitignore 规则的路径（含已跟踪文件的删除/修改差异）
+    let rule_ignored: Vec<String> = match files {
+        Some(fs) => keinestamp::git_project::check_ignore(std::path::Path::new(&project_root), &fs)
+            .unwrap_or_default(),
+        None => Vec::new(),
+    };
+    Ok(serde_json::json!({ "tracked": tracked, "ignored": ignored, "rule_ignored": rule_ignored }))
 }
 
 fn git_update_index(project_root: &str, args: &[&str]) -> Result<(), String> {

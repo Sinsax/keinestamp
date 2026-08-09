@@ -295,6 +295,7 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
                 &["restore", "--source", saved_head.trim(), "--staged", "--worktree", "--", "."],
             )?;
             reapply_skip_worktree(project_root, &skip_paths)?;
+            untrack_ignored_files(project_root)?;
             clear_rollback_refs(project_root)?;
             eprintln!("[debug] restore_rollback → ok (no stash, clean)");
             return Ok(());
@@ -336,6 +337,7 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
             run_git(project_root, &args)?;
         }
         reapply_skip_worktree(project_root, &skip_paths)?;
+        untrack_ignored_files(project_root)?;
         clear_rollback_refs(project_root)?;
         eprintln!("[debug] restore_rollback → ok (no stash, merged)");
         return Ok(());
@@ -385,6 +387,7 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
         }
     }
     reapply_skip_worktree(project_root, &skip_paths)?;
+    untrack_ignored_files(project_root)?;
     run_git(project_root, &["stash", "drop", &stash_ref])?;
     clear_rollback_refs(project_root)?;
     eprintln!("[debug] restore_rollback → ok");
@@ -430,6 +433,7 @@ pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)
         run_git(project_root, &["add", path])?;
     }
     reapply_skip_worktree(project_root, &skip_paths)?;
+    untrack_ignored_files(project_root)?;
     if let Some(s) = find_rollback_stash(project_root)? {
         run_git(project_root, &["stash", "drop", &s])?;
     }
@@ -478,6 +482,76 @@ pub fn tracked_files(project_root: &Path) -> Result<Vec<String>> {
         "ls-files",
     ])?;
     Ok(output.lines().map(|s| s.to_string()).filter(|s| !s.is_empty()).collect())
+}
+
+fn run_git_stdin_output(path: &Path, args: &[&str], input: &str) -> Result<String> {
+    use std::io::Write;
+    let mut child = crate::process_util::hide_console(Command::new("git"))
+        .args(args)
+        .current_dir(path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn git {:?} at {:?}", args, path))?;
+    let mut stdin = child.stdin.take().context("failed to open git stdin")?;
+    stdin.write_all(input.as_bytes()).with_context(|| format!("failed to write to git {:?}", args))?;
+    drop(stdin);
+    let output = child.wait_with_output().with_context(|| format!("failed to wait for git {:?}", args))?;
+    if !output.status.success() {
+        anyhow::bail!("git {} failed", args.join(" "));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// 返回传入列表中命中 .gitignore 规则的路径（对已跟踪文件也返回匹配）
+pub fn check_ignore(project_root: &Path, files: &[String]) -> Result<Vec<String>> {
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    use std::io::Write;
+    let input = files.join("\n") + "\n";
+    let mut child = crate::process_util::hide_console(Command::new("git"))
+        .args(["check-ignore", "-v", "--no-index", "--stdin"])
+        .current_dir(project_root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn git check-ignore at {:?}", project_root))?;
+    let mut stdin = child.stdin.take().context("failed to open git stdin")?;
+    stdin.write_all(input.as_bytes())?;
+    drop(stdin);
+    let output = child.wait_with_output().with_context(|| format!("failed to wait for git check-ignore at {:?}", project_root))?;
+    // exit 0 = 有匹配，exit 1 = 无匹配（git check-ignore 的语义，非错误）
+    if output.status.code() == Some(128) {
+        anyhow::bail!("git check-ignore failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+    }
+    // -v 输出格式: "<source>:<linenum>:<pattern>\t<pathname>"，取 tab 后路径
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|l| l.split_once('\t').map(|(_, p)| p.trim().to_string()))
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
+/// 取消 gitignore 规则匹配的已跟踪文件的跟踪（隐藏 + 不参与提交，文件保留磁盘）
+pub fn untrack_ignored_files(project_root: &Path) -> Result<()> {
+    eprintln!("[debug] untrack_ignored_files: root={:?}", project_root);
+    let tracked = tracked_files(project_root)?;
+    if tracked.is_empty() {
+        return Ok(());
+    }
+    let matched = check_ignore(project_root, &tracked)?;
+    if matched.is_empty() {
+        return Ok(());
+    }
+    for f in &matched {
+        eprintln!("[debug] untrack_ignored_files: rm --cached {}", f);
+        run_git(project_root, &["rm", "--cached", "--", f])?;
+    }
+    eprintln!("[debug] untrack_ignored_files → {} files untracked", matched.len());
+    Ok(())
 }
 
 pub fn is_lfs_available() -> bool {
@@ -1231,6 +1305,61 @@ mod tests {
 
         let err = keep_rollback_file(&dir, "a.txt").expect_err("非回退状态应报错");
         assert!(err.to_string().contains("不在回退状态"), "err: {}", err);
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_restore_untracks_ignored_files() -> Result<()> {
+        let dir = tmp_repo("rollback_untrack_ignored");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+
+        std::fs::write(dir.join("x.txt"), b"x1")?;
+        add_and_commit(&dir, "second")?;
+        let second = get_current_commit_hash(&dir)?;
+
+        rollback(&dir, &second)?;
+        assert!(!dir.join("x.txt").exists(), "回退后 x.txt 应从工作区移除");
+
+        let mut gi = std::fs::read_to_string(dir.join(".gitignore")).unwrap_or_default();
+        gi.push_str("x.txt\n");
+        std::fs::write(dir.join(".gitignore"), &gi)?;
+
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("x.txt"))?, b"x1", "恢复后 x.txt 文件应保留在磁盘");
+        let tracked = tracked_files(&dir)?;
+        assert!(!tracked.iter().any(|t| t == "x.txt"), "忽略的文件应取消跟踪: {:?}", tracked);
+        // 前端隐藏依据：check-ignore 匹配（status 的 D 差异由 UI 层隐藏）
+        let matched = check_ignore(&dir, &["x.txt".to_string()])?;
+        assert_eq!(matched, vec!["x.txt".to_string()], "规则应匹配 x.txt（前端据此隐藏）");
+        // 记录后 x.txt 不参与提交
+        add_and_commit(&dir, "after-restore")?;
+        let tracked_after = tracked_files(&dir)?;
+        assert!(!tracked_after.iter().any(|t| t == "x.txt"), "记录后 x.txt 不应被提交: {:?}", tracked_after);
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_check_ignore_matches_tracked() -> Result<()> {
+        let dir = tmp_repo("check_ignore_tracked");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+
+        let matched = check_ignore(&dir, &["a.txt".to_string(), "b.txt".to_string()])?;
+        assert!(matched.is_empty(), "无规则时不应匹配: {:?}", matched);
+
+        let mut gi = std::fs::read_to_string(dir.join(".gitignore")).unwrap_or_default();
+        gi.push_str("b.txt\n");
+        std::fs::write(dir.join(".gitignore"), &gi)?;
+
+        let matched = check_ignore(&dir, &["a.txt".to_string(), "b.txt".to_string()])?;
+        assert_eq!(matched, vec!["b.txt".to_string()], "应匹配规则命中的路径: {:?}", matched);
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())

@@ -93,8 +93,14 @@ export async function addToGitignore(projectRoot: string, entry: string): Promis
   return invoke<void>('add_to_gitignore', { projectRoot, entry })
 }
 
-export async function getIgnoreInfo(projectRoot: string): Promise<{ tracked: string[]; ignored: string[] }> {
-  return invoke<{ tracked: string[]; ignored: string[] }>('get_ignore_info', { projectRoot })
+export interface IgnoreInfo {
+  tracked: string[]
+  ignored: string[]
+  rule_ignored: string[]
+}
+
+export async function getIgnoreInfo(projectRoot: string, files?: string[]): Promise<IgnoreInfo> {
+  return invoke<IgnoreInfo>('get_ignore_info', { projectRoot, files: files ?? [] })
 }
 
 export async function addSkipWorktree(projectRoot: string, path: string): Promise<void> {

@@ -29,7 +29,9 @@
   }
 
   const statusFiles = $derived(
-    parseStatus(statusOutput).filter((f) => !isHiddenPath(f.path))
+    parseStatus(statusOutput)
+      .filter((f) => !isHiddenPath(f.path))
+      .filter((f) => !ruleIgnoredSet.has(f.path))
   )
   const statusMap = $derived(Object.fromEntries(statusFiles.map((f) => [f.path, f])) as Record<string, StatusFile>)
   const visibleFiles = $derived.by(() => {
@@ -218,6 +220,7 @@
   } | null>(null)
   let trackedSet = $state<Set<string>>(new Set())
   let ignoredSet = $state<Set<string>>(new Set())
+  let ruleIgnoredSet = $state<Set<string>>(new Set())
   let menuEl = $state<HTMLElement | null>(null)
 
   function openContextMenu(path: string, isDir: boolean, x: number, y: number) {
@@ -246,13 +249,16 @@
     if (!path) {
       trackedSet = new Set()
       ignoredSet = new Set()
+      ruleIgnoredSet = new Set()
       return
     }
-    getIgnoreInfo(path)
+    const files = statusFiles.map((f) => f.path)
+    getIgnoreInfo(path, files)
       .then((info) => {
         if (path !== activePath) return
         trackedSet = new Set(info.tracked)
         ignoredSet = new Set(info.ignored)
+        ruleIgnoredSet = new Set(info.rule_ignored)
       })
       .catch(() => {})
   })
@@ -278,9 +284,11 @@
   async function refreshIgnoreInfo() {
     if (!activePath) return
     try {
-      const info = await getIgnoreInfo(activePath)
+      const files = statusFiles.map((f) => f.path)
+      const info = await getIgnoreInfo(activePath, files)
       trackedSet = new Set(info.tracked)
       ignoredSet = new Set(info.ignored)
+      ruleIgnoredSet = new Set(info.rule_ignored)
     } catch {}
   }
 
