@@ -142,6 +142,24 @@ fn clear_rollback_refs(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
+fn snapshot_skip_worktree(project_root: &Path) -> Vec<String> {
+    run_git_output(project_root, &["-c", "core.quotepath=false", "ls-files", "-v"])
+        .map(|out| {
+            out.lines()
+                .filter_map(|l| l.strip_prefix('S').map(|s| s.trim_start().to_string()))
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn reapply_skip_worktree(project_root: &Path, paths: &[String]) -> Result<()> {
+    for p in paths {
+        let _ = run_git(project_root, &["update-index", "--skip-worktree", p]);
+    }
+    Ok(())
+}
+
 pub fn rollback(project_root: &Path, entry_hash: &str) -> Result<()> {
     eprintln!("[debug] rollback: root={:?}, entry={}", project_root, entry_hash);
     if get_rollback_state(project_root)?.rollback_point.is_some() {
@@ -258,13 +276,25 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
     let saved_head = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_REF])?;
     let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])?;
     let Some(stash_ref) = find_rollback_stash(project_root)? else {
-        if !rollback_local_files(project_root, point.trim()).is_empty() {
+        let local = rollback_local_files(project_root, point.trim());
+        let blocking: Vec<&String> = local.iter().filter(|p| p.as_str() != ".gitignore").collect();
+        if !blocking.is_empty() {
             anyhow::bail!("回退状态期间工作区有改动，无法直接恢复：请先处理改动（提交/暂存/放弃）后再恢复");
         }
+        let skip_paths = snapshot_skip_worktree(project_root);
+        let gitignore_backup = if local.contains(&".gitignore".to_string()) {
+            std::fs::read(project_root.join(".gitignore")).ok()
+        } else {
+            None
+        };
         run_git(
             project_root,
             &["restore", "--source", saved_head.trim(), "--staged", "--worktree", "--", "."],
         )?;
+        if let Some(content) = gitignore_backup {
+            std::fs::write(project_root.join(".gitignore"), &content)?;
+        }
+        reapply_skip_worktree(project_root, &skip_paths)?;
         clear_rollback_refs(project_root)?;
         eprintln!("[debug] restore_rollback → ok (no stash)");
         return Ok(());
@@ -294,6 +324,7 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
         anyhow::bail!("回退恢复冲突：{} 个文件需要二选一（保留当前版本或恢复最新版本）", conflicts.len());
     }
 
+    let skip_paths = snapshot_skip_worktree(project_root);
     if !stash_files.is_empty() {
         let restore_targets: Vec<&String> = stash_files
             .iter()
@@ -313,6 +344,7 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
             }
         }
     }
+    reapply_skip_worktree(project_root, &skip_paths)?;
     run_git(project_root, &["stash", "drop", &stash_ref])?;
     clear_rollback_refs(project_root)?;
     eprintln!("[debug] restore_rollback → ok");
@@ -341,6 +373,7 @@ pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)
     }
     let stash_ref = find_rollback_stash(project_root)?
         .ok_or_else(|| anyhow::anyhow!("没有找到回退暂存（stash）"))?;
+    let skip_paths = snapshot_skip_worktree(project_root);
     for (path, use_latest) in choices {
         if *use_latest {
             if run_git_output(project_root, &["rev-parse", &format!("{}:{}", stash_ref, path)]).is_ok() {
@@ -356,6 +389,7 @@ pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)
         }
         run_git(project_root, &["add", path])?;
     }
+    reapply_skip_worktree(project_root, &skip_paths)?;
     run_git(project_root, &["stash", "drop", &stash_ref])?;
     clear_rollback_refs(project_root)?;
     eprintln!("[debug] resolve_rollback_conflicts → ok");
@@ -889,6 +923,58 @@ mod tests {
         let out = run_git_output(&dir, &["stash", "list"])?;
         assert_eq!(out.trim().lines().count(), 1, "应只剩用户 stash: {}", out);
         assert!(out.contains("some keinestamp-rollback mention"), "用户 stash 应保留: {}", out);
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_skip_worktree_preserved_after_restore() -> Result<()> {
+        let dir = tmp_repo("rollback_skip_worktree_preserved");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+        let second = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        rollback(&dir, &second)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+
+        run_git(&dir, &["update-index", "--skip-worktree", "a.txt"])?;
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3");
+        let v = run_git_output(&dir, &["ls-files", "-v"])?;
+        assert!(v.lines().any(|l| l.starts_with('S') && l.trim_end() == "S a.txt"), "恢复后 skip-worktree 标志应保留: {}", v);
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_no_stash_gitignore_only_restore() -> Result<()> {
+        let dir = tmp_repo("rollback_no_stash_gitignore");
+        std::fs::write(dir.join(".gitignore"), b"out/\n")?;
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+        let second = get_current_commit_hash(&dir)?;
+
+        rollback(&dir, &second)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+
+        let mut gi = std::fs::read_to_string(dir.join(".gitignore"))?;
+        gi.push_str("cache/\n");
+        std::fs::write(dir.join(".gitignore"), &gi)?;
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
+        let gi_after = std::fs::read_to_string(dir.join(".gitignore"))?;
+        assert!(gi_after.contains("cache/"), "恢复后 .gitignore 的忽略规则应保留: {}", gi_after);
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
