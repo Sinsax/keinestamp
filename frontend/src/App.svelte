@@ -192,9 +192,14 @@
         siteLocked = cfg.site_locked
         if (seq !== loadSeq) return
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
-        refreshDeployStatus()
-        if (autoConn) {
-          testConnection()
+        if (siteLocked) {
+          refreshDeployStatus()
+          if (autoConn) {
+            testConnection()
+          }
+        } else {
+          deployStatus = null
+          connected = false
         }
       } else {
         entries = []

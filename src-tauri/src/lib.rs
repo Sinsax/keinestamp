@@ -312,6 +312,10 @@ async fn get_deploy_status(
         let meta_path = keinestamp::config::meta_path(&p);
         let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
         let local = keinestamp::git_web::get_web_commit_count(&meta.web_root);
+        if !meta.site_locked {
+            eprintln!("[debug] get_deploy_status: not deployed (site_locked=false), skip request");
+            return Ok(DeployStatus { local, remote: None });
+        }
         let site = keinestamp::config::resolve_site_name(&meta);
         let url = format!("{}/{}/version", server_url.trim_end_matches('/'), site);
         eprintln!("[debug] get_deploy_status: local={}, GET {}", local, url);

@@ -191,14 +191,14 @@ pub fn reset_soft_to(project_root: &Path, target: &str) -> Result<()> {
 }
 
 pub fn get_rollback_state(project_root: &Path) -> Result<RollbackState> {
-    let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])
+    let point = run_git_output_quiet(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
     let Some(point) = point else {
         return Ok(RollbackState { rollback_point: None, head_matches: false });
     };
-    let saved_head = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_REF])?;
+    let saved_head = run_git_output_quiet(project_root, &["rev-parse", "--verify", ROLLBACK_REF])?;
     let head = get_current_commit_hash(project_root)?;
     Ok(RollbackState {
         rollback_point: Some(point),
@@ -250,6 +250,18 @@ fn run_git_stdin(path: &Path, args: &[&str], input: &str) -> Result<()> {
         anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
     }
     Ok(())
+}
+
+fn run_git_output_quiet(path: &Path, args: &[&str]) -> Result<String> {
+    let output = crate::process_util::hide_console(Command::new("git"))
+        .args(args)
+        .current_dir(path)
+        .output()
+        .with_context(|| format!("failed to execute git {:?} at {:?}", args, path))?;
+    if !output.status.success() {
+        anyhow::bail!("git {} failed", args.join(" "));
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 fn stage_unmerged(project_root: &Path, path: &str, point: &str, stash_ref: &str) -> Result<()> {
