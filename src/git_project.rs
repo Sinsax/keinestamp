@@ -74,29 +74,6 @@ pub fn has_remote(project_root: &Path) -> bool {
     }
 }
 
-pub fn revert(project_root: &Path) -> Result<()> {
-    eprintln!("[debug] revert: root={:?}", project_root);
-    let count = get_commit_count(project_root)?;
-    if count < 2 {
-        anyhow::bail!("no commits to revert");
-    }
-    run_git(project_root, &["reset", "--soft", "HEAD~1"])?;
-    eprintln!("[debug] revert → ok");
-    Ok(())
-}
-
-pub fn restore_revert(project_root: &Path, original_hash: &str) -> Result<()> {
-    eprintln!("[debug] restore_revert: root={:?}, original={}", project_root, original_hash);
-    run_git(project_root, &["reset", "--soft", original_hash])?;
-    eprintln!("[debug] restore_revert → ok");
-    Ok(())
-}
-
-fn get_commit_count(project_root: &Path) -> Result<usize> {
-    let output = run_git_output(project_root, &["rev-list", "--count", "HEAD"])?;
-    Ok(output.trim().parse().unwrap_or(0))
-}
-
 pub fn status(project_root: &Path) -> Result<String> {
     let output = run_git_output(project_root, &[
         "-c", "core.quotepath=false",
@@ -120,6 +97,221 @@ pub fn log(project_root: &Path, max_count: usize) -> Result<String> {
 pub fn get_current_commit_hash(project_root: &Path) -> Result<String> {
     let hash = run_git_output(project_root, &["rev-parse", "HEAD"])?;
     Ok(hash.trim().to_string())
+}
+
+const ROLLBACK_REF: &str = "refs/keinestamp/rollback";
+const ROLLBACK_POINT_REF: &str = "refs/keinestamp/rollback-point";
+const ROLLBACK_STASH_PREFIX: &str = "keinestamp-rollback";
+
+fn find_rollback_stash(project_root: &Path) -> Result<Option<String>> {
+    let out = run_git_output(project_root, &["stash", "list", "--format=%gd %s"])?;
+    Ok(out
+        .lines()
+        .find_map(|line| {
+            let mut it = line.splitn(2, ' ');
+            let refname = it.next()?;
+            let msg = it.next().unwrap_or("");
+            if msg.contains(ROLLBACK_STASH_PREFIX) {
+                Some(refname.to_string())
+            } else {
+                None
+            }
+        }))
+}
+
+fn run_git_bytes(path: &Path, args: &[&str]) -> Result<Vec<u8>> {
+    let output = crate::process_util::hide_console(Command::new("git"))
+        .args(args)
+        .current_dir(path)
+        .output()
+        .with_context(|| format!("failed to execute git {:?} at {:?}", args, path))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
+    }
+    Ok(output.stdout)
+}
+
+fn clear_rollback_refs(project_root: &Path) -> Result<()> {
+    let _ = run_git(project_root, &["update-ref", "-d", ROLLBACK_REF]);
+    let _ = run_git(project_root, &["update-ref", "-d", ROLLBACK_POINT_REF]);
+    Ok(())
+}
+
+pub fn rollback(project_root: &Path, entry_hash: &str) -> Result<()> {
+    eprintln!("[debug] rollback: root={:?}, entry={}", project_root, entry_hash);
+    let head = get_current_commit_hash(project_root)?;
+
+    let dirty = run_git_output(project_root, &["status", "--porcelain"])?
+        .lines()
+        .any(|l| !l.trim().is_empty());
+    if dirty {
+        run_git(project_root, &["stash", "push", "-u", "-m", ROLLBACK_STASH_PREFIX])?;
+    }
+
+    run_git(
+        project_root,
+        &["restore", "--source", entry_hash, "--staged", "--worktree", "--", "."],
+    )?;
+    run_git(project_root, &["update-ref", ROLLBACK_REF, &head])?;
+    run_git(project_root, &["update-ref", ROLLBACK_POINT_REF, entry_hash])?;
+    eprintln!("[debug] rollback → ok");
+    Ok(())
+}
+
+pub struct RollbackState {
+    pub rollback_point: Option<String>,
+    pub head_matches: bool,
+}
+
+pub fn get_rollback_state(project_root: &Path) -> Result<RollbackState> {
+    let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let Some(point) = point else {
+        return Ok(RollbackState { rollback_point: None, head_matches: false });
+    };
+    let saved_head = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_REF])?;
+    let head = get_current_commit_hash(project_root)?;
+    Ok(RollbackState {
+        rollback_point: Some(point),
+        head_matches: head == saved_head.trim(),
+    })
+}
+
+fn rollback_stash_files(project_root: &Path, point: &str, stash_ref: &str) -> Vec<String> {
+    run_git_output(project_root, &["diff", "--name-only", point, stash_ref])
+        .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default()
+}
+
+fn rollback_local_files(project_root: &Path) -> Vec<String> {
+    let mut files: Vec<String> = run_git_output(project_root, &["-c", "core.quotepath=false", "diff", "--name-only"])
+        .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    if let Ok(untracked) = run_git_output(project_root, &["-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"]) {
+        files.extend(untracked.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()));
+    }
+    files
+}
+
+fn run_git_stdin(path: &Path, args: &[&str], input: &str) -> Result<()> {
+    use std::io::Write;
+    let mut child = crate::process_util::hide_console(Command::new("git"))
+        .args(args)
+        .current_dir(path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .with_context(|| format!("failed to spawn git {:?} at {:?}", args, path))?;
+    let mut stdin = child.stdin.take().context("failed to open git stdin")?;
+    stdin.write_all(input.as_bytes()).with_context(|| format!("failed to write to git {:?}", args))?;
+    drop(stdin);
+    let output = child.wait_with_output().with_context(|| format!("failed to wait for git {:?}", args))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        eprintln!("[debug] git {:?} failed at {:?}: {}", args, path, stderr.trim());
+        anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
+    }
+    Ok(())
+}
+
+fn stage_unmerged(project_root: &Path, path: &str, point: &str, stash_ref: &str) -> Result<()> {
+    let zero = "0000000000000000000000000000000000000000";
+    let mut info = format!("0 {zero}\t{path}\n");
+    if let Ok(b) = run_git_output(project_root, &["rev-parse", &format!("{}:{}", point, path)]) {
+        info.push_str(&format!("100644 {} 1\t{}\n", b.trim(), path));
+    }
+    if let Ok(o) = run_git_output(project_root, &["hash-object", "-w", path]) {
+        info.push_str(&format!("100644 {} 2\t{}\n", o.trim(), path));
+    }
+    if let Ok(t) = run_git_output(project_root, &["rev-parse", &format!("{}:{}", stash_ref, path)]) {
+        info.push_str(&format!("100644 {} 3\t{}\n", t.trim(), path));
+    }
+    run_git_stdin(project_root, &["update-index", "--index-info"], &info)
+}
+
+pub fn restore_rollback(project_root: &Path) -> Result<()> {
+    eprintln!("[debug] restore_rollback: root={:?}", project_root);
+    let saved_head = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_REF])?;
+    let Some(stash_ref) = find_rollback_stash(project_root)? else {
+        run_git(
+            project_root,
+            &["restore", "--source", saved_head.trim(), "--staged", "--worktree", "--", "."],
+        )?;
+        clear_rollback_refs(project_root)?;
+        eprintln!("[debug] restore_rollback → ok (no stash)");
+        return Ok(());
+    };
+
+    let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])?;
+    let stash_files = rollback_stash_files(project_root, point.trim(), &stash_ref);
+    let local_files = rollback_local_files(project_root);
+    let conflicts: Vec<String> = stash_files
+        .iter()
+        .filter(|f| local_files.contains(f))
+        .cloned()
+        .collect();
+    if !conflicts.is_empty() {
+        eprintln!("[debug] restore_rollback: conflicts {:?}", conflicts);
+        for path in &conflicts {
+            stage_unmerged(project_root, path, point.trim(), &stash_ref)?;
+        }
+        anyhow::bail!("回退恢复冲突：{} 个文件需要二选一（保留当前版本或恢复最新版本）", conflicts.len());
+    }
+
+    if !stash_files.is_empty() {
+        let mut args = vec!["restore", "--source", stash_ref.as_str(), "--staged", "--worktree", "--"];
+        args.extend(stash_files.iter().map(|s| s.as_str()));
+        run_git(project_root, &args)?;
+    }
+    let untracked_tree = format!("{}^{{3}}", stash_ref);
+    if let Ok(untracked) = run_git_output(project_root, &["ls-tree", "-r", "--name-only", &untracked_tree]) {
+        for p in untracked.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            if !project_root.join(&p).exists() {
+                run_git(project_root, &["restore", "--source", &untracked_tree, "--staged", "--worktree", "--", &p])?;
+            }
+        }
+    }
+    run_git(project_root, &["stash", "drop", &stash_ref])?;
+    clear_rollback_refs(project_root)?;
+    eprintln!("[debug] restore_rollback → ok");
+    Ok(())
+}
+
+pub fn get_rollback_conflicts(project_root: &Path) -> Result<Vec<String>> {
+    let out = run_git_output(project_root, &["diff", "--name-only", "--diff-filter=U"])?;
+    Ok(out.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+}
+
+pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)]) -> Result<()> {
+    eprintln!("[debug] resolve_rollback_conflicts: root={:?}, {} files", project_root, choices.len());
+    let stash_ref = find_rollback_stash(project_root)?
+        .ok_or_else(|| anyhow::anyhow!("没有找到回退暂存（stash）"))?;
+    for (path, use_latest) in choices {
+        if *use_latest {
+            let content = run_git_bytes(project_root, &["show", &format!("{}:{}", stash_ref, path)])?;
+            let full = project_root.join(path);
+            if let Some(parent) = full.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&full, &content)?;
+        }
+        run_git(project_root, &["add", path])?;
+    }
+    run_git(project_root, &["stash", "drop", &stash_ref])?;
+    clear_rollback_refs(project_root)?;
+    eprintln!("[debug] resolve_rollback_conflicts → ok");
+    Ok(())
+}
+
+pub fn clear_rollback(project_root: &Path) -> Result<()> {
+    if let Some(s) = find_rollback_stash(project_root)? {
+        let _ = run_git(project_root, &["stash", "drop", &s]);
+    }
+    clear_rollback_refs(project_root)
 }
 
 fn get_current_branch(project_root: &Path) -> Result<String> {
@@ -350,22 +542,55 @@ mod tests {
     }
 
     #[test]
-    fn test_revert() -> Result<()> {
-        let dir = tmp_repo("revert");
-        std::fs::write(dir.join("a.txt"), b"a")?;
+    fn test_rollback_roundtrip() -> Result<()> {
+        let dir = tmp_repo("rollback_roundtrip");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
 
-        std::fs::write(dir.join("b.txt"), b"b")?;
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        std::fs::write(dir.join("b.txt"), b"new")?;
         add_and_commit(&dir, "second")?;
 
-        let log_before = log(&dir, 10)?;
-        assert!(log_before.lines().count() >= 2);
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        let st = get_rollback_state(&dir)?;
+        assert_eq!(st.rollback_point.as_deref(), Some(first.as_str()));
+        assert!(st.head_matches);
 
-        revert(&dir)?;
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
 
-        let log_after = log(&dir, 10)?;
-        let msg = git_project_log_message(&log_after);
-        assert!(!msg.contains("second") || log_after.lines().count() < log_before.lines().count());
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_conflict_resolve() -> Result<()> {
+        let dir = tmp_repo("rollback_conflict");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+
+        std::fs::write(dir.join("a.txt"), b"v1.5")?;
+        assert!(restore_rollback(&dir).is_err(), "两边都改过应冲突");
+        let conflicts = get_rollback_conflicts(&dir)?;
+        assert!(conflicts.iter().any(|c| c == "a.txt"));
+
+        resolve_rollback_conflicts(&dir, &[("a.txt".to_string(), true)])?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -398,14 +623,5 @@ mod tests {
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
-    }
-
-    fn git_project_log_message(log_output: &str) -> String {
-        log_output
-            .lines()
-            .next()
-            .map(|l| l.splitn(3, '|').nth(2).unwrap_or(""))
-            .unwrap_or("")
-            .to_string()
     }
 }
