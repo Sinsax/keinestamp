@@ -5,12 +5,14 @@
     lastTag = '',
     canRestore = false,
     busy = false,
+    progress = '',
   }: {
     onConfirm: (msg: string, tag: string | null, noPreview: boolean) => Promise<boolean>
     onCancel: () => void
     lastTag?: string
     canRestore?: boolean
     busy?: boolean
+    progress?: string
   } = $props()
 
   const TAG_PRESETS = ['建模', 'UV拆分', '绑定', '贴图', '修复']
@@ -46,7 +48,7 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleConfirm()
-    if (e.key === 'Escape') onCancel()
+    if (e.key === 'Escape' && !busy) onCancel()
   }
 
   function selectPreset(p: string) {
@@ -61,7 +63,7 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="dialog-overlay" onclick={onCancel} role="presentation">
+<div class="dialog-overlay" onclick={() => { if (!busy) onCancel() }} role="presentation">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog commit-dialog" class:restore-mode={canRestore} onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
     <h3>
@@ -118,9 +120,9 @@
       <input id="cd-preview" type="checkbox" bind:checked={previewEnabled} />
     </div>
     <div class="actions">
-      <button onclick={onCancel}>取消</button>
+      <button onclick={onCancel} disabled={busy}>取消</button>
       <button onclick={handleConfirm} class="accent" disabled={busy || !message.trim()}>
-        {busy ? '记录中...' : '记录 (Ctrl+Enter)'}
+        {busy ? (progress ? `记录中...：${progress}` : '记录中...') : '记录 (Ctrl+Enter)'}
       </button>
     </div>
   </div>

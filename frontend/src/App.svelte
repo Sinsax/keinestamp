@@ -14,6 +14,7 @@
   import InputDialog from './lib/InputDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
   import ConflictDialog from './lib/ConflictDialog.svelte'
+  import BusyOverlay from './lib/BusyOverlay.svelte'
   import Toast from './lib/Toast.svelte'
   import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState, RollbackChoice } from './types'
   import * as api from './api'
@@ -59,6 +60,8 @@
   let resolvingConflict = $state(false)
   let deploying = $state(false)
   let recording = $state(false)
+  let busyText = $state('')
+  let commitProgressMsg = $state('')
   let loadSeq = 0
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
@@ -250,6 +253,7 @@
       statusText = '记录中...'
       unlisten = await listen<CommitProgress>('commit-progress', (event) => {
         statusText = event.payload.message
+        commitProgressMsg = event.payload.message
       })
       const sel = commitSelection
       let files: string[] | null = null
@@ -306,6 +310,7 @@
       return false
     } finally {
       recording = false
+      commitProgressMsg = ''
       if (unlisten) unlisten()
     }
   }
@@ -389,6 +394,7 @@
     if (!activePath || rollbackBusy) return
     const wasRolledBack = !!rollbackState.rollback_point
     rollbackBusy = true
+    busyText = '回退中...'
     try {
       await api.rollback(activePath, entry.id)
       pushToast(
@@ -407,12 +413,14 @@
         pushToast(`回退失败: ${msg}`, 'error')
       }
     }
+    busyText = ''
     rollbackBusy = false
   }
 
   async function handleRestore() {
     if (!activePath) return
     rollbackBusy = true
+    busyText = '恢复中...'
     try {
       await api.restoreRollback(activePath)
       pushToast('已恢复回退前的状态', 'success')
@@ -426,6 +434,7 @@
         pushToast(`恢复失败: ${msg}`, 'error')
       }
     }
+    busyText = ''
     rollbackBusy = false
   }
 
@@ -678,7 +687,7 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} busy={recording} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} busy={recording} progress={commitProgressMsg} />
 {/if}
 
 {#if conflictFiles}
@@ -688,6 +697,10 @@
     onResolve={handleResolveConflict}
     onCancel={() => (conflictFiles = null)}
   />
+{/if}
+
+{#if busyText}
+  <BusyOverlay text={busyText} />
 {/if}
 
 {#if showCloseAsk}
