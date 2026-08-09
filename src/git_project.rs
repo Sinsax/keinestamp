@@ -156,9 +156,7 @@ pub fn rollback(project_root: &Path, entry_hash: &str) -> Result<()> {
     }
     run_git_output(project_root, &["rev-parse", "--verify", &format!("{}^0", entry_hash)])
         .map_err(|_| anyhow::anyhow!("记录不存在: {}", entry_hash))?;
-    let point = run_git_output(project_root, &["rev-parse", "--verify", &format!("{}^", entry_hash)])
-        .map(|s| s.trim().to_string())
-        .map_err(|_| anyhow::anyhow!("第一条记录无法回退，没有更早的状态"))?;
+    let point = entry_hash.to_string();
     let head = get_current_commit_hash(project_root)?;
 
     let dirty = run_git_output(project_root, &["status", "--porcelain"])?
@@ -773,7 +771,6 @@ mod tests {
         let dir = tmp_repo("rollback_roundtrip");
         std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
-        let first = get_current_commit_hash(&dir)?;
 
         std::fs::write(dir.join("a.txt"), b"v2")?;
         std::fs::write(dir.join("b.txt"), b"new")?;
@@ -782,9 +779,9 @@ mod tests {
 
         std::fs::write(dir.join("a.txt"), b"v3")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2", "回退到 second 应为 second 状态");
         let st = get_rollback_state(&dir)?;
-        assert_eq!(st.rollback_point.as_deref(), Some(first.as_str()));
+        assert_eq!(st.rollback_point.as_deref(), Some(second.as_str()));
         assert!(st.head_matches);
 
         restore_rollback(&dir)?;
@@ -808,7 +805,7 @@ mod tests {
 
         std::fs::write(dir.join("a.txt"), b"v3")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
 
         std::fs::write(dir.join("a.txt"), b"v1.5")?;
         assert!(restore_rollback(&dir).is_err(), "两边都改过应冲突");
@@ -836,7 +833,7 @@ mod tests {
 
         std::fs::write(dir.join("测试文件.txt"), b"v3")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v2");
         let st = get_rollback_state(&dir)?;
         assert!(st.rollback_point.is_some(), "应处于回退状态");
 
@@ -861,7 +858,7 @@ mod tests {
 
         std::fs::write(dir.join("测试文件.txt"), b"v3")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v2");
 
         std::fs::write(dir.join("测试文件.txt"), b"v1.5")?;
         assert!(restore_rollback(&dir).is_err(), "两边都改过应冲突");
@@ -930,8 +927,11 @@ mod tests {
         add_and_commit(&dir, "second")?;
         let second = get_current_commit_hash(&dir)?;
 
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        add_and_commit(&dir, "third")?;
+
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
         assert!(find_rollback_stash(&dir)?.is_none(), "干净工作区回退不应产生 stash");
 
         std::fs::write(dir.join("a.txt"), b"user-change")?;
@@ -962,7 +962,7 @@ mod tests {
         let second = get_current_commit_hash(&dir)?;
 
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
         assert!(find_rollback_stash(&dir)?.is_none());
 
         std::fs::write(dir.join("b.txt"), b"b2")?;
@@ -986,8 +986,11 @@ mod tests {
         add_and_commit(&dir, "second")?;
         let second = get_current_commit_hash(&dir)?;
 
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        add_and_commit(&dir, "third")?;
+
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
         assert!(find_rollback_stash(&dir)?.is_none(), "干净工作区回退不应产生 stash");
 
         std::fs::write(dir.join("a.txt"), b"user-change")?;
@@ -1021,7 +1024,7 @@ mod tests {
         std::fs::write(dir.join("a.txt"), b"v3")?;
         std::fs::write(dir.join("b.txt"), b"b2")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
         assert_eq!(std::fs::read(dir.join("b.txt"))?, b"b1");
         assert!(find_rollback_stash(&dir)?.is_some(), "脏工作区回退应产生 stash");
 
@@ -1053,7 +1056,7 @@ mod tests {
 
         std::fs::remove_file(dir.join("a.txt"))?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
         assert!(find_rollback_stash(&dir)?.is_some(), "删除文件的工作区回退应产生 stash");
 
         std::fs::write(dir.join("a.txt"), b"user-a")?;
@@ -1083,7 +1086,7 @@ mod tests {
 
         std::fs::write(dir.join("a.txt"), b"v3")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
 
         std::fs::write(dir.join("a.txt"), b"user")?;
         run_git(&dir, &["stash", "push", "-m", "some keinestamp-rollback mention"])?;
@@ -1112,7 +1115,7 @@ mod tests {
 
         std::fs::write(dir.join("a.txt"), b"v3")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
 
         run_git(&dir, &["update-index", "--skip-worktree", "a.txt"])?;
         restore_rollback(&dir)?;
@@ -1136,7 +1139,7 @@ mod tests {
         let second = get_current_commit_hash(&dir)?;
 
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
 
         let mut gi = std::fs::read_to_string(dir.join(".gitignore"))?;
         gi.push_str("cache/\n");
@@ -1176,17 +1179,24 @@ mod tests {
     }
 
     #[test]
-    fn test_rollback_first_entry_rejected() -> Result<()> {
+    fn test_rollback_first_entry() -> Result<()> {
         let dir = tmp_repo("rollback_first_entry");
         std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
         let first = get_current_commit_hash(&dir)?;
 
-        let err = rollback(&dir, &first).expect_err("第一条记录没有更早状态，应报错");
-        assert!(err.to_string().contains("第一条记录无法回退"), "err: {}", err);
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1", "回退首条记录 = 首条状态");
         let st = get_rollback_state(&dir)?;
-        assert!(st.rollback_point.is_none(), "不应留下回退状态");
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1", "工作区不应被改动");
+        assert_eq!(st.rollback_point.as_deref(), Some(first.as_str()));
+
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2", "恢复应回到回退前状态");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1197,23 +1207,24 @@ mod tests {
         let dir = tmp_repo("rollback_nested");
         std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
-        let first = get_current_commit_hash(&dir)?;
 
         std::fs::write(dir.join("a.txt"), b"v2")?;
         add_and_commit(&dir, "second")?;
         let second = get_current_commit_hash(&dir)?;
 
         std::fs::write(dir.join("a.txt"), b"v3")?;
-        rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        add_and_commit(&dir, "third")?;
 
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1", "再次回退应自动恢复后回到目标状态");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
+
+        rollback(&dir, &second)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2", "再次回退应自动恢复后回到目标状态");
         let st = get_rollback_state(&dir)?;
-        assert_eq!(st.rollback_point.as_deref(), Some(first.as_str()), "回退点应为 first");
+        assert_eq!(st.rollback_point.as_deref(), Some(second.as_str()), "回退点应为 second");
         assert!(st.head_matches);
         let stash_out = run_git_output(&dir, &["stash", "list"])?;
-        assert_eq!(stash_out.trim().lines().count(), 1, "自动恢复应 drop 旧 stash，回退应新建一个: {}", stash_out);
+        assert_eq!(stash_out.trim().lines().count(), 0, "干净工作区回退/恢复不应产生 stash: {}", stash_out);
 
         restore_rollback(&dir)?;
         assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3", "恢复应回到回退前状态");
@@ -1234,7 +1245,7 @@ mod tests {
 
         std::fs::write(dir.join("a.txt"), b"same")?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
 
         std::fs::write(dir.join("a.txt"), b"same")?;
         restore_rollback(&dir)?;
@@ -1258,7 +1269,7 @@ mod tests {
 
         std::fs::remove_file(dir.join("a.txt"))?;
         rollback(&dir, &second)?;
-        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v2");
 
         std::fs::remove_file(dir.join("a.txt"))?;
         restore_rollback(&dir)?;
@@ -1275,13 +1286,13 @@ mod tests {
         let dir = tmp_repo("rollback_keep_file");
         std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
 
         std::fs::write(dir.join("b.txt"), b"b1")?;
         add_and_commit(&dir, "second")?;
-        let second = get_current_commit_hash(&dir)?;
 
-        rollback(&dir, &second)?;
-        assert!(!dir.join("b.txt").exists(), "回退后 b.txt 应从工作区移除");
+        rollback(&dir, &first)?;
+        assert!(!dir.join("b.txt").exists(), "回退到 first 后 b.txt（second 新增）应从工作区移除");
         assert!(run_git_output(&dir, &["ls-files", "--error-unmatch", "b.txt"]).is_err(), "回退后 b.txt 不在 index");
 
         keep_rollback_file(&dir, "b.txt")?;
@@ -1315,13 +1326,13 @@ mod tests {
         let dir = tmp_repo("rollback_untrack_ignored");
         std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
 
         std::fs::write(dir.join("x.txt"), b"x1")?;
         add_and_commit(&dir, "second")?;
-        let second = get_current_commit_hash(&dir)?;
 
-        rollback(&dir, &second)?;
-        assert!(!dir.join("x.txt").exists(), "回退后 x.txt 应从工作区移除");
+        rollback(&dir, &first)?;
+        assert!(!dir.join("x.txt").exists(), "回退到 first 后 x.txt（second 新增）应从工作区移除");
 
         let mut gi = std::fs::read_to_string(dir.join(".gitignore")).unwrap_or_default();
         gi.push_str("x.txt\n");

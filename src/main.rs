@@ -187,11 +187,11 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
     keinestamp::git_project::ensure_git_user(&meta.project_root)?;
     keinestamp::git_project::lfs_auto_configure(&meta.project_root)?;
 
-    // 回退状态下记录 = 顶替回退点之后的记录（HEAD 移回回退点再提交）
+    // 回退状态下记录 = 顶替回退点及之后的记录（HEAD 移回回退记录的父提交再提交）
     let rollback_point = keinestamp::git_project::get_rollback_point_hash(&meta.project_root)?;
     if let Some(ref point) = rollback_point {
-        eprintln!("[debug] cmd_record: rollback state, reset --soft to {}", point);
-        keinestamp::git_project::reset_soft_to(&meta.project_root, point)?;
+        eprintln!("[debug] cmd_record: rollback state, reset --soft to {}^", point);
+        keinestamp::git_project::reset_soft_to(&meta.project_root, &format!("{}^", point))?;
     }
 
     let hash = keinestamp::git_project::add_and_commit(&meta.project_root, message)?;
@@ -339,12 +339,7 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
             return Err(e);
         }
     }
-    let is_first = tl.entries.first().map(|e| e.id == full).unwrap_or(false);
-    if is_first {
-        println!("已回退到初始化状态（项目文件已从工作区移除，可用 restore 还原）");
-    } else {
-        println!("已回退到记录 {} 之前（该记录内容已撤销，可重新修改后记录；可用 restore 恢复）", &full[..7.min(full.len())]);
-    }
+    println!("已回退到记录 {}（文件已还原为该记录的内容，可修改后记录；可用 restore 恢复）", &full[..7.min(full.len())]);
     Ok(())
 }
 

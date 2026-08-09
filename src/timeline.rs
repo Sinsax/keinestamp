@@ -104,7 +104,7 @@ pub fn remove_entries_after(path: &Path, entry_id: &str) -> Result<()> {
     eprintln!("[debug] remove_entries_after: {:?}, id={}", path, entry_id);
     let mut timeline = read_timeline(path)?;
     let start = match timeline.entries.iter().position(|e| e.id == entry_id || e.id.starts_with(entry_id)) {
-        Some(pos) => pos + 1,
+        Some(pos) => pos,
         None => 0,
     };
     if start < timeline.entries.len() {

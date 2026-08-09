@@ -131,18 +131,22 @@ fn test_cli_rollback_and_restore() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "second"]);
     assert!(ok, "second record failed: {}", out);
 
+    std::fs::write(dir.join("test.blend"), b"v3").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "third"]);
+    assert!(ok, "third record failed: {}", out);
+
     let timeline = keinestamp::timeline::read_timeline(&dir.join("web-timeline").join("timeline.json")).unwrap();
     let second_id = timeline.entries.get(1).unwrap().id.clone();
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &second_id[..7]]);
     assert!(ok, "rollback failed: {}", out);
     assert!(out.contains("已回退"));
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1");
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退到 second 应为 second 状态");
 
     let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
     assert!(ok, "restore failed: {}", out);
     assert!(out.contains("已恢复"));
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2");
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v3", "恢复应回到回退前状态");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -168,7 +172,7 @@ fn test_cli_rollback_then_record_replaces() {
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
     assert!(ok, "rollback failed: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1");
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退到 B 应为 B 状态");
 
     std::fs::write(dir.join("test.blend"), b"v3").unwrap();
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
@@ -189,7 +193,7 @@ fn test_cli_rollback_then_record_replaces() {
 }
 
 #[test]
-fn test_cli_rollback_first_entry_to_init() {
+fn test_cli_rollback_first_entry() {
     let dir = tmp_dir("cli_rollback_first");
     let (out, ok) = run(&["init", &dir.to_string_lossy()]);
     assert!(ok, "init failed: {}", out);
@@ -208,8 +212,8 @@ fn test_cli_rollback_first_entry_to_init() {
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &a_id[..7]]);
     assert!(ok, "rollback first failed: {}", out);
-    assert!(out.contains("初始化状态"), "应提示回到初始化状态: {}", out);
-    assert!(!dir.join("test.blend").exists(), "回退到 init 后项目文件应从工作区移除");
+    assert!(out.contains("已回退"), "应提示已回退: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1", "回退首条记录 = 首条状态");
 
     std::fs::write(dir.join("test.blend"), b"v3").unwrap();
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
@@ -242,16 +246,16 @@ fn test_cli_rollback_while_in_rollback_auto_restores() {
 
     let tl_path = dir.join("web-timeline").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    let a_id = timeline.entries[0].id.clone();
     let b_id = timeline.entries[1].id.clone();
-    let c_id = timeline.entries[2].id.clone();
-
-    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &c_id[..7]]);
-    assert!(ok, "rollback C failed: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 C 后应为 B 状态");
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
-    assert!(ok, "回退状态下再回退 B 应自动恢复后回退: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1", "回退 B 后应为 A 状态");
+    assert!(ok, "rollback B failed: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 B 后应为 B 状态");
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &a_id[..7]]);
+    assert!(ok, "回退状态下再回退 A 应自动恢复后回退: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1", "回退 A 后应为 A 状态");
 
     let st = keinestamp::git_project::get_rollback_state(&dir).unwrap();
     assert_eq!(st.rollback_point.as_deref(), Some(timeline.entries[0].id.as_str()), "回退点应为 A");
@@ -289,7 +293,7 @@ fn test_cli_rollback_conflict_aborts_chain() {
     std::fs::write(dir.join("test.blend"), b"v3.5").unwrap();
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &c_id[..7]]);
     assert!(ok, "rollback C (dirty) failed: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 C 后应为 B 状态");
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v3", "回退 C 后应为 C 状态");
 
     std::fs::write(dir.join("test.blend"), b"v2.5").unwrap();
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
