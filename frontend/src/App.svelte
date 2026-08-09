@@ -13,8 +13,10 @@
   import CloseBehaviorDialog from './lib/CloseBehaviorDialog.svelte'
   import InputDialog from './lib/InputDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
+  import RollbackDialog from './lib/RollbackDialog.svelte'
+  import ConflictDialog from './lib/ConflictDialog.svelte'
   import Toast from './lib/Toast.svelte'
-  import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress } from './types'
+  import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState, RollbackChoice } from './types'
   import * as api from './api'
   import { openFolder } from './api'
   import { open } from '@tauri-apps/plugin-dialog'
@@ -52,7 +54,11 @@
   let siteLocked = $state(false)
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let commitSelection = $state<string[] | null>(null)
-  let canRestore = $state(false)
+  let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false })
+  let showRollbackConfirm = $state(false)
+  let rollbackBusy = $state(false)
+  let conflictFiles = $state<string[] | null>(null)
+  let resolvingConflict = $state(false)
   let deploying = $state(false)
   let recording = $state(false)
   let loadSeq = 0
@@ -174,6 +180,7 @@
     const seq = ++loadSeq
     activePath = normalizePath(path)
     if (!preserveSelection) commitSelection = null
+    rollbackState = { rollback_point: null, head_matches: false }
     try {
       const pt = await api.detect(path)
       if (seq !== loadSeq) return
@@ -185,7 +192,6 @@
         accessToken = cfg.access_token || ''
         siteName = cfg.site_name || ''
         siteLocked = cfg.site_locked
-        canRestore = await api.canRestoreRevert(path)
         if (seq !== loadSeq) return
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
         refreshDeployStatus()
@@ -200,6 +206,7 @@
       }
       if (seq !== loadSeq) return
       statusText = `${path.split(/[/\\]/).pop() || path} — ${pt}`
+      await refreshRollbackState()
     } catch (e: any) {
       if (seq !== loadSeq) return
       statusText = `Error: ${e}`
@@ -366,27 +373,85 @@
     }
   }
 
-  async function handleRevert() {
-    statusText = 'Reverting...'
+  async function refreshRollbackState() {
+    if (!activePath || projectType !== 'initialized') return
     try {
-      await api.revert(activePath)
-      pushToast('已撤回上次记录（文件保留在工作区）', 'success')
+      rollbackState = await api.getRollbackState(activePath)
+    } catch { /* ignore */ }
+  }
+
+  const canRestore = $derived(rollbackState.head_matches)
+
+  async function handleRollback(entry: TimelineEntry) {
+    if (!activePath || rollbackBusy) return
+    rollbackBusy = true
+    try {
+      await api.rollback(activePath, entry.id)
+      pushToast(`已回退到记录 ${entry.id.slice(0, 7)}（文件已还原）`, 'success')
       await loadProject(activePath)
+      await refreshRollbackState()
     } catch (e: any) {
-      pushToast(`Revert: ${e}`, 'error')
-      statusText = 'Revert skipped'
+      pushToast(`回退失败: ${e}`, 'error')
+    }
+    rollbackBusy = false
+  }
+
+  async function handleRestoreConfirm() {
+    showRollbackConfirm = false
+    if (!activePath) return
+    rollbackBusy = true
+    try {
+      await api.restoreRollback(activePath)
+      pushToast('已恢复回退前的状态', 'success')
+      await loadProject(activePath)
+      await refreshRollbackState()
+    } catch (e: any) {
+      const msg = String(e)
+      if (msg.startsWith('CONFLICT|')) {
+        await loadConflictFiles()
+      } else {
+        pushToast(`恢复失败: ${msg}`, 'error')
+      }
+    }
+    rollbackBusy = false
+  }
+
+  async function loadConflictFiles() {
+    if (!activePath) return
+    try {
+      conflictFiles = await api.getRollbackConflicts(activePath)
+    } catch (e: any) {
+      pushToast(`读取冲突失败: ${e}`, 'error')
+      conflictFiles = null
     }
   }
 
-  async function handleRestore() {
-    statusText = '恢复中...'
+  async function handleResolveConflict(choices: RollbackChoice[]) {
+    if (!activePath) return
+    resolvingConflict = true
     try {
-      await api.restoreRevert(activePath)
-      pushToast('已恢复上次撤回的记录', 'success')
+      await api.resolveRollbackConflicts(activePath, choices)
+      pushToast('冲突已解决，已恢复', 'success')
+      conflictFiles = null
       await loadProject(activePath)
+      await refreshRollbackState()
     } catch (e: any) {
-      pushToast(`恢复失败: ${e}`, 'error')
-      statusText = '恢复失败'
+      pushToast(`完成恢复失败: ${e}`, 'error')
+    }
+    resolvingConflict = false
+  }
+
+  async function handleExportEntry(entry: TimelineEntry) {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择导出位置',
+    })
+    if (!selected) return
+    pendingExport = {
+      parentDir: normalizePath(selected),
+      defaultName: 'export_' + entry.id.slice(0, 7),
+      entryId: entry.id,
     }
   }
 
@@ -438,25 +503,6 @@
     }
   }
 
-  async function handleExport() {
-    if (!selectedEntryId) {
-      pushToast('Select an entry first', 'info')
-      return
-    }
-    const entryId = selectedEntryId
-    const selected = await open({
-      directory: true,
-      multiple: false,
-      title: '选择导出位置',
-    })
-    if (!selected) return
-    pendingExport = {
-      parentDir: normalizePath(selected),
-      defaultName: 'export_' + entryId.slice(0, 7),
-      entryId,
-    }
-  }
-
   async function confirmExport(name: string) {
     const state = pendingExport
     pendingExport = null
@@ -478,6 +524,7 @@
       if (activePath && projectType === 'initialized') {
         refreshStatus()
         loadTrackedFiles(activePath)
+        refreshRollbackState()
       }
     }, 3000)
     return () => {
@@ -563,6 +610,16 @@
           <div class="timeline-panel" style="width: {timelineWidth}px">
             <div class="tl-header">
               <span class="tl-title">时间线</span>
+              {#if rollbackState.rollback_point}
+                <button
+                  class="tl-restore-btn"
+                  onclick={() => (showRollbackConfirm = true)}
+                  disabled={!rollbackState.head_matches || rollbackBusy}
+                  title={rollbackState.head_matches ? '恢复回退前的状态' : '回退后已有新记录，无法恢复'}
+                >
+                  恢复
+                </button>
+              {/if}
               <button class="tl-local-btn" onclick={handleLocalView} title="在浏览器中打开本地时间线页面">
                 本地查看
               </button>
@@ -581,6 +638,10 @@
               onOpenSite={handleOpenSite}
               onOpenLocalView={handleLocalView}
               onMilestoneChange={() => loadProject(activePath, true)}
+              rollbackPoint={rollbackState.rollback_point}
+              onExportEntry={handleExportEntry}
+              onRollback={handleRollback}
+              rollbackBusy={rollbackBusy}
             />
           </div>
         {/if}
@@ -589,15 +650,11 @@
       <ActionBar
         {projectType}
         onRecord={() => showCommit = true}
-        onExport={handleExport}
-        onRevert={handleRevert}
-        onRestore={handleRestore}
         onDeploy={handleDeploy}
         {connected}
         {deployAhead}
         {deployTip}
-        {canRestore}
-        busy={deploying || recording}
+        busy={deploying || recording || rollbackBusy}
       />
 
       <StatusBar
@@ -612,6 +669,19 @@
 
 {#if showCommit}
   <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} busy={recording} />
+{/if}
+
+{#if showRollbackConfirm}
+  <RollbackDialog onConfirm={handleRestoreConfirm} onCancel={() => (showRollbackConfirm = false)} />
+{/if}
+
+{#if conflictFiles}
+  <ConflictDialog
+    conflicts={conflictFiles}
+    busy={resolvingConflict}
+    onResolve={handleResolveConflict}
+    onCancel={() => (conflictFiles = null)}
+  />
 {/if}
 
 {#if showCloseAsk}
@@ -696,6 +766,24 @@
   .tl-local-btn:hover {
     background: var(--accent);
     color: #fff;
+  }
+  .tl-restore-btn {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 6px;
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+    cursor: pointer;
+    margin-right: 8px;
+  }
+  .tl-restore-btn:hover:not(:disabled) {
+    background: var(--accent);
+    color: #fff;
+  }
+  .tl-restore-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
   .toolbar-icon {
     background: none;
