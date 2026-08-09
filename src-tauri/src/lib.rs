@@ -39,22 +39,9 @@ fn detect(path: String) -> Result<String, String> {
 fn init_project(path: String) -> Result<keinestamp::config::MetaConfig, String> {
     eprintln!("[debug] init_project({})", path);
     let p = PathBuf::from(&path);
-    let is_already_init = matches!(
-        keinestamp::detect::detect_project(&p),
-        Ok(keinestamp::detect::ProjectType::Initialized(_))
-    );
     map_err(keinestamp::init::init_project(&p))?;
     let meta_path = keinestamp::config::meta_path(&p);
     let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    if !is_already_init {
-        eprintln!("[debug] init_project: first init, committing config files");
-        map_err(keinestamp::git_project::ensure_git_user(&meta.project_root))?;
-        map_err(keinestamp::git_project::stage_files_and_commit(
-            &meta.project_root,
-            &[".gitignore", ".gitattributes"],
-            "init",
-        ))?;
-    }
     keinestamp::recent::RecentProjects::add_path(&p);
     eprintln!("[debug] init_project → ok, project_root={}", meta.project_root.display());
     map_err(keinestamp::config::read_meta(&meta_path))
