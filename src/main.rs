@@ -313,7 +313,7 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
         .map(|e| e.id.clone())
         .ok_or_else(|| anyhow::anyhow!("记录不存在: {}", entry))?;
     keinestamp::git_project::rollback(&meta.project_root, &full)?;
-    println!("已回退到记录 {}（文件已还原，最新状态已暂存，可用 restore 恢复）", &full[..7.min(full.len())]);
+    println!("已回退到记录 {} 之前（该记录内容已撤销，可重新修改后记录；可用 restore 恢复）", &full[..7.min(full.len())]);
     Ok(())
 }
 

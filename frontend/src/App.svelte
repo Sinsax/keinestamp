@@ -384,8 +384,8 @@
     if (!activePath || rollbackBusy) return
     rollbackBusy = true
     try {
-      await api.rollback(activePath, entry.id)
-      pushToast(`已回退到记录 ${entry.id.slice(0, 7)}（文件已还原）`, 'success')
+    await api.rollback(activePath, entry.id)
+    pushToast(`已回退到记录 ${entry.id.slice(0, 7)} 之前，可重新修改后记录`, 'success')
       await loadProject(activePath)
       await refreshRollbackState()
     } catch (e: any) {

@@ -131,9 +131,9 @@ fn test_cli_rollback_and_restore() {
     assert!(ok, "second record failed: {}", out);
 
     let timeline = keinestamp::timeline::read_timeline(&dir.join("web-timeline").join("timeline.json")).unwrap();
-    let first_id = timeline.entries.first().unwrap().id.clone();
+    let second_id = timeline.entries.get(1).unwrap().id.clone();
 
-    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &first_id[..7]]);
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &second_id[..7]]);
     assert!(ok, "rollback failed: {}", out);
     assert!(out.contains("已回退"));
     assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1");
