@@ -20,13 +20,16 @@
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog conflict-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
     <h3>恢复冲突</h3>
-    <p class="conflict-hint">以下文件在回退期间被修改且与最新状态冲突，请为每个文件选择保留的版本：</p>
+    <p class="conflict-hint">以下文件在回退期间被修改且与回退前状态冲突，请为每个文件选择保留的版本：</p>
+    <p class="conflict-sub">
+      回退期间修改 = 回退状态下你继续编辑的内容；回退前状态 = 回退前暂存的最新进度
+    </p>
     {#each conflicts as f}
       <div class="conflict-row">
         <span class="conflict-path" title={f}>{f}</span>
         <div class="conflict-opts">
-          <button class:active={choices[f] !== 'latest'} onclick={() => (choices[f] = 'current')}>当前版本</button>
-          <button class:active={choices[f] === 'latest'} onclick={() => (choices[f] = 'latest')}>最新版本</button>
+          <button class:active={choices[f] !== 'latest'} onclick={() => (choices[f] = 'current')}>回退期间修改</button>
+          <button class:active={choices[f] === 'latest'} onclick={() => (choices[f] = 'latest')}>回退前状态</button>
         </div>
       </div>
     {/each}
@@ -47,6 +50,12 @@
   .conflict-hint {
     font-size: 12px;
     color: var(--text-dim);
+    margin-bottom: 6px;
+  }
+  .conflict-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    opacity: 0.8;
     margin-bottom: 12px;
   }
   .conflict-row {

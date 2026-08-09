@@ -13,7 +13,6 @@
   import CloseBehaviorDialog from './lib/CloseBehaviorDialog.svelte'
   import InputDialog from './lib/InputDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
-  import RollbackDialog from './lib/RollbackDialog.svelte'
   import ConflictDialog from './lib/ConflictDialog.svelte'
   import Toast from './lib/Toast.svelte'
   import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState, RollbackChoice } from './types'
@@ -55,7 +54,6 @@
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let commitSelection = $state<string[] | null>(null)
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false })
-  let showRollbackConfirm = $state(false)
   let rollbackBusy = $state(false)
   let conflictFiles = $state<string[] | null>(null)
   let resolvingConflict = $state(false)
@@ -396,8 +394,7 @@
     rollbackBusy = false
   }
 
-  async function handleRestoreConfirm() {
-    showRollbackConfirm = false
+  async function handleRestore() {
     if (!activePath) return
     rollbackBusy = true
     try {
@@ -610,16 +607,18 @@
           <div class="timeline-panel" style="width: {timelineWidth}px">
             <div class="tl-header">
               <span class="tl-title">时间线</span>
-              {#if rollbackState.rollback_point}
-                <button
-                  class="tl-restore-btn"
-                  onclick={() => (showRollbackConfirm = true)}
-                  disabled={!rollbackState.head_matches || rollbackBusy}
-                  title={rollbackState.head_matches ? '恢复回退前的状态' : '回退后已有新记录，无法恢复'}
-                >
-                  恢复
-                </button>
-              {/if}
+              <button
+                class="tl-restore-btn"
+                onclick={handleRestore}
+                disabled={!rollbackState.rollback_point || !rollbackState.head_matches || rollbackBusy}
+                title={!rollbackState.rollback_point
+                  ? '没有可恢复的回退'
+                  : rollbackState.head_matches
+                    ? '恢复回退前的状态'
+                    : '回退后已有新记录，无法恢复'}
+              >
+                恢复
+              </button>
               <button class="tl-local-btn" onclick={handleLocalView} title="在浏览器中打开本地时间线页面">
                 本地查看
               </button>
@@ -669,10 +668,6 @@
 
 {#if showCommit}
   <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} busy={recording} />
-{/if}
-
-{#if showRollbackConfirm}
-  <RollbackDialog onConfirm={handleRestoreConfirm} onCancel={() => (showRollbackConfirm = false)} />
 {/if}
 
 {#if conflictFiles}
