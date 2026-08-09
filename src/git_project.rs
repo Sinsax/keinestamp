@@ -181,6 +181,15 @@ pub struct RollbackState {
     pub head_matches: bool,
 }
 
+pub fn get_rollback_point_hash(project_root: &Path) -> Result<Option<String>> {
+    Ok(get_rollback_state(project_root)?.rollback_point)
+}
+
+pub fn reset_soft_to(project_root: &Path, target: &str) -> Result<()> {
+    eprintln!("[debug] reset_soft_to: root={:?}, target={}", project_root, target);
+    run_git(project_root, &["reset", "--soft", target])
+}
+
 pub fn get_rollback_state(project_root: &Path) -> Result<RollbackState> {
     let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])
         .ok()

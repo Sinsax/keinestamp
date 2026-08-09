@@ -147,6 +147,46 @@ fn test_cli_rollback_and_restore() {
 }
 
 #[test]
+fn test_cli_rollback_then_record_replaces() {
+    let dir = tmp_dir("cli_rollback_record");
+    let (out, ok) = run(&["init", &dir.to_string_lossy()]);
+    assert!(ok, "init failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v1").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "A"]);
+    assert!(ok, "record A failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v2").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
+    assert!(ok, "record B failed: {}", out);
+
+    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    let a_id = timeline.entries[0].id.clone();
+    let b_id = timeline.entries[1].id.clone();
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
+    assert!(ok, "rollback failed: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1");
+
+    std::fs::write(dir.join("test.blend"), b"v3").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
+    assert!(ok, "record C failed: {}", out);
+
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    assert_eq!(timeline.entries.len(), 2, "B 应被顶替: {:?}", timeline.entries.iter().map(|e| &e.message).collect::<Vec<_>>());
+    assert_eq!(timeline.entries[0].id, a_id, "A 应保留");
+    assert_eq!(timeline.entries[1].message, "C", "新记录 C 应接替 B");
+
+    let log_out = keinestamp::git_project::log(&dir, 10).unwrap();
+    assert!(!log_out.contains("B"), "git 历史不应再有 B: {}", log_out);
+    assert!(log_out.contains("C"), "git 历史应包含 C: {}", log_out);
+    assert_eq!(log_out.lines().count(), 2, "git 历史应为 A → C: {}", log_out);
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn test_export_with_real_hash() {
     let dir = tmp_dir("export_real");
     let (out, ok) = run(&["init", &dir.to_string_lossy()]);

@@ -89,10 +89,19 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
 
         map_err(keinestamp::git_project::ensure_git_user(&meta.project_root))?;
         map_err(keinestamp::git_project::lfs_auto_configure(&meta.project_root))?;
+        // 回退状态下记录 = 顶替回退点之后的记录（HEAD 移回回退点再提交）
+        let rollback_point = map_err(keinestamp::git_project::get_rollback_point_hash(&meta.project_root))?;
+        if let Some(ref point) = rollback_point {
+            eprintln!("[debug] record: rollback state, reset --soft to {}", point);
+            map_err(keinestamp::git_project::reset_soft_to(&meta.project_root, point))?;
+        }
         let hash: String = match files {
             Some(f) => map_err(keinestamp::git_project::add_and_commit_files(&meta.project_root, &f, &message))?,
             None => map_err(keinestamp::git_project::add_and_commit(&meta.project_root, &message))?,
         };
+        if let Some(ref point) = rollback_point {
+            map_err(keinestamp::timeline::remove_entries_after(&meta.web_root.join("timeline.json"), point))?;
+        }
         let _ = keinestamp::git_project::clear_rollback(&meta.project_root);
         let short_hash = hash[..7].to_string();
 

@@ -75,7 +75,7 @@
     {#if canRestore}
       <div class="restore-warn">
         <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10z"/><path d="M7.2 4.6h1.6v4.4H7.2zM7.2 10.4h1.6v1.2H7.2z"/></svg>
-        <span>回退未恢复，继续记录将无法再恢复</span>
+        <span>回退状态下记录将顶替被回退的记录（原记录被新记录取代）</span>
       </div>
     {/if}
     <div class="field">

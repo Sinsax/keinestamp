@@ -180,14 +180,25 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
 
     if let Ok(rs) = keinestamp::git_project::get_rollback_state(&meta.project_root) {
         if rs.rollback_point.is_some() && rs.head_matches {
-            eprintln!("⚠️ 注意：当前处于回退状态，记录后将无法恢复回退前的状态");
+            eprintln!("⚠️ 注意：当前处于回退状态，记录后将顶替被回退的记录（原记录被新记录取代）");
         }
     }
 
     keinestamp::git_project::ensure_git_user(&meta.project_root)?;
     keinestamp::git_project::lfs_auto_configure(&meta.project_root)?;
 
+    // 回退状态下记录 = 顶替回退点之后的记录（HEAD 移回回退点再提交）
+    let rollback_point = keinestamp::git_project::get_rollback_point_hash(&meta.project_root)?;
+    if let Some(ref point) = rollback_point {
+        eprintln!("[debug] cmd_record: rollback state, reset --soft to {}", point);
+        keinestamp::git_project::reset_soft_to(&meta.project_root, point)?;
+    }
+
     let hash = keinestamp::git_project::add_and_commit(&meta.project_root, message)?;
+
+    if let Some(ref point) = rollback_point {
+        keinestamp::timeline::remove_entries_after(&meta.web_root.join("timeline.json"), point)?;
+    }
 
     let short_hash = &hash[..7.min(hash.len())];
     let timestamp = chrono::Utc::now().to_rfc3339();
