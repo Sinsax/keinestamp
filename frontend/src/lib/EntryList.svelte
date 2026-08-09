@@ -83,7 +83,7 @@
   function isDimmed(index: number): boolean {
     if (!rollbackPoint) return false
     if (rollbackIndex < 0) return true
-    return index < rollbackIndex
+    return index <= rollbackIndex
   }
 
   let editingToken = $state(false)

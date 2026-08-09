@@ -393,8 +393,8 @@
       await api.rollback(activePath, entry.id)
       pushToast(
         wasRolledBack
-          ? `已自动恢复并回退到记录 ${entry.id.slice(0, 7)}，可修改后记录`
-          : `已回退到记录 ${entry.id.slice(0, 7)}（文件已还原为该记录的内容），可修改后记录`,
+          ? `已自动恢复并回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本）`
+          : `已回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本，可修改后记录）`,
         'success'
       )
       await loadProject(activePath)

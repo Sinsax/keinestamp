@@ -339,7 +339,7 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
             return Err(e);
         }
     }
-    println!("已回退到记录 {}（文件已还原为该记录的内容，可修改后记录；可用 restore 恢复）", &full[..7.min(full.len())]);
+    println!("已回退到记录 {} 之前（文件保留该记录的版本，可修改后记录；可用 restore 恢复）", &full[..7.min(full.len())]);
     Ok(())
 }
 
