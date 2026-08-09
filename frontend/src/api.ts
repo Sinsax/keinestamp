@@ -45,6 +45,10 @@ export async function getRollbackConflicts(path: string): Promise<string[]> {
   return invoke<string[]>('get_rollback_conflicts', { path })
 }
 
+export async function keepRollbackFile(path: string, file: string): Promise<void> {
+  return invoke<void>('keep_rollback_file', { path, file })
+}
+
 export async function resolveRollbackConflicts(path: string, choices: RollbackChoice[]): Promise<void> {
   return invoke<void>('resolve_rollback_conflicts', { path, choices })
 }

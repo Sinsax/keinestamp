@@ -118,6 +118,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `get_rollback_state` | `{rollback_point, head_matches}` | rollback_point null = 无回退状态; head_matches = HEAD 仍停在回退前 (回退后新记录则为 false, 无法恢复) |
 | `restore_rollback` | `()` | 恢复回退前状态 (三向合并); 冲突时返回 `CONFLICT|<files…>` 错误, 前端弹逐文件二选一 |
 | `get_rollback_conflicts` | `String[]` | 未解决冲突文件列表 (`git diff --diff-filter=U`) |
+| `keep_rollback_file` | `()` | 回退状态下保留被回退记录删除的文件 (`git restore --source=<回退前HEAD> --staged --worktree -- <path>`, 取消删除差异; 仅回退状态 + HEAD 有/回退点无的文件) |
 | `resolve_rollback_conflicts` | `()` | choices: `[path, "current"\|"latest"]` 逐文件二选一; 全部解决后 drop stash + 清 refs |
 | `status` | `{clean, output}` | |
 | `log` | `LogEntry[]` | timeline entries (short hash/date/message) |

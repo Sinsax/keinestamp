@@ -445,6 +445,28 @@ pub fn clear_rollback(project_root: &Path) -> Result<()> {
     clear_rollback_refs(project_root)
 }
 
+pub fn keep_rollback_file(project_root: &Path, path: &str) -> Result<()> {
+    eprintln!("[debug] keep_rollback_file: root={:?}, path={}", project_root, path);
+    let st = get_rollback_state(project_root)?;
+    st.rollback_point
+        .ok_or_else(|| anyhow::anyhow!("不在回退状态，无法保留文件"))?;
+    let head = get_current_commit_hash(project_root)?;
+    // 仅处理"回退前 HEAD 有、回退点没有"的删除差异文件
+    run_git_output(project_root, &["rev-parse", "--verify", &format!("{}:{}", head, path)])
+        .map_err(|_| anyhow::anyhow!("文件在回退前状态不存在，无需保留"))?;
+    let in_index = run_git_output(project_root, &["ls-files", "--error-unmatch", path]).is_ok();
+    if in_index {
+        anyhow::bail!("文件已在项目中，无需保留");
+    }
+    // 从回退前 HEAD 恢复文件（index + 工作区），D 差异消失
+    run_git(
+        project_root,
+        &["restore", "--source", &head, "--staged", "--worktree", "--", path],
+    )?;
+    eprintln!("[debug] keep_rollback_file → ok");
+    Ok(())
+}
+
 fn get_current_branch(project_root: &Path) -> Result<String> {
     let branch = run_git_output(project_root, &["rev-parse", "--abbrev-ref", "HEAD"])?;
     Ok(branch.trim().to_string())
@@ -1169,6 +1191,46 @@ mod tests {
         assert!(!dir.join("a.txt").exists(), "两边都删除应保持删除");
         let st = get_rollback_state(&dir)?;
         assert!(st.rollback_point.is_none());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_keep_rollback_file() -> Result<()> {
+        let dir = tmp_repo("rollback_keep_file");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+
+        std::fs::write(dir.join("b.txt"), b"b1")?;
+        add_and_commit(&dir, "second")?;
+        let second = get_current_commit_hash(&dir)?;
+
+        rollback(&dir, &second)?;
+        assert!(!dir.join("b.txt").exists(), "回退后 b.txt 应从工作区移除");
+        assert!(run_git_output(&dir, &["ls-files", "--error-unmatch", "b.txt"]).is_err(), "回退后 b.txt 不在 index");
+
+        keep_rollback_file(&dir, "b.txt")?;
+        assert_eq!(std::fs::read(dir.join("b.txt"))?, b"b1", "保留后文件应回到工作区");
+        assert!(run_git_output(&dir, &["ls-files", "--error-unmatch", "b.txt"]).is_ok(), "保留后 b.txt 应在 index");
+        let status = status(&dir)?;
+        assert!(!status.contains("D b.txt"), "保留后不应再显示删除差异: {}", status);
+
+        let err = keep_rollback_file(&dir, "a.txt").expect_err("已在项目中的文件应报错");
+        assert!(err.to_string().contains("无需保留"), "err: {}", err);
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_keep_rollback_file_outside_rollback() -> Result<()> {
+        let dir = tmp_repo("rollback_keep_no_state");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+
+        let err = keep_rollback_file(&dir, "a.txt").expect_err("非回退状态应报错");
+        assert!(err.to_string().contains("不在回退状态"), "err: {}", err);
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())

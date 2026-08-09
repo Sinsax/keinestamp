@@ -2,7 +2,7 @@
   import { parseStatus, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
-  import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore } from '../api'
+  import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore, keepRollbackFile } from '../api'
 
   let {
     statusOutput,
@@ -10,6 +10,7 @@
     activePath = '',
     selection = null,
     statusError = false,
+    rollbackActive = false,
     onSelectionChange = (_sel: string[] | null) => {},
   }: {
     statusOutput: string
@@ -17,6 +18,7 @@
     activePath?: string
     selection?: string[] | null
     statusError?: boolean
+    rollbackActive?: boolean
     onSelectionChange?: (sel: string[] | null) => void
   } = $props()
 
@@ -361,6 +363,24 @@
       console.error('remove ignore failed', e)
     }
   }
+
+  async function menuKeepFile() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu || !activePath) return
+    try {
+      await keepRollbackFile(activePath, menu.path)
+      onRefresh()
+    } catch (e) {
+      console.error('keep file failed', e)
+    }
+  }
+
+  function isDeletedInRollback(path: string): boolean {
+    if (!rollbackActive) return false
+    const st = statusOf(path)
+    return !!st && (st.x === 'D' || st.y === 'D')
+  }
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
@@ -422,6 +442,9 @@
       <button onclick={menuCopyPath}>复制路径</button>
       <button onclick={menuCopyName}>复制名称</button>
       <div class="ctx-sep"></div>
+      {#if isDeletedInRollback(contextMenu.path) && !contextMenu.isDir}
+        <button onclick={menuKeepFile} title="回退状态下保留该文件（从回退前状态恢复）">保留文件</button>
+      {/if}
       {#if isIgnored(contextMenu.path)}
         <button onclick={menuUnignore}>取消忽略</button>
       {:else if contextMenu.isDir}

@@ -633,6 +633,16 @@ fn get_rollback_conflicts(path: String) -> Result<Vec<String>, String> {
 }
 
 #[tauri::command]
+fn keep_rollback_file(path: String, file: String) -> Result<(), String> {
+    eprintln!("[debug] keep_rollback_file({}, {})", path, file);
+    validate_entry(&file)?;
+    let p = PathBuf::from(&path);
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    map_err(keinestamp::git_project::keep_rollback_file(&meta.project_root, &file))
+}
+
+#[tauri::command]
 async fn resolve_rollback_conflicts(path: String, choices: Vec<Vec<String>>) -> Result<(), String> {
     eprintln!("[debug] resolve_rollback_conflicts({}, {} files)", path, choices.len());
     let handle = tokio::task::spawn_blocking(move || {
@@ -1205,6 +1215,7 @@ pub fn run() {
             get_rollback_state,
             restore_rollback,
             get_rollback_conflicts,
+            keep_rollback_file,
             resolve_rollback_conflicts,
             status,
             log,
