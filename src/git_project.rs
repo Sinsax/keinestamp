@@ -181,7 +181,7 @@ pub fn get_rollback_state(project_root: &Path) -> Result<RollbackState> {
 }
 
 fn rollback_stash_files(project_root: &Path, point: &str, stash_ref: &str) -> Vec<String> {
-    run_git_output(project_root, &["diff", "--name-only", point, stash_ref])
+    run_git_output(project_root, &["-c", "core.quotepath=false", "diff", "--name-only", point, stash_ref])
         .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect())
         .unwrap_or_default()
 }
@@ -268,7 +268,7 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
         run_git(project_root, &args)?;
     }
     let untracked_tree = format!("{}^{{3}}", stash_ref);
-    if let Ok(untracked) = run_git_output(project_root, &["ls-tree", "-r", "--name-only", &untracked_tree]) {
+    if let Ok(untracked) = run_git_output(project_root, &["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", &untracked_tree]) {
         for p in untracked.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
             if !project_root.join(&p).exists() {
                 run_git(project_root, &["restore", "--source", &untracked_tree, "--staged", "--worktree", "--", &p])?;
@@ -282,12 +282,20 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
 }
 
 pub fn get_rollback_conflicts(project_root: &Path) -> Result<Vec<String>> {
-    let out = run_git_output(project_root, &["diff", "--name-only", "--diff-filter=U"])?;
+    let out = run_git_output(project_root, &["-c", "core.quotepath=false", "diff", "--name-only", "--diff-filter=U"])?;
     Ok(out.lines().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
 }
 
 pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)]) -> Result<()> {
     eprintln!("[debug] resolve_rollback_conflicts: root={:?}, {} files", project_root, choices.len());
+    let all = get_rollback_conflicts(project_root)?;
+    let uncovered: Vec<&String> = all
+        .iter()
+        .filter(|p| !choices.iter().any(|(c, _)| c == *p))
+        .collect();
+    if !uncovered.is_empty() {
+        anyhow::bail!("冲突文件列表不完整，未解决全部冲突文件：{:?}", uncovered);
+    }
     let stash_ref = find_rollback_stash(project_root)?
         .ok_or_else(|| anyhow::anyhow!("没有找到回退暂存（stash）"))?;
     for (path, use_latest) in choices {
@@ -589,6 +597,100 @@ mod tests {
 
         resolve_rollback_conflicts(&dir, &[("a.txt".to_string(), true)])?;
         assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_roundtrip_chinese() -> Result<()> {
+        let dir = tmp_repo("rollback_roundtrip_chinese");
+        std::fs::write(dir.join("测试文件.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("测试文件.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        std::fs::write(dir.join("测试文件.txt"), b"v3")?;
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v1");
+
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v3");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_conflict_resolve_chinese() -> Result<()> {
+        let dir = tmp_repo("rollback_conflict_chinese");
+        std::fs::write(dir.join("测试文件.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("测试文件.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        std::fs::write(dir.join("测试文件.txt"), b"v3")?;
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v1");
+
+        std::fs::write(dir.join("测试文件.txt"), b"v1.5")?;
+        assert!(restore_rollback(&dir).is_err(), "两边都改过应冲突");
+        let conflicts = get_rollback_conflicts(&dir)?;
+        assert!(conflicts.iter().any(|c| c == "测试文件.txt"), "conflicts: {:?}", conflicts);
+
+        resolve_rollback_conflicts(&dir, &[("测试文件.txt".to_string(), true)])?;
+        assert_eq!(std::fs::read(dir.join("测试文件.txt"))?, b"v3");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_resolve_rollback_conflicts_incomplete_choices() -> Result<()> {
+        let dir = tmp_repo("rollback_conflict_incomplete");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        std::fs::write(dir.join("b.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        std::fs::write(dir.join("b.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        std::fs::write(dir.join("b.txt"), b"v3")?;
+        rollback(&dir, &first)?;
+
+        std::fs::write(dir.join("a.txt"), b"v1.5")?;
+        std::fs::write(dir.join("b.txt"), b"v1.5")?;
+        assert!(restore_rollback(&dir).is_err(), "两边都改过应冲突");
+        let conflicts = get_rollback_conflicts(&dir)?;
+        assert!(conflicts.contains(&"a.txt".to_string()));
+        assert!(conflicts.contains(&"b.txt".to_string()));
+
+        let err = resolve_rollback_conflicts(&dir, &[("a.txt".to_string(), true)])
+            .expect_err("choices 不完整应报错");
+        assert!(err.to_string().contains("冲突文件列表不完整"), "err: {}", err);
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_some(), "未全部解决时不应清理 refs");
+        assert!(find_rollback_stash(&dir)?.is_some(), "未全部解决时不应 drop stash");
+
+        resolve_rollback_conflicts(
+            &dir,
+            &[("a.txt".to_string(), true), ("b.txt".to_string(), false)],
+        )?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3");
+        assert_eq!(std::fs::read(dir.join("b.txt"))?, b"v1.5");
         let st = get_rollback_state(&dir)?;
         assert!(st.rollback_point.is_none());
 
