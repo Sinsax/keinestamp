@@ -93,6 +93,7 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             Some(f) => map_err(keinestamp::git_project::add_and_commit_files(&meta.project_root, &f, &message))?,
             None => map_err(keinestamp::git_project::add_and_commit(&meta.project_root, &message))?,
         };
+        let _ = keinestamp::git_project::clear_rollback(&meta.project_root);
         let short_hash = hash[..7].to_string();
 
         let changed_files: Vec<String> = map_err(keinestamp::git_helpers::get_changed_files(&meta.project_root, &hash))?;

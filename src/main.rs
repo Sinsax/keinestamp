@@ -319,6 +319,13 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
 
 fn cmd_restore(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
+    let st = keinestamp::git_project::get_rollback_state(&meta.project_root)?;
+    if st.rollback_point.is_none() {
+        anyhow::bail!("没有可恢复的回退");
+    }
+    if !st.head_matches {
+        anyhow::bail!("回退后已有新记录，无法恢复");
+    }
     match keinestamp::git_project::restore_rollback(&meta.project_root) {
         Ok(_) => {
             println!("已恢复回退前的状态");
@@ -331,7 +338,7 @@ fn cmd_restore(path: &Path) -> anyhow::Result<()> {
                     for f in &files {
                         println!("  {}", f);
                     }
-                    println!("请在 GUI 中完成恢复（文件二选一），或手动处理冲突后运行 `git stash drop` 结束回退状态");
+                    println!("请在 GUI 中完成恢复（文件二选一），或手动处理冲突后运行 `git stash drop` 并 `git update-ref -d refs/keinestamp/rollback refs/keinestamp/rollback-point` 结束回退状态（推荐在 GUI 中完成恢复）");
                     return Ok(());
                 }
             }
