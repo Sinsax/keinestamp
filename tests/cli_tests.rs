@@ -222,6 +222,90 @@ fn test_cli_rollback_first_entry_to_init() {
 }
 
 #[test]
+fn test_cli_rollback_while_in_rollback_auto_restores() {
+    let dir = tmp_dir("cli_rollback_chain");
+    let (out, ok) = run(&["init", &dir.to_string_lossy()]);
+    assert!(ok, "init failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v1").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "A"]);
+    assert!(ok, "record A failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v2").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
+    assert!(ok, "record B failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v3").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
+    assert!(ok, "record C failed: {}", out);
+
+    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    let b_id = timeline.entries[1].id.clone();
+    let c_id = timeline.entries[2].id.clone();
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &c_id[..7]]);
+    assert!(ok, "rollback C failed: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 C 后应为 B 状态");
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
+    assert!(ok, "回退状态下再回退 B 应自动恢复后回退: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1", "回退 B 后应为 A 状态");
+
+    let st = keinestamp::git_project::get_rollback_state(&dir).unwrap();
+    assert_eq!(st.rollback_point.as_deref(), Some(timeline.entries[0].id.as_str()), "回退点应为 A");
+
+    let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
+    assert!(ok, "restore failed: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v3", "恢复应回到 C 状态");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn test_cli_rollback_conflict_aborts_chain() {
+    let dir = tmp_dir("cli_rollback_chain_conflict");
+    let (out, ok) = run(&["init", &dir.to_string_lossy()]);
+    assert!(ok, "init failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v1").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "A"]);
+    assert!(ok, "record A failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v2").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
+    assert!(ok, "record B failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v3").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
+    assert!(ok, "record C failed: {}", out);
+
+    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    let b_id = timeline.entries[1].id.clone();
+    let c_id = timeline.entries[2].id.clone();
+
+    std::fs::write(dir.join("test.blend"), b"v3.5").unwrap();
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &c_id[..7]]);
+    assert!(ok, "rollback C (dirty) failed: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 C 后应为 B 状态");
+
+    std::fs::write(dir.join("test.blend"), b"v2.5").unwrap();
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
+    assert!(ok, "CLI 冲突时打印清单并返回 Ok: {}", out);
+    assert!(out.contains("冲突"), "应提示冲突: {}", out);
+
+    let conflicts = keinestamp::git_project::get_rollback_conflicts(&dir).unwrap();
+    assert!(conflicts.iter().any(|c| c == "test.blend"), "冲突文件应列出: {:?}", conflicts);
+
+    keinestamp::git_project::resolve_rollback_conflicts(&dir, &[("test.blend".to_string(), true)]).unwrap();
+    let st = keinestamp::git_project::get_rollback_state(&dir).unwrap();
+    assert!(st.rollback_point.is_none(), "冲突解决后回退状态应清除");
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn test_export_with_real_hash() {
     let dir = tmp_dir("export_real");
     let (out, ok) = run(&["init", &dir.to_string_lossy()]);

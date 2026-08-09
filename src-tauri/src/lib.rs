@@ -573,8 +573,17 @@ async fn rollback(path: String, entry_id: String) -> Result<(), String> {
         let p = PathBuf::from(&path);
         let meta_path = keinestamp::config::meta_path(&p);
         let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-        map_err(keinestamp::git_project::rollback(&meta.project_root, &entry_id))?;
-        Ok(())
+        match keinestamp::git_project::rollback(&meta.project_root, &entry_id) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let Ok(files) = keinestamp::git_project::get_rollback_conflicts(&meta.project_root) {
+                    if !files.is_empty() {
+                        return Err(format!("CONFLICT|{}", files.join("\n")));
+                    }
+                }
+                Err(e.to_string())
+            }
+        }
     });
     handle.await.map_err(|e| e.to_string())?
 }

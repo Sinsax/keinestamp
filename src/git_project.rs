@@ -150,7 +150,9 @@ fn reapply_skip_worktree(project_root: &Path, paths: &[String]) -> Result<()> {
 pub fn rollback(project_root: &Path, entry_hash: &str) -> Result<()> {
     eprintln!("[debug] rollback: root={:?}, entry={}", project_root, entry_hash);
     if get_rollback_state(project_root)?.rollback_point.is_some() {
-        anyhow::bail!("已处于回退状态，请先恢复后再回退");
+        // 回退状态下再次回退 = 先自动恢复（回到回退前），再回退到新目标
+        eprintln!("[debug] rollback: in rollback state, auto-restore first");
+        restore_rollback(project_root)?;
     }
     run_git_output(project_root, &["rev-parse", "--verify", &format!("{}^0", entry_hash)])
         .map_err(|_| anyhow::anyhow!("记录不存在: {}", entry_hash))?;
@@ -1026,10 +1028,11 @@ mod tests {
     }
 
     #[test]
-    fn test_rollback_nested_rejected() -> Result<()> {
+    fn test_rollback_while_in_rollback_auto_restores() -> Result<()> {
         let dir = tmp_repo("rollback_nested");
         std::fs::write(dir.join("a.txt"), b"v1")?;
         add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
 
         std::fs::write(dir.join("a.txt"), b"v2")?;
         add_and_commit(&dir, "second")?;
@@ -1039,10 +1042,16 @@ mod tests {
         rollback(&dir, &second)?;
         assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
 
-        let err = rollback(&dir, &second).expect_err("回退状态下再次回退应报错");
-        assert!(err.to_string().contains("已处于回退状态"), "err: {}", err);
+        rollback(&dir, &second)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1", "再次回退应自动恢复后回到目标状态");
+        let st = get_rollback_state(&dir)?;
+        assert_eq!(st.rollback_point.as_deref(), Some(first.as_str()), "回退点应为 first");
+        assert!(st.head_matches);
         let stash_out = run_git_output(&dir, &["stash", "list"])?;
-        assert_eq!(stash_out.trim().lines().count(), 1, "不应新增 stash: {}", stash_out);
+        assert_eq!(stash_out.trim().lines().count(), 1, "自动恢复应 drop 旧 stash，回退应新建一个: {}", stash_out);
+
+        restore_rollback(&dir)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v3", "恢复应回到回退前状态");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())

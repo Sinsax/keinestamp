@@ -417,7 +417,7 @@
     <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
     <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
       <button class="ctx-item" onclick={ctxExport}>导出</button>
-      <button class="ctx-item" onclick={ctxRollback} disabled={!!rollbackPoint || rollbackBusy} title={rollbackPoint ? '回退状态下不可回退' : ''}>回退</button>
+      <button class="ctx-item" onclick={ctxRollback} disabled={rollbackBusy} title={rollbackPoint ? '将先恢复当前回退，再回退到该记录' : ''}>回退</button>
     </div>
   {/if}
   <div class="entries-footer">

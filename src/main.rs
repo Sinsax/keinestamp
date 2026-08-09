@@ -323,7 +323,22 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
     let full = keinestamp::timeline::get_entry(&tl, entry)
         .map(|e| e.id.clone())
         .ok_or_else(|| anyhow::anyhow!("记录不存在: {}", entry))?;
-    keinestamp::git_project::rollback(&meta.project_root, &full)?;
+    match keinestamp::git_project::rollback(&meta.project_root, &full) {
+        Ok(_) => {}
+        Err(e) => {
+            if let Ok(files) = keinestamp::git_project::get_rollback_conflicts(&meta.project_root) {
+                if !files.is_empty() {
+                    println!("自动恢复回退前状态时存在冲突，以下文件需要处理：");
+                    for f in &files {
+                        println!("  {}", f);
+                    }
+                    println!("请在 GUI 中完成恢复（文件二选一），再重新回退");
+                    return Ok(());
+                }
+            }
+            return Err(e);
+        }
+    }
     let is_first = tl.entries.first().map(|e| e.id == full).unwrap_or(false);
     if is_first {
         println!("已回退到初始化状态（项目文件已从工作区移除，可用 restore 还原）");
