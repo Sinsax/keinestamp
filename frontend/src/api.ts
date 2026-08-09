@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { MetaConfig, Timeline, RecentEntry, StatusResult, ProjectType } from './types'
+import type { MetaConfig, Timeline, RecentEntry, StatusResult, ProjectType, RollbackState, RollbackChoice } from './types'
 
 export async function detect(path: string): Promise<ProjectType> {
   return invoke<ProjectType>('detect', { path })
@@ -29,16 +29,24 @@ export async function setDeployToken(token: string): Promise<void> {
   return invoke<void>('set_deploy_token', { token })
 }
 
-export async function revert(path: string): Promise<void> {
-  return invoke<void>('revert', { path })
+export async function rollback(path: string, entryId: string): Promise<void> {
+  return invoke<void>('rollback', { path, entryId })
 }
 
-export async function restoreRevert(path: string): Promise<void> {
-  return invoke<void>('restore_revert', { path })
+export async function getRollbackState(path: string): Promise<RollbackState> {
+  return invoke<RollbackState>('get_rollback_state', { path })
 }
 
-export async function canRestoreRevert(path: string): Promise<boolean> {
-  return invoke<boolean>('can_restore_revert', { path })
+export async function restoreRollback(path: string): Promise<void> {
+  return invoke<void>('restore_rollback', { path })
+}
+
+export async function getRollbackConflicts(path: string): Promise<string[]> {
+  return invoke<string[]>('get_rollback_conflicts', { path })
+}
+
+export async function resolveRollbackConflicts(path: string, choices: RollbackChoice[]): Promise<void> {
+  return invoke<void>('resolve_rollback_conflicts', { path, choices })
 }
 
 export async function status(path: string): Promise<StatusResult> {

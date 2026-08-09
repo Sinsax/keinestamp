@@ -48,3 +48,10 @@ export interface CommitProgress {
   phase: string
   message: string
 }
+
+export interface RollbackState {
+  rollback_point: string | null
+  head_matches: boolean
+}
+
+export type RollbackChoice = [string, 'current' | 'latest']
