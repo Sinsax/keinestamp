@@ -607,18 +607,6 @@
           <div class="timeline-panel" style="width: {timelineWidth}px">
             <div class="tl-header">
               <span class="tl-title">时间线</span>
-              <button
-                class="tl-restore-btn"
-                onclick={handleRestore}
-                disabled={!rollbackState.rollback_point || !rollbackState.head_matches || rollbackBusy}
-                title={!rollbackState.rollback_point
-                  ? '没有可恢复的回退'
-                  : rollbackState.head_matches
-                    ? '恢复回退前的状态'
-                    : '回退后已有新记录，无法恢复'}
-              >
-                恢复
-              </button>
               <button class="tl-local-btn" onclick={handleLocalView} title="在浏览器中打开本地时间线页面">
                 本地查看
               </button>
@@ -649,10 +637,17 @@
       <ActionBar
         {projectType}
         onRecord={() => showCommit = true}
+        onRestore={handleRestore}
         onDeploy={handleDeploy}
         {connected}
         {deployAhead}
         {deployTip}
+        restoreEnabled={!!rollbackState.rollback_point && rollbackState.head_matches}
+        restoreTitle={!rollbackState.rollback_point
+          ? '没有可恢复的回退'
+          : rollbackState.head_matches
+            ? '恢复回退前的状态'
+            : '回退后已有新记录，无法恢复'}
         busy={deploying || recording || rollbackBusy}
       />
 
@@ -761,24 +756,6 @@
   .tl-local-btn:hover {
     background: var(--accent);
     color: #fff;
-  }
-  .tl-restore-btn {
-    font-size: 11px;
-    padding: 3px 10px;
-    border-radius: 6px;
-    border: 1px solid var(--accent);
-    color: var(--accent);
-    background: var(--accent-soft);
-    cursor: pointer;
-    margin-right: 8px;
-  }
-  .tl-restore-btn:hover:not(:disabled) {
-    background: var(--accent);
-    color: #fff;
-  }
-  .tl-restore-btn:disabled {
-    opacity: 0.4;
-    cursor: default;
   }
   .toolbar-icon {
     background: none;

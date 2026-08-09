@@ -4,18 +4,24 @@
   let {
     projectType,
     onRecord,
+    onRestore,
     onDeploy,
     connected = false,
     deployAhead = false,
     deployTip = '部署到服务器',
+    restoreEnabled = false,
+    restoreTitle = '没有可恢复的回退',
     busy = false,
   }: {
     projectType: ProjectType | null
     onRecord: () => void
+    onRestore: () => void
     onDeploy: () => void
     connected?: boolean
     deployAhead?: boolean
     deployTip?: string
+    restoreEnabled?: boolean
+    restoreTitle?: string
     busy?: boolean
   } = $props()
 
@@ -26,6 +32,11 @@
   <button class="record-btn" onclick={onRecord} disabled={!initialized || busy}>
     <span class="ab-label">记录</span>
     <span class="ab-hint">record</span>
+  </button>
+
+  <button class="restore-btn" class:enabled={restoreEnabled} onclick={onRestore} disabled={!initialized || !restoreEnabled || busy} title={restoreTitle}>
+    <span class="ab-label">恢复</span>
+    <span class="ab-hint">redo</span>
   </button>
 
   <div class="spacer"></div>
@@ -122,4 +133,12 @@
     color: var(--error) !important;
   }
   .spacer { flex: 1; }
+  .restore-btn.enabled {
+    border-color: var(--accent) !important;
+    color: var(--accent) !important;
+  }
+  .restore-btn.enabled:hover:not(:disabled) {
+    background: var(--accent-soft) !important;
+    border-color: var(--accent) !important;
+  }
 </style>
