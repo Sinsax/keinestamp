@@ -28,6 +28,7 @@ fn tmp_dir(name: &str) -> PathBuf {
 
 fn run(args: &[&str]) -> (String, bool) {
     let output = Command::new(keinestamp_bin())
+        .env("KEINESTAMP_NO_RECENT", "1")
         .args(args)
         .output()
         .expect("failed to run keinestamp");

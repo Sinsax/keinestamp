@@ -49,6 +49,9 @@ impl RecentProjects {
     }
 
     pub fn add_path(path: &Path) {
+        if std::env::var("KEINESTAMP_NO_RECENT").is_ok() {
+            return;
+        }
         let recent_path = default_recent_path();
         Self::add_path_to(path, &recent_path);
     }
