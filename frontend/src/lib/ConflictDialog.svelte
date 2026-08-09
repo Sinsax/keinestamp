@@ -28,8 +28,8 @@
       <div class="conflict-row">
         <span class="conflict-path" title={f}>{f}</span>
         <div class="conflict-opts">
-          <button class:active={choices[f] !== 'latest'} onclick={() => (choices[f] = 'current')}>回退期间修改</button>
-          <button class:active={choices[f] === 'latest'} onclick={() => (choices[f] = 'latest')}>回退前状态</button>
+          <button class:active={choices[f] === 'current'} onclick={() => (choices[f] = 'current')}>回退期间修改</button>
+          <button class:active={choices[f] !== 'current'} onclick={() => (choices[f] = 'latest')}>回退前状态</button>
         </div>
       </div>
     {/each}
@@ -38,7 +38,7 @@
       <button
         class="accent"
         disabled={busy}
-        onclick={() => onResolve(conflicts.map((f) => [f, choices[f] ?? 'current'] as RollbackChoice))}
+        onclick={() => onResolve(conflicts.map((f) => [f, choices[f] ?? 'latest'] as RollbackChoice))}
       >
         {busy ? '处理中...' : '完成恢复'}
       </button>
