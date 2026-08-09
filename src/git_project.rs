@@ -195,13 +195,21 @@ fn rollback_stash_files(project_root: &Path, point: &str, stash_ref: &str) -> Ve
         .unwrap_or_default()
 }
 
-fn rollback_local_files(project_root: &Path) -> Vec<String> {
-    let mut files: Vec<String> = run_git_output(project_root, &["-c", "core.quotepath=false", "diff", "--name-only"])
-        .map(|s| s.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()).collect())
-        .unwrap_or_default();
+fn rollback_local_files(project_root: &Path, point: &str) -> Vec<String> {
+    let mut files: Vec<String> = Vec::new();
+    for args in [
+        &["-c", "core.quotepath=false", "diff", "--name-only"][..],
+        &["-c", "core.quotepath=false", "diff", "--cached", "--name-only", point][..],
+    ] {
+        if let Ok(out) = run_git_output(project_root, args) {
+            files.extend(out.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()));
+        }
+    }
     if let Ok(untracked) = run_git_output(project_root, &["-c", "core.quotepath=false", "ls-files", "--others", "--exclude-standard"]) {
         files.extend(untracked.lines().map(|l| l.trim().to_string()).filter(|s| !s.is_empty()));
     }
+    files.sort();
+    files.dedup();
     files
 }
 
@@ -245,8 +253,9 @@ fn stage_unmerged(project_root: &Path, path: &str, point: &str, stash_ref: &str)
 pub fn restore_rollback(project_root: &Path) -> Result<()> {
     eprintln!("[debug] restore_rollback: root={:?}", project_root);
     let saved_head = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_REF])?;
+    let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])?;
     let Some(stash_ref) = find_rollback_stash(project_root)? else {
-        if !rollback_local_files(project_root).is_empty() {
+        if !rollback_local_files(project_root, point.trim()).is_empty() {
             anyhow::bail!("回退状态期间工作区有改动，无法直接恢复：请先处理改动（提交/暂存/放弃）后再恢复");
         }
         run_git(
@@ -258,9 +267,8 @@ pub fn restore_rollback(project_root: &Path) -> Result<()> {
         return Ok(());
     };
 
-    let point = run_git_output(project_root, &["rev-parse", "--verify", ROLLBACK_POINT_REF])?;
     let stash_files = rollback_stash_files(project_root, point.trim(), &stash_ref);
-    let local_files = rollback_local_files(project_root);
+    let local_files = rollback_local_files(project_root, point.trim());
     let conflicts: Vec<String> = stash_files
         .iter()
         .filter(|f| local_files.contains(f))
@@ -332,12 +340,16 @@ pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)
         .ok_or_else(|| anyhow::anyhow!("没有找到回退暂存（stash）"))?;
     for (path, use_latest) in choices {
         if *use_latest {
-            let content = run_git_bytes(project_root, &["show", &format!("{}:{}", stash_ref, path)])?;
-            let full = project_root.join(path);
-            if let Some(parent) = full.parent() {
-                std::fs::create_dir_all(parent)?;
+            if run_git_output(project_root, &["rev-parse", &format!("{}:{}", stash_ref, path)]).is_ok() {
+                let content = run_git_bytes(project_root, &["show", &format!("{}:{}", stash_ref, path)])?;
+                let full = project_root.join(path);
+                if let Some(parent) = full.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::write(&full, &content)?;
+            } else if project_root.join(path).is_file() {
+                std::fs::remove_file(project_root.join(path))?;
             }
-            std::fs::write(&full, &content)?;
         }
         run_git(project_root, &["add", path])?;
     }
@@ -750,6 +762,98 @@ mod tests {
         assert_eq!(std::fs::read(dir.join("a.txt"))?, b"user-change", "本地改动必须原样保留");
         let st = get_rollback_state(&dir)?;
         assert!(st.rollback_point.is_some(), "恢复失败后回退状态应保留");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_no_stash_restore_protects_staged_changes() -> Result<()> {
+        let dir = tmp_repo("rollback_no_stash_staged_guard");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert!(find_rollback_stash(&dir)?.is_none(), "干净工作区回退不应产生 stash");
+
+        std::fs::write(dir.join("a.txt"), b"user-change")?;
+        run_git(&dir, &["add", "a.txt"])?;
+        let err = restore_rollback(&dir).expect_err("回退期间有已暂存改动时不应静默覆盖");
+        assert!(err.to_string().contains("工作区有改动"), "err: {}", err);
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"user-change", "暂存改动必须原样保留");
+        let cached = run_git_output(&dir, &["diff", "--cached", "--name-only"])?;
+        assert!(cached.lines().any(|l| l.trim() == "a.txt"), "index 应保留暂存改动: {}", cached);
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_some(), "恢复失败后回退状态应保留");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_staged_change_conflicts() -> Result<()> {
+        let dir = tmp_repo("rollback_staged_conflict");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        std::fs::write(dir.join("b.txt"), b"b1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        std::fs::write(dir.join("a.txt"), b"v3")?;
+        std::fs::write(dir.join("b.txt"), b"b2")?;
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert_eq!(std::fs::read(dir.join("b.txt"))?, b"b1");
+        assert!(find_rollback_stash(&dir)?.is_some(), "脏工作区回退应产生 stash");
+
+        std::fs::write(dir.join("b.txt"), b"b3")?;
+        run_git(&dir, &["add", "b.txt"])?;
+        let err = restore_rollback(&dir).expect_err("暂存改动与回退两侧都不同时应冲突");
+        assert!(err.to_string().contains("冲突"), "err: {}", err);
+        let conflicts = get_rollback_conflicts(&dir)?;
+        assert!(conflicts.iter().any(|c| c == "b.txt"), "conflicts: {:?}", conflicts);
+
+        resolve_rollback_conflicts(&dir, &[("b.txt".to_string(), true)])?;
+        assert_eq!(std::fs::read(dir.join("b.txt"))?, b"b2", "latest 应恢复 stash 内容");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_rollback_conflict_resolve_latest_deletes_absent_in_stash() -> Result<()> {
+        let dir = tmp_repo("rollback_resolve_deleted_stash");
+        std::fs::write(dir.join("a.txt"), b"v1")?;
+        add_and_commit(&dir, "first")?;
+        let first = get_current_commit_hash(&dir)?;
+
+        std::fs::write(dir.join("a.txt"), b"v2")?;
+        add_and_commit(&dir, "second")?;
+
+        std::fs::remove_file(dir.join("a.txt"))?;
+        rollback(&dir, &first)?;
+        assert_eq!(std::fs::read(dir.join("a.txt"))?, b"v1");
+        assert!(find_rollback_stash(&dir)?.is_some(), "删除文件的工作区回退应产生 stash");
+
+        std::fs::write(dir.join("a.txt"), b"user-a")?;
+        let err = restore_rollback(&dir).expect_err("stash 删除了文件而用户重建时应冲突");
+        assert!(err.to_string().contains("冲突"), "err: {}", err);
+        let conflicts = get_rollback_conflicts(&dir)?;
+        assert!(conflicts.iter().any(|c| c == "a.txt"), "conflicts: {:?}", conflicts);
+
+        resolve_rollback_conflicts(&dir, &[("a.txt".to_string(), true)])?;
+        assert!(!dir.join("a.txt").exists(), "latest 应保留 stash 的删除");
+        let st = get_rollback_state(&dir)?;
+        assert!(st.rollback_point.is_none());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
