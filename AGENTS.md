@@ -5,7 +5,7 @@ Single-binary CLI + Tauri GUI Blender Git Progress Board. Rust Edition 2024.
 ## Commands
 
 ```powershell
-cargo test                          # 97 unit + 8 integration
+cargo test                          # 100 unit + 8 integration
 cargo test --lib <module>           # Single module (config/detect/init/timeline/...)
 cargo test --test cli_tests         # Integration only
 cargo run -- init <path>            # CLI entry
@@ -26,8 +26,8 @@ Build order (crate): config → detect → init → git_project → git_web → 
 
 ## Constraints
 
-- **Git safety**: Only `add/commit/push/pull/reset --soft`. No checkout/branch/merge/rebase/reset --hard. Exception: `git update-index --skip-worktree/--no-skip-worktree` (local index flag only, used for tracked-file local ignore, zero repo impact, fully reversible).
-- **revert guard**: Checks commit count >= 2 before `reset --soft HEAD~1`. `get_commit_count()` in git_project.
+- **Git safety**: Only `add/commit/push/pull/reset --soft`. No checkout/branch/merge/rebase/reset --hard. Exceptions: `git update-index --skip-worktree/--no-skip-worktree` (local index flag only, used for tracked-file local ignore, zero repo impact, fully reversible); `git stash push/pop/drop` (回退暂存/恢复工作区状态, stash 兜底可逆); `git restore --source=<commit> --staged --worktree` (文件回退, 配合 stash 可逆); `git update-ref refs/keinestamp/*` (本地回退状态标记, 仅项目 .git 内, 可 `-d` 删除); `git show <stash>:<path>` 写回文件 (冲突二选一).
+- **rollback mechanism** (replaces old revert): 回退 = 工作区有改动先 `stash push -u` (message 前缀 `keinestamp-rollback`) + `git restore --source=<记录> --staged --worktree` 将文件还原到记录点; 状态标记在项目 .git 的 `refs/keinestamp/rollback` (回退前 HEAD) 与 `refs/keinestamp/rollback-point` (回退点). 恢复 = 三向合并 (base=回退点, 手工实现: 对比 stash 与回退点差异 + 当前工作区差异, 无冲突则 `git restore --source=<stash>` 合并带回 + `stash drop` + 清 refs; 无 stash 时直接 `restore --source=<回退前 HEAD>`). 冲突 = GUI 逐文件二选一 (`resolve_rollback_conflicts`, `git show <stash>:<path>` 写回最新版或保留当前版). 回退后新记录 (HEAD 前进) 则无法恢复 (`head_matches=false`, 恢复按钮禁用); `clear_rollback` 在记录成功后清理 (CLI record 调用). 核心在 `git_project.rs`.
 - **pull**: Always `git pull --rebase` to avoid merge commits.
 - **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.
 - **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `access_token`, `project_id`, `site_name`, `site_locked`. Old fields silently ignored via `#[serde(default)]` (`web_remote`/`auto_connect` removed — legacy `web_remote` was a never-effective web git remote, and `auto_connect` moved to AppConfig). `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server. `site_name` (ASCII `[A-Za-z0-9-_]` only, URL prefix / `X-Project-Name`) locks permanently after first deploy (`site_locked = true`); `config::resolve_site_name()` picks `site_name` → sanitized folder name → `project<id前8>` fallback, shared by deploy + jump button.
@@ -42,7 +42,7 @@ Build order (crate): config → detect → init → git_project → git_web → 
 - **Web-timeline/**: Separate git repo, excluded via `.gitignore`.
 - **Git user**: `ensure_git_user()` sets fallback name/email before commit if not configured globally.
 - **Chinese filenames**: `git -c core.quotepath=false` in `get_changed_files`.
-- **CLI output**: Chinese labels (`已提交`, `已撤回`, `已推送到远端`). Log format: `  {short_hash}  {date}  {author}  ({file_count} 文件)`.
+- **CLI output**: Chinese labels (`已提交`, `已推送到远端`, `已回退到记录 ...`, `已恢复回退前的状态`). Log format: `  {short_hash}  {date}  {author}  ({file_count} 文件)`.
 
 ## serve.rs
 
@@ -100,7 +100,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (36)
+### Tauri commands (51)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -114,14 +114,20 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
 | `get_deploy_status` | `{local, remote}` | web-timeline commit count vs server record via `GET /<project>/version` (Bearer deploy_token); remote null = no record |
 | `has_remote` | `bool` | checks git `origin` only |
-| `revert` | `()` | error `"no commits to revert"` < 2 commits; records `last_revert` (AppConfig: project_id/revert_hash/original_hash/removed_entry) for restore |
-| `restore_revert` | `()` | `git reset --soft <original_hash>` + re-append timeline entry + regen web; requires HEAD == revert_hash (no new commits since revert) |
-| `can_restore_revert` | `bool` | last_revert belongs to current project AND HEAD still at revert_hash |
+| `rollback` | `()` | 回退到指定记录: 工作区有改动先 `stash push -u` (前缀 `keinestamp-rollback`), 再 `git restore --source=<记录> --staged --worktree` 还原文件, 写 `refs/keinestamp/rollback` + `rollback-point` |
+| `get_rollback_state` | `{rollback_point, head_matches}` | rollback_point null = 无回退状态; head_matches = HEAD 仍停在回退前 (回退后新记录则为 false, 无法恢复) |
+| `restore_rollback` | `()` | 恢复回退前状态 (三向合并); 冲突时返回 `CONFLICT|<files…>` 错误, 前端弹逐文件二选一 |
+| `get_rollback_conflicts` | `String[]` | 未解决冲突文件列表 (`git diff --diff-filter=U`) |
+| `resolve_rollback_conflicts` | `()` | choices: `[path, "current"\|"latest"]` 逐文件二选一; 全部解决后 drop stash + 清 refs |
 | `status` | `{clean, output}` | |
+| `log` | `LogEntry[]` | timeline entries (short hash/date/message) |
 | `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching (`access_token`, `site_name`); `site_name` key validates ASCII `[A-Za-z0-9-_]` and rejects when locked |
 | `get_timeline` | `Timeline` | resolves preview paths to absolute |
-| `get_recent` / `add_recent` / `remove_recent` | recent mgmt | |
+| `export_entry` | `()` | 导出 entry 文件到指定目录 (`git ls-tree` + `git show`) |
+| `get_recent` / `add_recent` / `remove_recent` / `reorder_recent` | recent mgmt | |
 | `open_folder` / `open_web_timeline` / `open_site` | `()` | platform-specific shell cmds; `open_site(url)` requires http(s):// prefix |
+| `get_ignore_info` | `{tracked, ignored}` | tracked via `git ls-files`; ignored = ignore 规则命中 + skip-worktree (S 前缀) |
+| `add_to_gitignore` / `add_skip_worktree` / `remove_ignore` | `()` | 忽略管理: .gitignore 规则 / 已跟踪文件本地忽略 (skip-worktree, 零 repo 影响) / 移除忽略 |
 | `delete_entry` | `()` | timeline.json only, not git |
 | `get_project_log` | `String[]` | git log lines |
 | `get_tracked_files` | `String[]` | walks dir (skips hidden/node_modules/target/web-timeline) |
@@ -130,6 +136,7 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `refresh_blender_versions` / `get_cached_blender_versions` / `list_installed_blender_versions` | `String[]` | manual-only check (manual button) / persisted cache (no network) / installed local |
 | `get_blender_path` / `set_blender_path` | `String` / `()` | AppConfig |
 | `get_deploy_token` / `set_deploy_token` | `String` / `()` | AppConfig deploy_token |
+| `get_deploy_server_url` / `set_deploy_server_url` | `String` / `()` | AppConfig deploy_server_url |
 | `get_auto_connect` / `set_auto_connect` | `bool` / `()` | AppConfig auto_connect |
 | `get_close_action` / `set_close_action` | `bool|null` / `()` | AppConfig close_to_tray（关窗行为：null=未决定，true=后台驻留，false=退出）|
 | `resolve_close_action` | `()` | 首次关窗弹窗后的落定：记录选择并执行（true=隐藏窗口，false=退出）|
@@ -139,15 +146,17 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 
 All in `frontend/src/`. Key files:
 
-- `App.svelte` — Main layout, state, 3s status polling
+- `App.svelte` — Main layout, state, 3s status polling. Timeline header (`tl-header`) shows 恢复 button while `rollback_state.rollback_point` set (disabled when `head_matches=false`); restore confirm via `RollbackDialog` (5s countdown), conflicts via `ConflictDialog` (per-file 二选一).
 - `SettingsDialog.svelte` — deploy_server_url/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle (app-level). Save does not close dialog.
-- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. ★ milestone toggle per card (`set_entry_milestone`); milestone cards get full accent-tinted background + accent border. Site name + access token sections at bottom (token only after deploy).
+- `ActionBar.svelte` — 主操作区只剩 记录 (record) / 部署 (deploy) 两个按钮（旧 revert 按钮已移除）.
+- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. ★ milestone toggle per card (`set_entry_milestone`); milestone cards get full accent-tinted background + accent border. Right-click context menu per card: 导出 (`export_entry` via InputDialog) / 回退 (`rollback`, 回退状态下禁用). 回退状态下, 回退点之前的卡片灰显 (`dimmed` class). Site name + access token sections at bottom (token only after deploy).
 - `StatusPanel.svelte` — Changes panel: directory-tree view of working files (`git status --porcelain -uall` so untracked dirs are not collapsed). Per-row checkboxes (default all = full commit; unchecking some → record commits only selected via `files` param, selection persists across 3s auto-refresh). Dir checkbox = select/deselect all files under it (indeterminate when partial), dir row click collapses/expands, file row click toggles. Header shows `selected/total` count + 全选/全不选 buttons.
-- `CommitDialog.svelte` — record dialog: message/tag/3D-preview only (file selection lives in StatusPanel); closes after each commit (batch = re-open, selection persists on main panel).
+- `CommitDialog.svelte` — record dialog: message/tag/3D-preview only (file selection lives in StatusPanel); closes after each commit (batch = re-open, selection persists on main panel). 回退未恢复时显示警告 (`回退未恢复，继续记录将无法再恢复`).
 - `statusParse.ts` — shared `parseStatus(output)` used by StatusPanel + CommitDialog.
 - `StatusBar.svelte` — Connection indicator (green/red dot) only.
 - `ProjectTabs.svelte` — Project tabs bar: scrollable tabs area (`overflow-x: auto` + wheel-scroll action + hover-only thin scrollbar + edge mask fade when scrollable + active tab auto `scrollIntoView`). Active tab shows × (wired to `onRemoveRecent`, reuses confirm logic, `stopPropagation` so it doesn't select). Fixed right actions area (☀/🌙 theme toggle + ⚙ settings, divided by border). Props: `theme`/`onToggleTheme`/`onRemoveRecent`.
-- `api.ts` — 31 Tauri invoke wrappers
+- `RollbackDialog.svelte` / `ConflictDialog.svelte` — 恢复确认 (5s 延时按钮) / 冲突逐文件二选一 (`current` 保留当前版 vs `latest` 恢复最新版).
+- `api.ts` — 42 Tauri invoke wrappers
 - `types.ts` — Interfaces
 
 **Dead code (don't use)**: (none — `InitDialog.svelte`/`ModelViewer.svelte` deleted, replaced by native `@tauri-apps/plugin-dialog` and browser `openWebTimeline`)
