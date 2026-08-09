@@ -181,7 +181,42 @@ fn test_cli_rollback_then_record_replaces() {
     let log_out = keinestamp::git_project::log(&dir, 10).unwrap();
     assert!(!log_out.contains("B"), "git 历史不应再有 B: {}", log_out);
     assert!(log_out.contains("C"), "git 历史应包含 C: {}", log_out);
-    assert_eq!(log_out.lines().count(), 2, "git 历史应为 A → C: {}", log_out);
+    assert!(log_out.contains("init"), "git 历史应包含 init 提交: {}", log_out);
+    assert_eq!(log_out.lines().count(), 3, "git 历史应为 init → A → C: {}", log_out);
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn test_cli_rollback_first_entry_to_init() {
+    let dir = tmp_dir("cli_rollback_first");
+    let (out, ok) = run(&["init", &dir.to_string_lossy()]);
+    assert!(ok, "init failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v1").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "A"]);
+    assert!(ok, "record A failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v2").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
+    assert!(ok, "record B failed: {}", out);
+
+    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    let a_id = timeline.entries[0].id.clone();
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &a_id[..7]]);
+    assert!(ok, "rollback first failed: {}", out);
+    assert!(out.contains("初始化状态"), "应提示回到初始化状态: {}", out);
+    assert!(!dir.join("test.blend").exists(), "回退到 init 后项目文件应从工作区移除");
+
+    std::fs::write(dir.join("test.blend"), b"v3").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
+    assert!(ok, "record C failed: {}", out);
+
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    assert_eq!(timeline.entries.len(), 1, "应只剩新记录: {:?}", timeline.entries.iter().map(|e| &e.message).collect::<Vec<_>>());
+    assert_eq!(timeline.entries[0].message, "C", "新记录 C 应接替 A/B");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

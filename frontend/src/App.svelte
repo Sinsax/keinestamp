@@ -390,7 +390,13 @@
     rollbackBusy = true
     try {
     await api.rollback(activePath, entry.id)
-    pushToast(`已回退到记录 ${entry.id.slice(0, 7)} 之前，可重新修改后记录`, 'success')
+    const isFirst = entries.length > 0 && entry.id === entries[entries.length - 1].id
+    pushToast(
+      isFirst
+        ? '已回退到初始化状态（项目文件已从工作区移除，可用恢复还原）'
+        : `已回退到记录 ${entry.id.slice(0, 7)} 之前，可重新修改后记录`,
+      'success'
+    )
       await loadProject(activePath)
       await refreshRollbackState()
     } catch (e: any) {

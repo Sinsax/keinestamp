@@ -79,16 +79,11 @@
   }
 
   let rollbackIndex = $derived(rollbackPoint ? entries.findIndex((e) => e.id === rollbackPoint) : -1)
-  let firstEntry = $derived(entries[entries.length - 1])
 
   function isDimmed(index: number): boolean {
     if (!rollbackPoint) return false
     if (rollbackIndex < 0) return true
     return index < rollbackIndex
-  }
-
-  function isFirstEntry(entry: TimelineEntry): boolean {
-    return !!firstEntry && entry.id === firstEntry.id
   }
 
   let editingToken = $state(false)
@@ -422,7 +417,7 @@
     <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
     <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
       <button class="ctx-item" onclick={ctxExport}>导出</button>
-      <button class="ctx-item" onclick={ctxRollback} disabled={!!rollbackPoint || rollbackBusy || (ctxMenu && isFirstEntry(ctxMenu.entry))} title={rollbackPoint ? '回退状态下不可回退' : ctxMenu && isFirstEntry(ctxMenu.entry) ? '第一条记录无法回退' : ''}>回退</button>
+      <button class="ctx-item" onclick={ctxRollback} disabled={!!rollbackPoint || rollbackBusy} title={rollbackPoint ? '回退状态下不可回退' : ''}>回退</button>
     </div>
   {/if}
   <div class="entries-footer">

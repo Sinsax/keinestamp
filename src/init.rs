@@ -31,7 +31,8 @@ fn perform_init(project_root: &Path) -> Result<()> {
         .with_context(|| format!("failed to create project directory {:?}", project_root))?;
 
     let project_git = project_root.join(".git");
-    if !project_git.exists() {
+    let fresh_git = !project_git.exists();
+    if fresh_git {
         git_init(project_root, "project")?;
     } else {
         eprintln!("Project git repository already exists, skipping init");
@@ -39,6 +40,16 @@ fn perform_init(project_root: &Path) -> Result<()> {
 
     ensure_project_gitignore(project_root)?;
     ensure_project_gitattributes(project_root)?;
+
+    if fresh_git {
+        // 创建 init 提交（与 GUI init 对齐），保证首条记录有父提交可回退到初始化状态
+        crate::git_project::ensure_git_user(project_root)?;
+        crate::git_project::stage_files_and_commit(
+            project_root,
+            &[".gitignore", ".gitattributes"],
+            "init",
+        )?;
+    }
 
     let meta = MetaConfig::new(project_root.to_path_buf());
     let web_root = &meta.web_root;
