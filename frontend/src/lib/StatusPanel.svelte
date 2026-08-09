@@ -30,9 +30,7 @@
   }
 
   const statusFiles = $derived(
-    parseStatus(statusOutput)
-      .filter((f) => !isHiddenPath(f.path))
-      .filter((f) => !ruleIgnoredSet.has(f.path))
+    parseStatus(statusOutput).filter((f) => !isHiddenPath(f.path))
   )
   const statusMap = $derived(Object.fromEntries(statusFiles.map((f) => [f.path, f])) as Record<string, StatusFile>)
   const visibleFiles = $derived.by(() => {
@@ -267,10 +265,11 @@
   })
 
   function isIgnored(path: string): boolean {
-    if (ignoredSet.has(path)) return true
+    if (ignoredSet.has(path) || ruleIgnoredSet.has(path)) return true
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) {
-      if (ignoredSet.has(parts.slice(0, i).join('/'))) return true
+      const prefix = parts.slice(0, i).join('/')
+      if (ignoredSet.has(prefix) || ruleIgnoredSet.has(prefix)) return true
     }
     return false
   }
