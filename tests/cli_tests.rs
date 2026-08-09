@@ -117,22 +117,31 @@ fn test_init_then_config_set() {
 }
 
 #[test]
-fn test_init_then_revert() {
-    let dir = tmp_dir("revert");
+fn test_cli_rollback_and_restore() {
+    let dir = tmp_dir("cli_rollback");
     let (out, ok) = run(&["init", &dir.to_string_lossy()]);
     assert!(ok, "init failed: {}", out);
 
     std::fs::write(dir.join("test.blend"), b"v1").unwrap();
-    let (out, ok) = run(&["commit", &dir.to_string_lossy(), "-m", "first"]);
-    assert!(ok, "commit failed: {}", out);
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "first"]);
+    assert!(ok, "record failed: {}", out);
 
     std::fs::write(dir.join("test.blend"), b"v2").unwrap();
-    let (out, ok) = run(&["commit", &dir.to_string_lossy(), "-m", "second"]);
-    assert!(ok, "second commit failed: {}", out);
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "second"]);
+    assert!(ok, "second record failed: {}", out);
 
-    let (out, ok) = run(&["revert", &dir.to_string_lossy()]);
-    assert!(ok, "revert failed: {}", out);
-    assert!(out.contains("已撤回"));
+    let timeline = keinestamp::timeline::read_timeline(&dir.join("web-timeline").join("timeline.json")).unwrap();
+    let first_id = timeline.entries.first().unwrap().id.clone();
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &first_id[..7]]);
+    assert!(ok, "rollback failed: {}", out);
+    assert!(out.contains("已回退"));
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v1");
+
+    let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
+    assert!(ok, "restore failed: {}", out);
+    assert!(out.contains("已恢复"));
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }

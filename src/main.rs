@@ -40,9 +40,12 @@ enum Commands {
         path: PathBuf,
     },
 
-    Revert {
+    Rollback {
         #[arg(default_value = ".")]
         path: PathBuf,
+
+        #[arg(short, long, help = "回退到的记录 ID（timeline entry id，支持前缀）")]
+        entry: String,
     },
 
     Restore {
@@ -134,7 +137,7 @@ fn main() -> anyhow::Result<()> {
         }
         Some(Commands::Push { path }) => cmd_push(&path),
         Some(Commands::Pull { path }) => cmd_pull(&path),
-        Some(Commands::Revert { path }) => cmd_revert(&path),
+        Some(Commands::Rollback { path, entry }) => cmd_rollback(&path, &entry),
         Some(Commands::Restore { path }) => cmd_restore(&path),
         Some(Commands::Status { path }) => cmd_status(&path),
         Some(Commands::Log { path, count }) => cmd_log(&path, count),
@@ -159,7 +162,7 @@ fn main() -> anyhow::Result<()> {
         None => {
             println!("Keinestamp - Blender Git Progress Board");
             println!("用法: keinestamp <子命令> [选项]");
-            println!("子命令: init, record, push, pull, revert, status, log, config, export, serve, deploy, download-blender, list-blender-versions");
+            println!("子命令: init, record, push, pull, rollback, restore, status, log, config, export, serve, deploy, download-blender, list-blender-versions");
             println!("GUI 模式: 运行 `cargo tauri dev` 或使用编译后的 Tauri 应用");
             println!("查看详细帮助: keinestamp --help");
             Ok(())
@@ -175,13 +178,9 @@ fn load_meta(path: &Path) -> anyhow::Result<keinestamp::config::MetaConfig> {
 fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    if let Some(lr) = keinestamp::app_config::get_last_revert() {
-        if meta.project_id.as_deref() == Some(lr.project_id.as_str()) {
-            if let Ok(head) = keinestamp::git_project::get_current_commit_hash(&meta.project_root) {
-                if head == lr.revert_hash {
-                    eprintln!("⚠️ 注意：当前处于撤回状态，记录后将无法恢复上次撤回的记录（其内容会合并进新记录）");
-                }
-            }
+    if let Ok(rs) = keinestamp::git_project::get_rollback_state(&meta.project_root) {
+        if rs.rollback_point.is_some() && rs.head_matches {
+            eprintln!("⚠️ 注意：当前处于回退状态，记录后将无法恢复回退前的状态");
         }
     }
 
@@ -274,6 +273,8 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
         false,
     );
 
+    let _ = keinestamp::git_project::clear_rollback(&meta.project_root);
+
     println!("已记录 {} — {}", short_hash, message);
     Ok(())
 }
@@ -304,90 +305,39 @@ fn cmd_pull(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn cmd_revert(path: &Path) -> anyhow::Result<()> {
+fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
-    let original_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)?;
-
-    match keinestamp::git_project::revert(&meta.project_root) {
-        Ok(_) => {
-            let revert_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)?;
-            let timeline_path = meta.web_root.join("timeline.json");
-            let mut removed_entry: Option<keinestamp::timeline::TimelineEntry> = None;
-            if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
-                let pos = tl.entries.iter().position(|e| e.id == original_hash);
-                if let Some(i) = pos {
-                    let e = tl.entries.remove(i);
-                    eprintln!("[debug] revert: removed entry {}", &e.id[..7.min(e.id.len())]);
-                    removed_entry = Some(e.clone());
-                    keinestamp::timeline::write_timeline(&timeline_path, &tl)?;
-                    let project_name = meta.project_root.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-                    keinestamp::html_gen::generate_index_html(&meta.web_root, &meta.project_root, &tl, &project_name)?;
-                    let _ = keinestamp::git_web::web_commit_and_push(
-                        &meta.web_root,
-                        &format!("revert {}", &e.id[..7.min(e.id.len())]),
-                        false,
-                    );
-                } else {
-                    eprintln!(
-                        "[debug] revert: no timeline entry matches {} — timeline unchanged",
-                        &original_hash[..7.min(original_hash.len())]
-                    );
-                }
-            }
-            if let Some(pid) = meta.project_id.clone() {
-                keinestamp::app_config::set_last_revert(Some(keinestamp::app_config::LastRevert {
-                    project_id: pid,
-                    revert_hash,
-                    original_hash,
-                    removed_entry,
-                }));
-            }
-            println!("已撤回上一次提交，文件修改保留在工作区中");
-            Ok(())
-        }
-        Err(e) => {
-            let msg = format!("{}", e);
-            if msg.contains("no commits to revert") {
-                println!("没有可撤回的提交");
-                Ok(())
-            } else {
-                Err(e)
-            }
-        }
-    }
+    let timeline_path = meta.web_root.join("timeline.json");
+    let tl = keinestamp::timeline::read_timeline(&timeline_path)?;
+    let full = keinestamp::timeline::get_entry(&tl, entry)
+        .map(|e| e.id.clone())
+        .ok_or_else(|| anyhow::anyhow!("记录不存在: {}", entry))?;
+    keinestamp::git_project::rollback(&meta.project_root, &full)?;
+    println!("已回退到记录 {}（文件已还原，最新状态已暂存，可用 restore 恢复）", &full[..7.min(full.len())]);
+    Ok(())
 }
 
 fn cmd_restore(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
-    let lr = keinestamp::app_config::get_last_revert();
-    let lr = match lr {
-        Some(r) if meta.project_id.as_deref() == Some(r.project_id.as_str()) => r,
-        _ => {
-            println!("没有可恢复的撤回");
-            return Ok(());
+    match keinestamp::git_project::restore_rollback(&meta.project_root) {
+        Ok(_) => {
+            println!("已恢复回退前的状态");
+            Ok(())
         }
-    };
-    let head = keinestamp::git_project::get_current_commit_hash(&meta.project_root)?;
-    if head != lr.revert_hash {
-        println!("撤回后已有新记录，无法恢复");
-        return Ok(());
+        Err(e) => {
+            if let Ok(files) = keinestamp::git_project::get_rollback_conflicts(&meta.project_root) {
+                if !files.is_empty() {
+                    println!("恢复存在冲突，以下文件需要处理：");
+                    for f in &files {
+                        println!("  {}", f);
+                    }
+                    println!("请在 GUI 中完成恢复（文件二选一），或手动处理冲突后运行 `git stash drop` 结束回退状态");
+                    return Ok(());
+                }
+            }
+            Err(e)
+        }
     }
-    keinestamp::git_project::restore_revert(&meta.project_root, &lr.original_hash)?;
-    keinestamp::app_config::set_last_revert(None);
-    if let Some(entry) = lr.removed_entry {
-        keinestamp::timeline::append_entry(&meta.web_root.join("timeline.json"), entry)?;
-    }
-    if let Ok(tl) = keinestamp::timeline::read_timeline(&meta.web_root.join("timeline.json")) {
-        let project_name = meta.project_root.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-        keinestamp::html_gen::generate_index_html(&meta.web_root, &meta.project_root, &tl, &project_name)?;
-        let _ = keinestamp::git_web::web_commit_and_push(
-            &meta.web_root,
-            &format!("restore revert {}", &lr.original_hash[..7.min(lr.original_hash.len())]),
-            false,
-        );
-    }
-    println!("已恢复撤回的上一次记录");
-    Ok(())
 }
 
 fn cmd_status(path: &Path) -> anyhow::Result<()> {

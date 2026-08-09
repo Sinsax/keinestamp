@@ -1,15 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct LastRevert {
-    pub project_id: String,
-    pub revert_hash: String,
-    pub original_hash: String,
-    #[serde(default)]
-    pub removed_entry: Option<crate::timeline::TimelineEntry>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     #[serde(default)]
@@ -26,8 +17,6 @@ pub struct AppConfig {
     pub auto_connect: bool,
     #[serde(default)]
     pub close_to_tray: Option<bool>,
-    #[serde(default)]
-    pub last_revert: Option<LastRevert>,
 }
 
 impl AppConfig {
@@ -75,7 +64,6 @@ impl Default for AppConfig {
             deploy_token: None,
             auto_connect: false,
             close_to_tray: None,
-            last_revert: None,
         }
     }
 }
@@ -146,16 +134,6 @@ pub fn set_auto_connect(v: bool) {
     cfg.save();
 }
 
-pub fn get_last_revert() -> Option<LastRevert> {
-    AppConfig::load().last_revert
-}
-
-pub fn set_last_revert(r: Option<LastRevert>) {
-    let mut cfg = AppConfig::load();
-    cfg.last_revert = r;
-    cfg.save();
-}
-
 pub fn default_app_config_path() -> PathBuf {
     let (base, dir_name) = if cfg!(target_os = "windows") {
         (
@@ -198,7 +176,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, close_to_tray: Some(true), last_revert: None };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, close_to_tray: Some(true) };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);
@@ -208,7 +186,6 @@ assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
     assert_eq!(loaded.deploy_server_url, None);
     assert_eq!(loaded.deploy_token, None);
     assert_eq!(loaded.close_to_tray, Some(true));
-    assert_eq!(loaded.last_revert, None);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -219,38 +196,6 @@ assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
 assert_eq!(loaded.blender_path, None);
     assert_eq!(loaded.blender_version, None);
     assert_eq!(loaded.blender_versions, None);
-    }
-
-    #[test]
-    fn test_last_revert_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_app_lr_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let path = dir.join("app-config.toml");
-
-        let lr = LastRevert {
-            project_id: "proj1".to_string(),
-            revert_hash: "aaaa1111".to_string(),
-            original_hash: "bbbb2222".to_string(),
-            removed_entry: None,
-        };
-        let cfg = AppConfig {
-            blender_path: None,
-            blender_version: None,
-            blender_versions: None,
-            deploy_server_url: None,
-            deploy_token: None,
-            auto_connect: false,
-            close_to_tray: None,
-            last_revert: Some(lr),
-        };
-        cfg.save_to(&path);
-        let loaded = AppConfig::load_from(&path);
-        let got = loaded.last_revert.unwrap();
-        assert_eq!(got.project_id, "proj1");
-        assert_eq!(got.revert_hash, "aaaa1111");
-        assert_eq!(got.original_hash, "bbbb2222");
-
-        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
