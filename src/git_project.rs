@@ -123,19 +123,6 @@ fn find_rollback_stash(project_root: &Path) -> Result<Option<String>> {
         }))
 }
 
-fn run_git_bytes(path: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let output = crate::process_util::hide_console(Command::new("git"))
-        .args(args)
-        .current_dir(path)
-        .output()
-        .with_context(|| format!("failed to execute git {:?} at {:?}", args, path))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git {} failed: {}", args.join(" "), stderr.trim());
-    }
-    Ok(output.stdout)
-}
-
 fn clear_rollback_refs(project_root: &Path) -> Result<()> {
     let _ = run_git(project_root, &["update-ref", "-d", ROLLBACK_REF]);
     let _ = run_git(project_root, &["update-ref", "-d", ROLLBACK_POINT_REF]);
@@ -377,12 +364,9 @@ pub fn resolve_rollback_conflicts(project_root: &Path, choices: &[(String, bool)
     for (path, use_latest) in choices {
         if *use_latest {
             if run_git_output(project_root, &["rev-parse", &format!("{}:{}", stash_ref, path)]).is_ok() {
-                let content = run_git_bytes(project_root, &["show", &format!("{}:{}", stash_ref, path)])?;
-                let full = project_root.join(path);
-                if let Some(parent) = full.parent() {
-                    std::fs::create_dir_all(parent)?;
-                }
-                std::fs::write(&full, &content)?;
+                // 用 git restore 写回（会跑 smudge filter，LFS 文件得到真实内容；
+                // 直接用 git show 写文件不过 filter，LFS 文件会变成指针文本）
+                run_git(project_root, &["restore", "--source", stash_ref.as_str(), "--worktree", "--", path])?;
             } else if project_root.join(path).is_file() {
                 std::fs::remove_file(project_root.join(path))?;
             }
