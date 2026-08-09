@@ -1,7 +1,7 @@
-<script lang="ts">
+﻿<script lang="ts">
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
-  import { getFileDiff, openWebTimeline, setEntryMilestone, updateConfig } from '../api'
+  import { getFileDiff, setEntryMilestone, updateConfig } from '../api'
   import { tagColor } from './tags'
 
   let {
@@ -16,6 +16,7 @@
     siteLocked = false,
     onSiteNameChange = async (_val: string) => false,
     onOpenSite = () => {},
+    onOpenLocalView = () => {},
     onMilestoneChange = async () => {},
   }: {
     entries: TimelineEntry[]
@@ -29,6 +30,7 @@
     siteLocked?: boolean
     onSiteNameChange?: (val: string) => Promise<boolean>
     onOpenSite?: () => void
+    onOpenLocalView?: () => void
     onMilestoneChange?: () => Promise<void>
   } = $props()
 
@@ -45,10 +47,10 @@
   }
 
   let editingToken = $state(false)
-  let tokenInput = $state(accessToken)
+  let tokenInput = $state('')
   let tokenSaving = $state(false)
   let copyFeedback = $state(false)
-  let siteInput = $state(siteName)
+  let siteInput = $state('')
   let siteSaving = $state(false)
 
   $effect(() => { tokenInput = accessToken })
@@ -68,16 +70,6 @@
 
   let isDirty = $derived(tokenInput !== accessToken)
 
-  let editTimer: ReturnType<typeof setTimeout> | undefined
-
-  $effect(() => {
-    if (!editingToken) return
-    tokenInput
-    if (editTimer) clearTimeout(editTimer)
-    editTimer = setTimeout(() => { editingToken = false }, 5000)
-    return () => { if (editTimer) clearTimeout(editTimer) }
-  })
-
   function generateToken(): string {
     const bytes = new Uint8Array(16)
     crypto.getRandomValues(bytes)
@@ -87,11 +79,15 @@
   async function saveToken() {
     if (!activePath || !isDirty) return
     tokenSaving = true
+    const val = tokenInput.trim()
     try {
-      await updateConfig(activePath, 'access_token', tokenInput || null)
-      if (onTokenChange) onTokenChange(tokenInput)
+      await updateConfig(activePath, 'access_token', val || null)
+      tokenInput = val
+      if (onTokenChange) onTokenChange(val)
       editingToken = false
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     tokenSaving = false
   }
 
@@ -270,6 +266,7 @@
           <span class="tag-group-line"></span>
         </div>
       {/if}
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <div
         class="entry-card"
         class:active={entry.id === selectedId}
@@ -301,6 +298,7 @@
         </div>
 
         <!-- Section 1: File Changes -->
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'files'); }}>
           <span class="arr">{hasSection(entry.id, 'files') ? '▾' : '▸'}</span>
           <span>文件变动</span>
@@ -319,6 +317,7 @@
 
         <!-- Section 2: Text Diffs -->
         {#if textF.length > 0}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'diff'); }}>
             <span class="arr">{hasSection(entry.id, 'diff') ? '▾' : '▸'}</span>
             <span>文本改动 ({textF.length})</span>
@@ -350,7 +349,8 @@
         {/if}
 
         <!-- Section 3: Blend Models -->
-        {#if blendF.length > 0}
+        {#if entry.preview && blendF.length > 0}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'model'); }}>
             <span class="arr">{hasSection(entry.id, 'model') ? '▾' : '▸'}</span>
             <span>3D 模型预览 ({blendF.length})</span>
@@ -360,7 +360,7 @@
               {#each blendF as f}
                 <div class="diff-path" style="margin-bottom:4px">{f}</div>
               {/each}
-              <button class="open-web-btn" onclick={(e) => { e.stopPropagation(); if (activePath) openWebTimeline(activePath) }}>
+              <button class="open-web-btn" onclick={(e) => { e.stopPropagation(); onOpenLocalView() }}>
                 在浏览器中打开 — 3D 预览
               </button>
             </div>
@@ -372,7 +372,7 @@
   </div>
   <div class="entries-footer">
     <div class="at-section">
-      <label>网页名称</label>
+      <label for="el-site-name">网页名称</label>
       {#if siteLocked}
         <div class="at-row">
           <div class="at-masked site-name-display" title={siteName}>{siteName}</div>
@@ -385,6 +385,7 @@
         <div class="at-row">
           <input
             type="text"
+            id="el-site-name"
             class="at-input"
             bind:value={siteInput}
             placeholder="站点名（仅限英文、数字、- 和 _）"
@@ -404,15 +405,15 @@
     </div>
     {#if siteLocked}
       <div class="at-section">
-        <label>网页访问令牌</label>
+        <label for="el-access-token">网页访问令牌</label>
         <div class="at-row">
           {#if editingToken}
             <input
               type="text"
+              id="el-access-token"
               class="at-input"
               bind:value={tokenInput}
               placeholder="访问令牌"
-              autofocus
             />
             {#if !tokenInput}
               <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
@@ -426,6 +427,7 @@
               {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
             </button>
           {:else if accessToken}
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <div
               class="at-masked"
               class:copied={copyFeedback}
@@ -440,6 +442,7 @@
               {/if}
             </div>
           {:else}
+            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
             <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
               - 未设置 -
             </div>
@@ -510,6 +513,10 @@
   }
   .entry-card.milestone:hover {
     border-color: var(--accent);
+  }
+  .entry-card.milestone.active {
+    outline-offset: -1px;
+    box-shadow: 0 2px 18px color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .entry-card.milestone .msg {
     font-weight: 600;

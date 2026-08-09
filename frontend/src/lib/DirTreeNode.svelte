@@ -9,12 +9,14 @@
     toggle,
     depth = 0,
     activePath = '',
+    onContextMenu = (_path: string, _isDir: boolean, _x: number, _y: number) => {},
   }: {
     node: FileTreeNode
     collapsed: Set<string>
     toggle: (path: string) => void
     depth?: number
     activePath?: string
+    onContextMenu?: (path: string, isDir: boolean, x: number, y: number) => void
   } = $props()
 
   function handleFileDblClick() {
@@ -29,16 +31,25 @@
   const pad = $derived(depth * 18)
 </script>
 
-<div class="dtn" style="padding-left: {pad}px">
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+<div
+  class="dtn"
+  class:dir={isDir}
+  style="padding-left: {pad}px"
+  onclick={() => isDir && toggle(node.path)}
+  oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, isDir, e.clientX, e.clientY) }}
+>
   {#if isDir}
-    <span class="arr" onclick={() => toggle(node.path)}>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <span class="arr" onclick={(e) => { e.stopPropagation(); toggle(node.path) }}>
       {#if isCollapsed}
         <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
       {:else}
         <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M3 6l5 5 5-5H3z"/></svg>
       {/if}
     </span>
-    <span class="ico" onclick={() => toggle(node.path)}>
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <span class="ico" onclick={(e) => { e.stopPropagation(); toggle(node.path) }}>
       {#if isCollapsed}
         <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor"><path d="M2 5a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z" opacity="0.7"/></svg>
       {:else}
@@ -49,12 +60,13 @@
     <span class="arr-placeholder"></span>
     <span class="ico"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" opacity="0.5"><path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-5.586a1 1 0 01-.707-.293L9.293 3.293A1 1 0 008.586 3H4z"/></svg></span>
   {/if}
-  <span class="nm" class:dir={isDir} onclick={() => isDir && toggle(node.path)} ondblclick={!isDir ? handleFileDblClick : undefined}>{node.name}</span>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <span class="nm" class:dir={isDir} onclick={(e) => { if (isDir) { e.stopPropagation(); toggle(node.path) } }} ondblclick={!isDir ? handleFileDblClick : undefined}>{node.name}</span>
 </div>
 
 {#if isDir && !isCollapsed}
   {#each node.children as child (child.path)}
-      <DirTreeNode node={child} {collapsed} {toggle} depth={depth + 1} />
+      <DirTreeNode node={child} {collapsed} {toggle} depth={depth + 1} {activePath} {onContextMenu} />
   {/each}
 {/if}
 

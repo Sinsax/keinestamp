@@ -9,15 +9,6 @@ export interface MetaConfig {
   site_locked: boolean
 }
 
-export interface AppConfig {
-  blender_path: string | null
-  blender_version: string | null
-  blender_versions: string | null
-  deploy_server_url: string | null
-  deploy_token: string | null
-  auto_connect: boolean
-}
-
 export interface TimelineEntry {
   id: string
   timestamp: string

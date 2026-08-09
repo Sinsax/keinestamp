@@ -1,4 +1,4 @@
-use anyhow::Context;
+﻿use anyhow::Context;
 use std::path::Path;
 
 pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> anyhow::Result<()> {
@@ -20,7 +20,7 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
     std::fs::create_dir_all(&files_dir)
         .with_context(|| format!("failed to create output directory {:?}", files_dir))?;
 
-    let ls_output = std::process::Command::new("git")
+    let ls_output = crate::process_util::hide_console(std::process::Command::new("git"))
         .args(["-c", "core.quotepath=false", "ls-tree", "-r", "--name-only", &entry.id])
         .current_dir(project_root)
         .output()
@@ -42,7 +42,7 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
     }
 
     for file in &files {
-        let show_output = std::process::Command::new("git")
+        let show_output = crate::process_util::hide_console(std::process::Command::new("git"))
             .args(["show", &format!("{}:{}", entry.id, file)])
             .current_dir(project_root)
             .output()

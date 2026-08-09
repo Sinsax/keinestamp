@@ -4,11 +4,13 @@
     onCancel,
     lastTag = '',
     canRestore = false,
+    busy = false,
   }: {
     onConfirm: (msg: string, tag: string | null, noPreview: boolean) => Promise<boolean>
     onCancel: () => void
     lastTag?: string
     canRestore?: boolean
+    busy?: boolean
   } = $props()
 
   const TAG_PRESETS = ['建模', 'UV拆分', '绑定', '贴图', '修复']
@@ -26,7 +28,7 @@
   }
 
   async function handleConfirm() {
-    if (!message.trim()) return
+    if (busy || !message.trim()) return
     const ok = await onConfirm(message.trim(), effectiveTag(), !previewEnabled)
     if (ok) onCancel()
   }
@@ -59,8 +61,9 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="dialog-overlay" onclick={onCancel} role="dialog">
-  <div class="dialog commit-dialog" class:restore-mode={canRestore} onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
+<div class="dialog-overlay" onclick={onCancel} role="presentation">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="dialog commit-dialog" class:restore-mode={canRestore} onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
     <h3>
       {#if canRestore}
         <span class="restore-mark">
@@ -76,15 +79,16 @@
       </div>
     {/if}
     <div class="field">
-      <label>记录说明</label>
+      <label for="cd-message">记录说明</label>
       <textarea
+        id="cd-message"
         bind:value={message}
         rows={3}
         placeholder="描述本次修改..."
       ></textarea>
     </div>
     <div class="field">
-      <label>标签（可选）</label>
+      <label for="cd-tag">标签（可选）</label>
       <div class="tag-row">
         {#each TAG_PRESETS as p}
           <button
@@ -101,6 +105,7 @@
       </div>
       {#if useCustom}
         <input
+          id="cd-tag"
           class="custom-input"
           type="text"
           bind:value={customTag}
@@ -109,13 +114,13 @@
       {/if}
     </div>
     <div class="field row-field">
-      <label>3D 预览</label>
-      <input type="checkbox" bind:checked={previewEnabled} />
+      <label for="cd-preview">3D 预览</label>
+      <input id="cd-preview" type="checkbox" bind:checked={previewEnabled} />
     </div>
     <div class="actions">
       <button onclick={onCancel}>取消</button>
-      <button onclick={handleConfirm} class="accent" disabled={!message.trim()}>
-        记录 (Ctrl+Enter)
+      <button onclick={handleConfirm} class="accent" disabled={busy || !message.trim()}>
+        {busy ? '记录中...' : '记录 (Ctrl+Enter)'}
       </button>
     </div>
   </div>

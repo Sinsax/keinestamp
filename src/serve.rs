@@ -5,18 +5,19 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tiny_http::{Header, Method, Response, Server};
 
-const MAX_UPLOAD_SIZE: usize = 100 * 1024 * 1024;
+const MAX_UPLOAD_SIZE: usize = 512 * 1024 * 1024;
 const MAX_EXTRACT_SIZE: u64 = 512 * 1024 * 1024;
 const BODY_READ_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_LOGIN_BODY: u64 = 8 * 1024;
 const MAX_AUTH_FAILURES: u32 = 10;
 const AUTH_WINDOW_SECS: u64 = 60;
 const AUTH_BLOCK_SECS: u64 = 120;
+const MAX_CONCURRENT_REQUESTS: usize = 32;
 
 // --- Logger ---
 
@@ -37,6 +38,7 @@ fn log_error(tag: &str, msg: &str) {
 }
 
 static TRUST_PROXY: OnceLock<bool> = OnceLock::new();
+static UPLOAD_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn request_ip(request: &tiny_http::Request) -> IpAddr {
     let fallback = request.remote_addr().map(|sa| sa.ip()).unwrap_or(IpAddr::from([127, 0, 0, 1]));
@@ -103,6 +105,14 @@ struct AttemptTracker {
 
 struct RateLimiter {
     attempts: Mutex<HashMap<IpAddr, AttemptTracker>>,
+}
+
+struct SlotGuard(Arc<AtomicUsize>);
+
+impl Drop for SlotGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
 }
 
 impl RateLimiter {
@@ -254,8 +264,7 @@ fn check_browser_static_auth(
                 rate_limiter.record_success(&ip);
                 return AuthResult::Authenticated;
             }
-            rate_limiter.record_failure(&ip);
-            return AuthResult::Unauthorized;
+            // Wrong bearer → fall through to cookie check before failing
         }
     }
 
@@ -865,7 +874,14 @@ fn projects_file(web_root: &Path) -> PathBuf {
 fn load_projects(
     web_root: &Path,
 ) -> (HashMap<String, String>, HashMap<String, String>) {
-    let content = std::fs::read_to_string(projects_file(web_root)).unwrap_or_default();
+    let path = projects_file(web_root);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(e) => {
+            log_error("PROJECTS", &format!("failed to read {:?}: {} — starting with empty project registry", path, e));
+            return (HashMap::new(), HashMap::new());
+        }
+    };
     if content.trim().is_empty() {
         return (HashMap::new(), HashMap::new());
     }
@@ -881,7 +897,10 @@ fn load_projects(
                 .unwrap_or_default();
             (tokens, ids)
         }
-        Err(_) => (HashMap::new(), HashMap::new()),
+        Err(e) => {
+            log_error("PROJECTS", &format!("corrupt projects file {:?}: {} — starting with empty project registry", path, e));
+            (HashMap::new(), HashMap::new())
+        }
     }
 }
 
@@ -949,8 +968,15 @@ fn handle_login_post(
     mut request: tiny_http::Request,
     project_name: &str,
     project_tokens: &RwLock<HashMap<String, String>>,
+    rate_limiter: &RateLimiter,
 ) -> Result<()> {
     let ip = request_ip_trusted(&request);
+    if !rate_limiter.check(&ip) {
+        log_warn("LOGIN", &format!("{} rate limited", ip));
+        let response = Response::from_string("429 Too Many Requests").with_status_code(429);
+        request.respond(response)?;
+        return Ok(());
+    }
     let mut body = String::new();
     let read_start = Instant::now();
     let mut reader = request.as_reader().take(MAX_LOGIN_BODY);
@@ -985,6 +1011,7 @@ fn handle_login_post(
 
     if is_valid {
         log_info("LOGIN", &format!("{} project={} → success", ip, project_name));
+        rate_limiter.record_success(&ip);
         let set_cookie = format!("keinestamp_token={}; Path=/{}/; HttpOnly; SameSite=Lax", decoded, project_name);
         let redirect = Response::from_string("")
             .with_status_code(302)
@@ -993,6 +1020,7 @@ fn handle_login_post(
         request.respond(redirect)?;
     } else {
         log_warn("LOGIN", &format!("{} project={} → failed", ip, project_name));
+        rate_limiter.record_failure(&ip);
         let redirect = Response::from_string("")
             .with_status_code(302)
             .with_header(Header::from_bytes(&b"Location"[..], format!("/{}/login?error=1", project_name).as_bytes().to_vec()).unwrap());
@@ -1001,17 +1029,11 @@ fn handle_login_post(
     Ok(())
 }
 
-/// Generate a reasonably random hex token (not cryptographically secure, sufficient for LAN use)
+/// Generate a random hex token (32 bytes from OS CSPRNG)
 pub fn generate_token() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let pid = std::process::id();
-    let a = now as u64;
-    let b = (pid as u64).wrapping_mul(0x9e3779b97f4a7c15);
-    format!("{:016x}{:016x}", a ^ b, a.wrapping_mul(6364136223846793005) ^ b.rotate_left(17))
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).unwrap_or_default();
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Auto-generate `serve.toml` with random tokens when none exists
@@ -1073,22 +1095,55 @@ pub fn start(config: ServeConfig) -> Result<()> {
     let project_tokens: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(tokens_loaded));
     let project_ids: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(ids_loaded));
     let web_versions: Arc<RwLock<HashMap<String, u64>>> = Arc::new(RwLock::new(load_versions(&web_root)));
-    let rate_limiter = Arc::new(RateLimiter::new());
+    let deploy_limiter = Arc::new(RateLimiter::new());
+    let browser_limiter = Arc::new(RateLimiter::new());
 
+    let active_requests = Arc::new(AtomicUsize::new(0));
     for request in server.incoming_requests() {
-        let rl = rate_limiter.clone();
+        if active_requests.load(Ordering::Relaxed) >= MAX_CONCURRENT_REQUESTS {
+            let _ = request.respond(Response::from_string("503 Too Many Requests").with_status_code(503));
+            continue;
+        }
+        active_requests.fetch_add(1, Ordering::Relaxed);
+        let rl = deploy_limiter.clone();
+        let brl = browser_limiter.clone();
         let dt = deploy_token.clone();
         let pt = project_tokens.clone();
         let pi = project_ids.clone();
         let wv = web_versions.clone();
         let wr = web_root.clone();
         let lu = last_update.clone();
+        let active = active_requests.clone();
         let method = request.method().clone();
         let url = request.url().to_string();
         let req_ip = request_ip_trusted(&request);
+        std::thread::spawn(move || {
+            let _guard = SlotGuard(active);
+            let _ = handle_request(request, url, method, req_ip, dt, pt, pi, wv, wr, lu, rl, brl);
+        });
+    }
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn handle_request(
+    request: tiny_http::Request,
+    url: String,
+    method: Method,
+    req_ip: IpAddr,
+    dt: Option<String>,
+    pt: Arc<RwLock<HashMap<String, String>>>,
+    pi: Arc<RwLock<HashMap<String, String>>>,
+    wv: Arc<RwLock<HashMap<String, u64>>>,
+    web_root: PathBuf,
+    lu: Arc<AtomicU64>,
+    rl: Arc<RateLimiter>,
+    brl: Arc<RateLimiter>,
+) -> Result<()> {
 
         // /health
-        if url == "/health" && method == Method::Get {
+        if url.split('?').next() == Some("/health") && method == Method::Get {
             let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
             match auth {
                 AuthResult::Authenticated => {
@@ -1105,7 +1160,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
                     let _ = request.respond(unauthorized_response());
                 }
             }
-            continue;
+            return Ok(());
         }
 
         // /upload
@@ -1113,7 +1168,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
             let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
             match auth {
                 AuthResult::Authenticated => {
-                    if let Err(e) = handle_upload(request, &wr, &lu, &pt, &pi, &wv) {
+                    if let Err(e) = handle_upload(request, &web_root, &lu, &pt, &pi, &wv) {
                         log_error("DEPLOY", &format!("{} {}", req_ip, e));
                     }
                 }
@@ -1126,7 +1181,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
                     let _ = request.respond(unauthorized_response());
                 }
             }
-            continue;
+            return Ok(());
         }
 
         // Root homepage
@@ -1134,7 +1189,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
             if let Err(e) = handle_index(request) {
                 log_error("INDEX", &format!("{} {}", req_ip, e));
             }
-            continue;
+            return Ok(());
         }
 
         // Browser routes
@@ -1147,12 +1202,12 @@ pub fn start(config: ServeConfig) -> Result<()> {
 
         if project_name.is_empty() || !project_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
-            continue;
+            return Ok(());
         }
 
         if !web_root.join(project_name).is_dir() {
             let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
-            continue;
+            return Ok(());
         }
 
         let route_path = if rest.is_empty() { "/" } else { rest };
@@ -1174,7 +1229,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
                     let _ = request.respond(unauthorized_response());
                 }
             }
-            continue;
+            return Ok(());
         }
 
         if route_path == "/login" && method == Method::Get {
@@ -1182,14 +1237,14 @@ pub fn start(config: ServeConfig) -> Result<()> {
                 log_error("LOGIN", &format!("{} serve_login_page: {}", req_ip, e));
             }
         } else if route_path == "/login" && method == Method::Post {
-            if let Err(e) = handle_login_post(request, project_name, &pt) {
+            if let Err(e) = handle_login_post(request, project_name, &pt, &brl) {
                 log_error("LOGIN", &format!("{} handle_login_post: {}", req_ip, e));
             }
         } else {
-            let auth = check_browser_static_auth(&request, &rl, project_name, &pt);
+            let auth = check_browser_static_auth(&request, &brl, project_name, &pt);
             match auth {
                 AuthResult::Authenticated => {
-                    if let Err(e) = handle_static(request, &wr, project_name) {
+                    if let Err(e) = handle_static(request, &web_root, project_name) {
                         log_error("ACCESS", &format!("{} handle_static: {}", req_ip, e));
                     }
                 }
@@ -1214,7 +1269,6 @@ pub fn start(config: ServeConfig) -> Result<()> {
                 }
             }
         }
-    }
 
     Ok(())
 }
@@ -1294,6 +1348,13 @@ fn handle_upload(
         return Ok(());
     }
 
+    if project_name.starts_with('_') {
+        log_warn("DEPLOY", &format!("{} reserved project name '{}'", ip, project_name));
+        let response = Response::from_string("reserved project name").with_status_code(400);
+        request.respond(response)?;
+        return Ok(());
+    }
+
     // Conflict check: verify project_id matches
     let project_id = request.headers().iter()
         .find(|h| h.field.equiv("X-Project-Id"))
@@ -1308,6 +1369,14 @@ fn handle_upload(
                 request.respond(response)?;
                 return Ok(());
             }
+        } else if web_root.join(&project_name).is_dir() {
+            log_warn(
+                "DEPLOY",
+                &format!("{} project='{}' exists but has no recorded identity — refusing takeover", ip, project_name),
+            );
+            let response = Response::from_string("403 Forbidden: existing project has no identity").with_status_code(403);
+            request.respond(response)?;
+            return Ok(());
         }
     }
     if !project_id.is_empty() {
@@ -1338,8 +1407,9 @@ fn handle_upload(
     let tmp_parent = deploy_dir
         .parent()
         .unwrap_or(Path::new("."));
-    let tmp_dir = tmp_parent.join(format!(".keinestamp-tmp.{}", std::process::id()));
-    let bak_dir = tmp_parent.join(format!(".keinestamp-bak.{}", std::process::id()));
+    let seq = UPLOAD_SEQ.fetch_add(1, Ordering::Relaxed);
+    let tmp_dir = tmp_parent.join(format!(".keinestamp-tmp.{}.{}", std::process::id(), seq));
+    let bak_dir = tmp_parent.join(format!(".keinestamp-bak.{}.{}", std::process::id(), seq));
 
     let _ = std::fs::remove_dir_all(&tmp_dir);
     std::fs::create_dir_all(&tmp_dir).context("failed to create temp dir")?;
@@ -1362,10 +1432,6 @@ fn handle_upload(
     for i in 0..archive.len() {
         let mut file = archive.by_index(i)?;
         let entry_path = file.mangled_name();
-        let path_str = entry_path.to_string_lossy();
-        if path_str.contains("..") {
-            continue;
-        }
         let dest = tmp_dir.join(&entry_path);
 
         let canonical_tmp = tmp_dir.canonicalize().unwrap_or_else(|_| tmp_dir.to_path_buf());
@@ -1525,8 +1591,7 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
             }
             Err(e) => {
                 log_error("ACCESS", &format!("{}500: {}", access_msg, e));
-                let body = format!("500 Internal Server Error: {}", e);
-                let response = Response::from_string(body).with_status_code(500);
+                let response = Response::from_string("500 Internal Server Error").with_status_code(500);
                 request.respond(response)?;
             }
         }
@@ -1566,11 +1631,16 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
         let _ = port_tx.send(port);
         for request in server.incoming_requests() {
             let url = request.url().to_string();
-            let clean_path = if url == "/" || url.is_empty() {
+            let path_only = url.split('?').next().unwrap_or(&url);
+            let clean_path = if path_only == "/" || path_only.is_empty() {
                 "index.html".to_string()
             } else {
-                url.trim_start_matches('/').to_string()
+                path_only.trim_start_matches('/').to_string()
             };
+            if clean_path.starts_with('.') || clean_path.contains("/.") {
+                let _ = request.respond(Response::from_string("404").with_status_code(404));
+                continue;
+            }
             let file_path = web_root.join(&clean_path);
             if file_path.exists() && file_path.is_file() {
                 if let Ok(canonical_file) = file_path.canonicalize() {
@@ -1591,7 +1661,22 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
                     }
                 }
             } else {
-                let _ = request.respond(Response::from_string("404").with_status_code(404));
+                let fallback = web_root.join("index.html");
+                if fallback.exists() && fallback.is_file() {
+                    match std::fs::read(&fallback) {
+                        Ok(content) => {
+                            let mime = mime_type(&fallback);
+                            let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
+                            let response = Response::from_data(content).with_header(hdr);
+                            let _ = request.respond(response);
+                        }
+                        Err(_) => {
+                            let _ = request.respond(Response::from_string("500").with_status_code(500));
+                        }
+                    }
+                } else {
+                    let _ = request.respond(Response::from_string("404").with_status_code(404));
+                }
             }
         }
         return Ok(());

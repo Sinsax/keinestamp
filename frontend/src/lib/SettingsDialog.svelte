@@ -1,25 +1,27 @@
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, onDestroy } from 'svelte'
   import { listen } from '@tauri-apps/api/event'
   import * as api from '../api'
 
   let {
     path = '',
     onClose,
-    cachedVersions = [],
   }: {
     path?: string
     onClose: () => void
-    cachedVersions?: string[]
   } = $props()
 
   let webRemote = $state('')
   let deployToken = $state('')
   let autoConnect = $state(false)
+  let closeAction = $state<'tray' | 'quit'>('tray')
   let selectedVersion = $state('')
   let versions = $state<string[]>([])
   let installedVersions = $state<string[]>([])
   let versionsLoading = $state(false)
+  let cooldownLeft = $state(0)
+  let cooldownUntil = 0
+  let cooldownTimer: ReturnType<typeof setTimeout> | undefined
   let saving = $state(false)
   let downloading = $state(false)
   let dlPhase = $state('')
@@ -29,28 +31,27 @@
   let connectStatus = $state<'none' | 'ok' | 'fail'>('none')
   let savedFeedback = $state(false)
 
-  $effect(() => {
-    if (cachedVersions.length > 0 && versions.length === 0) {
-      versions = [...cachedVersions]
-      if (!selectedVersion) selectedVersion = versions[0]
-    }
-  })
-
   onMount(() => {
     (async () => {
       try {
         deployToken = await api.getDeployToken()
         webRemote = await api.getDeployServerUrl()
         autoConnect = await api.getAutoConnect()
+        const close = await api.getCloseAction()
+        closeAction = close === false ? 'quit' : 'tray'
       } catch { /* ignore */ }
     })()
 
-    if (versions.length > 0 && !selectedVersion) {
-      selectedVersion = versions[0]
-    }
-    if (versions.length === 0 && cachedVersions.length === 0) {
-      loadVersions()
-    }
+    ;(async () => {
+      try {
+        const cached = await api.getCachedBlenderVersions()
+        if (cached.length > 0) {
+          versions = cached
+          if (!selectedVersion) selectedVersion = versions[0]
+        }
+      } catch { /* ignore */ }
+    })()
+
     loadInstalled()
 
     const unlistenPromise = listen<BlenderProgress>('blender-download-progress', (event) => {
@@ -61,15 +62,30 @@
     return () => { unlistenPromise.then(fn => fn()) }
   })
 
-  async function loadVersions() {
+  onDestroy(() => {
+    if (cooldownTimer) clearTimeout(cooldownTimer)
+  })
+
+  function updateCooldown() {
+    const left = Math.max(0, Math.ceil((cooldownUntil - Date.now()) / 1000))
+    cooldownLeft = left
+    if (left > 0) {
+      cooldownTimer = setTimeout(updateCooldown, 500)
+    }
+  }
+
+  async function checkVersions() {
+    if (versionsLoading || cooldownLeft > 0) return
     versionsLoading = true
     try {
-      versions = await api.listBlenderVersions()
+      versions = await api.refreshBlenderVersions()
       if (versions.length > 0 && !selectedVersion) {
         selectedVersion = versions[0]
       }
     } catch { /* ignore */ }
     versionsLoading = false
+    cooldownUntil = Date.now() + 10000
+    updateCooldown()
   }
 
   async function loadInstalled() {
@@ -121,6 +137,7 @@
       await api.setDeployToken(deployToken)
       await api.setDeployServerUrl(webRemote)
       await api.setAutoConnect(autoConnect)
+      await api.setCloseAction(closeAction === 'tray')
       savedFeedback = true
       setTimeout(() => savedFeedback = false, 2000)
     } catch { /* ignore */ }
@@ -136,8 +153,9 @@
   }
 </script>
 
-<div class="overlay" onclick={onClose} role="dialog">
-  <div class="panel" onclick={(e) => e.stopPropagation()} role="document">
+<div class="dialog-overlay" onclick={onClose} role="presentation">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="dialog settings-panel" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
     <h3>设置</h3>
 
     <div class="section">
@@ -146,9 +164,12 @@
         <span class="hint">Keinestamp 自带独立 Blender，不影响系统已安装的版本，无插件冲突风险</span>
         <div class="dl-row">
           {#if versionsLoading}
-            <span class="versions-loading">加载版本列表...</span>
+            <span class="versions-loading">检测版本列表中...</span>
           {:else}
-            <select bind:value={selectedVersion} disabled={downloading}>
+            <select class="sd-select" bind:value={selectedVersion} disabled={downloading}>
+              {#if versions.length === 0}
+                <option value="" disabled>未检测 — 点击「检测新版本」</option>
+              {/if}
               {#each versions as v}
                 <option value={v}>
                   {v}{v === versions[0] ? ' (最新)' : ''}{isInstalled(v) ? ' ✓' : ''}
@@ -156,6 +177,9 @@
               {/each}
             </select>
           {/if}
+          <button onclick={checkVersions} disabled={versionsLoading || cooldownLeft > 0}>
+            {versionsLoading ? '检测中...' : cooldownLeft > 0 ? `冷却 ${cooldownLeft}s` : '检测新版本'}
+          </button>
           <button class="accent" onclick={downloadBlender} disabled={downloading || !selectedVersion || isInstalled(selectedVersion)}>
             {downloading ? '下载中...' : isInstalled(selectedVersion) ? '已安装' : '下载 Blender'}
           </button>
@@ -183,35 +207,47 @@
       </div>
     </div>
 
-      <div class="section">
-        <div class="section-title">服务器连接</div>
-        <div class="field">
-          <label>服务器地址</label>
-          <div class="input-row">
-            <input type="text" bind:value={webRemote} placeholder="http://192.168.0.100:7799" />
-            <button class="connect-btn" onclick={testConnection} disabled={testing || !webRemote}>
-              {testing ? '测试中...' : '测试连接'}
-            </button>
-          </div>
-          <span class="hint">Keinestamp Server 监听地址（全局设置，跟随软件）</span>
-          {#if connectStatus === 'ok'}
-            <span class="conn-result ok">✅ 连接成功</span>
-          {:else if connectStatus === 'fail'}
-            <span class="conn-result fail">❌ 连接失败</span>
-          {/if}
+    <div class="section">
+      <div class="section-title">服务器连接</div>
+      <div class="field">
+        <label for="sd-server-url">服务器地址</label>
+        <div class="input-row">
+          <input id="sd-server-url" type="text" bind:value={webRemote} placeholder="http://192.168.0.100:7799" />
+          <button class="connect-btn" onclick={testConnection} disabled={testing || !webRemote}>
+            {testing ? '测试中...' : '测试连接'}
+          </button>
         </div>
-        <div class="field">
-          <label>部署令牌（Deploy Token）</label>
-          <input type="password" bind:value={deployToken} placeholder="可选" />
-          <span class="hint">用于 App 上传认证（Bearer Token），保存在本机</span>
-        </div>
-        <div class="field toggle-field">
-          <label>
-            <input type="checkbox" bind:checked={autoConnect} />
-            打开项目时自动测试连接（软件级设置）
-          </label>
-        </div>
+        <span class="hint">Keinestamp Server 监听地址（全局设置，跟随软件）</span>
+        {#if connectStatus === 'ok'}
+          <span class="conn-result ok">✅ 连接成功</span>
+        {:else if connectStatus === 'fail'}
+          <span class="conn-result fail">❌ 连接失败</span>
+        {/if}
       </div>
+      <div class="field">
+        <label for="sd-deploy-token">部署令牌（Deploy Token）</label>
+        <input id="sd-deploy-token" type="password" bind:value={deployToken} placeholder="可选" />
+        <span class="hint">用于 App 上传认证（Bearer Token），保存在本机</span>
+      </div>
+      <div class="field toggle-field">
+        <label>
+          <input type="checkbox" bind:checked={autoConnect} />
+          打开项目时自动测试连接（软件级设置）
+        </label>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">通用</div>
+      <div class="field">
+        <label for="sd-close-action">关闭窗口时</label>
+        <select id="sd-close-action" class="sd-select" bind:value={closeAction}>
+          <option value="tray">后台驻留（通知区域）</option>
+          <option value="quit">退出应用</option>
+        </select>
+        <span class="hint">首次关闭会询问一次，之后按此习惯执行；通知区域图标左键打开、右键可随时退出</span>
+      </div>
+    </div>
 
     <div class="actions">
       <button onclick={onClose}>取消</button>
@@ -221,27 +257,10 @@
 </div>
 
 <style>
-  .overlay {
-    position: fixed; inset: 0;
-    background: rgba(30, 40, 51, 0.35);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-    z-index: 200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    animation: fade-in 0.15s var(--ease);
-  }
-  .panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-lg);
-    padding: 24px;
+  .settings-panel {
     width: 520px;
     max-height: 80vh;
     overflow-y: auto;
-    box-shadow: var(--shadow-lg);
-    animation: dialog-in 0.2s var(--ease);
   }
   h3 { margin-bottom: 16px; font-size: 16px; }
   .section { margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
@@ -254,7 +273,7 @@
   .hint { display: block; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
   .dl-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .dl-row button { font-size: 12px; padding: 5px 14px; }
-  .dl-row select { width: 200px; font-size: 12px; padding: 5px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
+  .dl-row select, .sd-select { width: 200px; font-size: 12px; padding: 5px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
   .versions-loading { font-size: 11px; color: var(--text-dim); }
 
   .progress-bar-container {

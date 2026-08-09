@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use std::path::Path;
 
 fn compute_diff(project_root: &Path, entry_id: &str, file_path: &str) -> String {
-    let output = std::process::Command::new("git")
+    let output = crate::process_util::hide_console(std::process::Command::new("git"))
         .args([
             "-c", "core.quotepath=false",
             "show",
@@ -85,8 +85,12 @@ pub fn generate_index_html(
         .replace("{{PAGE_TITLE}}", page_title)
         .replace("{{FAVICON_B64}}", crate::three_assets::logo_favicon_b64());
 
-    std::fs::write(web_root.join("index.html"), &html)
+    let html_path = web_root.join("index.html");
+    let tmp_path = web_root.join(format!("index.html.tmp{}", std::process::id()));
+    std::fs::write(&tmp_path, &html)
         .with_context(|| format!("failed to write index.html to {:?}", web_root))?;
+    std::fs::rename(&tmp_path, &html_path)
+        .with_context(|| format!("failed to replace index.html in {:?}", web_root))?;
 
     Ok(())
 }
@@ -248,17 +252,17 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 [data-theme="night"] .theme-btn .icon-moon { display: block; }
 .theme-btn:hover { background: var(--surface3); border-color: var(--accent); color: var(--accent); }
 .model-placeholder { font-size: 11px; color: #6c7086; padding: 8px; text-align: center; background: #181825; border-radius: 6px; }
-.model-box { width: 100%; border-radius: 6px; overflow: hidden; background: #1a1a2e; position: relative; }
-.model-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 4px; padding: 6px 8px; background: rgba(17,17,27,0.82); z-index: 10; font-size: 11px; }
-.model-toolbar .sep { width: 1px; height: 16px; background: #45475a; margin: 0 4px; }
+.model-box { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; background: #1a1a2e; position: relative; }
+.model-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-direction: column; gap: 5px; padding: 6px 8px; background: rgba(17,17,27,0.82); z-index: 10; font-size: 11px; }
+.model-toolbar-row { display: flex; align-items: center; gap: 4px; }
+.model-toolbar-row .sep { width: 1px; height: 16px; background: #45475a; margin: 0 4px; flex-shrink: 0; }
 .mbtn { padding: 3px 8px; background: rgba(69,71,90,0.5); border: 1px solid #45475a; border-radius: 4px; color: #a6adc8; cursor: pointer; font-size: 10px; font-family: inherit; transition: background 0.15s, color 0.15s; white-space: nowrap; }
 .mbtn:hover { background: rgba(69,71,90,0.9); }
 .mbtn.active { background: rgba(137,180,250,0.2); border-color: #89b4fa; color: #89b4fa; }
 .model-expand-btn { width: 26px; height: 26px; background: rgba(30,30,46,0.85); border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: background 0.2s; margin-left: auto; }
 .model-expand-btn:hover { background: rgba(69,71,90,0.95); }
 .model-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; background: #11111b; display: flex; flex-direction: column; }
-.model-overlay-bar { display: flex; align-items: center; gap: 4px; padding: 6px 12px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; font-size: 11px; }
-.model-overlay-bar .sep { width: 1px; height: 16px; background: #45475a; margin: 0 4px; }
+.model-overlay-bar { display: flex; flex-direction: column; gap: 5px; padding: 6px 12px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; font-size: 11px; }
 .model-overlay-close { width: 26px; height: 26px; background: rgba(224,108,117,0.15); border: 1px solid #e06c75; border-radius: 4px; color: #e06c75; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; margin-left: auto; }
 .model-overlay-close:hover { background: rgba(224,108,117,0.3); }
 .model-overlay-canvas { flex: 1; position: relative; }
@@ -550,8 +554,10 @@ window.calScroll = function(ds) {
 function createViewer(container, w, h, url, isOverlay) {
   var scene = new THREE.Scene();
   scene.background = new THREE.Color(0x1a1a2e);
-  var camera = new THREE.PerspectiveCamera(40, w / h, 0.1, 1000);
-  camera.position.set(0, 0, 7);
+  var perspCam = new THREE.PerspectiveCamera(40, w / h, 0.1, 1000);
+  perspCam.position.set(0, 0, 7);
+  var orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 1000);
+  var camera = perspCam;
 
   var renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
@@ -638,15 +644,148 @@ function createViewer(container, w, h, url, isOverlay) {
     });
   }
 
-  function resetFrontView() {
+  var pendingAnim = null;
+
+  function animateTo(pos, target) {
+    if (!modelObj) return;
+    pendingAnim = {
+      fromPos: camera.position.clone(),
+      toPos: pos,
+      fromTarget: controls.target.clone(),
+      toTarget: target,
+      t: 0
+    };
+  }
+
+  function updateFrame() {
+    if (pendingAnim) {
+      var a = pendingAnim;
+      a.t = Math.min(1, a.t + 0.05);
+      var k = a.t < 0.5 ? 2 * a.t * a.t : 1 - Math.pow(-2 * a.t + 2, 2) / 2;
+      camera.position.lerpVectors(a.fromPos, a.toPos, k);
+      controls.target.lerpVectors(a.fromTarget, a.toTarget, k);
+      if (k >= 1) pendingAnim = null;
+    }
+    controls.update();
+  }
+
+  function setOrthoFrustumHalfH(halfH) {
+    var aspect = perspCam.aspect || (w / h);
+    orthoCam.left = -halfH * aspect;
+    orthoCam.right = halfH * aspect;
+    orthoCam.top = halfH;
+    orthoCam.bottom = -halfH;
+    orthoCam.zoom = 1;
+    orthoCam.updateProjectionMatrix();
+  }
+
+  function resetView() {
     if (!modelObj) return;
     var box = new THREE.Box3().setFromObject(modelObj);
     var size = box.getSize(new THREE.Vector3());
     var center = box.getCenter(new THREE.Vector3());
     var dist = Math.max(size.x, size.y, size.z) * 1.8;
-    camera.position.set(center.x, center.y, center.z + dist);
-    controls.target.set(center.x, center.y, center.z);
+    camera.up.set(0, 1, 0);
+    if (camera === orthoCam) {
+      setOrthoFrustumHalfH(dist * Math.tan(THREE.MathUtils.degToRad(perspCam.fov) / 2));
+    }
+    animateTo(new THREE.Vector3(center.x, center.y, center.z + dist), center);
+  }
+
+  function setViewAxis(x, y, z) {
+    if (!modelObj) return;
+    var dist = camera.position.distanceTo(controls.target);
+    var t = controls.target;
+    camera.up.set(0, y > 0 ? 0 : 1, y > 0 ? -1 : 0);
+    animateTo(new THREE.Vector3(t.x + x * dist, t.y + y * dist, t.z + z * dist), t);
+  }
+
+  function findHead() {
+    if (!modelObj) return null;
+    modelObj.updateMatrixWorld(true);
+    var pts = [];
+    modelObj.traverse(function(c) {
+      if (!c.isMesh || !c.geometry) return;
+      var pos = c.geometry.getAttribute('position');
+      if (!pos) return;
+      var m = c.matrixWorld;
+      for (var i = 0; i < pos.count; i++) {
+        pts.push(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)).applyMatrix4(m));
+      }
+    });
+    if (pts.length === 0) return null;
+    var minY = Infinity, maxY = -Infinity;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].y < minY) minY = pts[i].y;
+      if (pts[i].y > maxY) maxY = pts[i].y;
+    }
+    if (maxY - minY < 1e-6) return null;
+    var headMin = maxY - (maxY - minY) * 0.25;
+    var cx = 0, cy = 0, cz = 0, n = 0, hs = 0;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].y >= headMin) {
+        cx += pts[i].x; cy += pts[i].y; cz += pts[i].z; n++;
+      }
+    }
+    if (n === 0) return null;
+    cx /= n; cy /= n; cz /= n;
+    for (var i = 0; i < pts.length; i++) {
+      if (pts[i].y >= headMin) {
+        var r = Math.sqrt((pts[i].x - cx) * (pts[i].x - cx) + (pts[i].z - cz) * (pts[i].z - cz));
+        if (r > hs) hs = r;
+      }
+    }
+    return { cx: cx, cy: cy, cz: cz, r: hs };
+  }
+
+  function setFaceView() {
+    var h = findHead();
+    if (!h) {
+      resetView();
+      return;
+    }
+    var dist = Math.max(h.r * 2.2, 0.15);
+    camera.up.set(0, 1, 0);
+    if (camera === orthoCam) {
+      setOrthoFrustumHalfH(dist * Math.tan(THREE.MathUtils.degToRad(perspCam.fov) / 2));
+    }
+    animateTo(new THREE.Vector3(h.cx, h.cy, h.cz + dist), new THREE.Vector3(h.cx, h.cy, h.cz));
+  }
+
+  function setProjection(ortho) {
+    var from = camera;
+    var to = ortho ? orthoCam : perspCam;
+    if (from === to) return;
+    to.position.copy(from.position);
+    to.up.copy(from.up);
+    var dist = from.position.distanceTo(controls.target);
+    if (ortho) {
+      setOrthoFrustumHalfH(dist * Math.tan(THREE.MathUtils.degToRad(perspCam.fov) / 2));
+    } else {
+      var halfH = orthoCam.top / orthoCam.zoom;
+      var newDist = halfH / Math.tan(THREE.MathUtils.degToRad(perspCam.fov) / 2);
+      var dir = from.position.clone().sub(controls.target).normalize();
+      to.position.copy(controls.target).add(dir.multiplyScalar(newDist));
+      perspCam.updateProjectionMatrix();
+    }
+    camera = to;
+    ret.camera = to;
+    controls.object = to;
     controls.update();
+  }
+
+  function resize(nw, nh) {
+    perspCam.aspect = nw / nh;
+    perspCam.updateProjectionMatrix();
+    if (camera === orthoCam) {
+      var halfH = camera.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(perspCam.fov) / 2);
+      orthoCam.left = -halfH * (nw / nh);
+      orthoCam.right = halfH * (nw / nh);
+      orthoCam.top = halfH;
+      orthoCam.bottom = -halfH;
+      orthoCam.updateProjectionMatrix();
+    }
+    renderer.setSize(nw, nh);
   }
 
   function showError(msg) {
@@ -672,7 +811,7 @@ function createViewer(container, w, h, url, isOverlay) {
       scene.add(modelObj);
       saveMaterials();
       applyShading();
-      resetFrontView();
+      resetView();
     } else {
       showError('3D 模型无可见网格');
     }
@@ -692,6 +831,10 @@ function createViewer(container, w, h, url, isOverlay) {
   function makeToolbar(expandCb) {
     var tb = document.createElement('div');
     tb.className = isOverlay ? 'model-overlay-bar' : 'model-toolbar';
+    var row1 = document.createElement('div');
+    row1.className = 'model-toolbar-row';
+    var row2 = document.createElement('div');
+    row2.className = 'model-toolbar-row';
 
     var shadeModes = ['material', 'flat', 'normal'];
     var shadeLabels = { material: '贴图', flat: '灰模', normal: '平滑' };
@@ -725,54 +868,88 @@ function createViewer(container, w, h, url, isOverlay) {
       });
       b.classList.add('shade-btn');
       if (currentShading === m) b.classList.add('active');
-      tb.appendChild(b);
+      row1.appendChild(b);
     });
-
-    tb.appendChild(document.createElement('span')).className = 'sep';
 
     var wireBtn = btn('线框', 'mbtn', function() {
       wireframeVisible = !wireframeVisible;
       rebuildWireframe();
       if (wireframeVisible) wireBtn.classList.add('active'); else wireBtn.classList.remove('active');
     });
-    tb.appendChild(wireBtn);
+    row2.appendChild(wireBtn);
 
     var xrayBtn = btn('透视', 'mbtn', function() {
       xrayMode = !xrayMode;
       applyShading();
       if (xrayMode) xrayBtn.classList.add('active'); else xrayBtn.classList.remove('active');
     });
-    tb.appendChild(xrayBtn);
+    row2.appendChild(xrayBtn);
 
     var gridBtn = btn('网格', 'mbtn active', function() {
       grid.visible = !grid.visible;
       if (grid.visible) gridBtn.classList.add('active'); else gridBtn.classList.remove('active');
     });
-    tb.appendChild(gridBtn);
+    row2.appendChild(gridBtn);
 
-    var frontBtn = btn('正视图', 'mbtn', function() {
-      resetFrontView();
+    row1.appendChild(document.createElement('span')).className = 'sep';
+
+    row1.appendChild(btn('正视图', 'mbtn', function() {
+      setViewAxis(0, 0, 1);
+    }));
+
+    var side = 1;
+    var sideBtn = btn('右视图', 'mbtn', function() {
+      side = -side;
+      setViewAxis(side, 0, 0);
+      sideBtn.textContent = side > 0 ? '右视图' : '左视图';
     });
-    tb.appendChild(frontBtn);
+    row1.appendChild(sideBtn);
+
+    row1.appendChild(btn('顶视图', 'mbtn', function() {
+      setViewAxis(0, 1, 0);
+    }));
+
+    row1.appendChild(document.createElement('span')).className = 'sep';
+
+    var faceBtn = btn('面部', 'mbtn', function() {
+      setFaceView();
+    });
+    row1.appendChild(faceBtn);
+
+    row1.appendChild(document.createElement('span')).className = 'sep';
+
+    var orthoBtn = btn('正交', 'mbtn', function() {
+      setProjection(camera === perspCam);
+      if (camera === orthoCam) orthoBtn.classList.add('active'); else orthoBtn.classList.remove('active');
+    });
+    row1.appendChild(orthoBtn);
+
+    var resetBtn = btn('重置', 'mbtn', function() {
+      resetView();
+    });
+    row1.appendChild(resetBtn);
 
     if (expandCb) {
       var eb = document.createElement('button');
       eb.className = 'model-expand-btn';
       eb.innerHTML = '&#x26F6;';
       eb.addEventListener('click', function(e) { e.stopPropagation(); expandCb(); });
-      tb.appendChild(eb);
+      row2.appendChild(eb);
     }
     if (isOverlay) {
       var cb = document.createElement('button');
       cb.className = 'model-overlay-close';
       cb.innerHTML = '&times;';
       cb.addEventListener('click', function() { container.closest('.model-overlay').remove(); });
-      tb.appendChild(cb);
+      row2.appendChild(cb);
     }
+    tb.appendChild(row1);
+    tb.appendChild(row2);
     return tb;
   }
 
-  return { scene: scene, renderer: renderer, camera: camera, controls: controls, makeToolbar: makeToolbar, grid: grid, modelObj: modelObj, perspCam: camera };
+  var ret = { scene: scene, renderer: renderer, camera: camera, controls: controls, makeToolbar: makeToolbar, grid: grid, modelObj: modelObj, perspCam: perspCam, orthoCam: orthoCam, updateFrame: updateFrame, resize: resize };
+  return ret;
 }
 
 var ACTIVE_VIEWERS = [];
@@ -800,9 +977,16 @@ function initModelsLazy() {
     });
   }, { rootMargin: '200px' });
   boxes.forEach(function(el) {
-    el.style.height = '450px';
     el.innerHTML = '<div class="model-placeholder">等待加载...</div>';
     OBSERVER.observe(el);
+  });
+
+  window.addEventListener('resize', function() {
+    ACTIVE_VIEWERS.forEach(function(entry) {
+      var el = entry.el;
+      var w = el.clientWidth, h = el.clientHeight;
+      if (w > 0 && h > 0) entry.viewer.resize(w, h);
+    });
   });
 }
 
@@ -820,7 +1004,8 @@ function createViewerFor(el) {
   el.setAttribute('data-viewer-id', '' + id);
   var url = el.getAttribute('data-url');
   var w = el.clientWidth || 600;
-  var v = createViewer(el, w, 450, url, false);
+  var h = el.clientHeight || w;
+  var v = createViewer(el, w, h, url, false);
   el.innerHTML = '';
   el.appendChild(v.makeToolbar(function() { openFullscreen(el); }));
   el.appendChild(v.renderer.domElement);
@@ -830,7 +1015,7 @@ function createViewerFor(el) {
     var found = ACTIVE_VIEWERS.findIndex(function(x) { return x.id === id; });
     if (found === -1 || !entry.el.isConnected) return;
     entry.animId = requestAnimationFrame(anim);
-    v.controls.update();
+    v.updateFrame();
     v.renderer.render(v.scene, v.camera);
   }
   anim();
@@ -881,7 +1066,7 @@ function openFullscreen(el) {
   function anim() {
     if (!document.body.contains(overlay)) return;
     requestAnimationFrame(anim);
-    v.controls.update();
+    v.updateFrame();
     v.renderer.render(v.scene, v.camera);
   }
   anim();
@@ -890,9 +1075,7 @@ function openFullscreen(el) {
     if (!document.body.contains(overlay)) { window.removeEventListener('resize', onResize); return; }
     var nw = window.innerWidth;
     var nh = window.innerHeight - 42;
-    v.perspCam.aspect = nw / nh;
-    v.perspCam.updateProjectionMatrix();
-    v.renderer.setSize(nw, nh);
+    v.resize(nw, nh);
   });
 }
 render();

@@ -1,5 +1,6 @@
-<script lang="ts">
+﻿<script lang="ts">
   import DirTree from './DirTree.svelte'
+  import { openFolder } from '../api'
 
   let {
     trackedFiles = [],
@@ -14,6 +15,58 @@
     onExpand?: () => void
     onCloseProject: (path: string) => void
   } = $props()
+
+  let contextMenu = $state<{ x: number; y: number; path: string; isDir: boolean } | null>(null)
+
+  function openContextMenu(path: string, isDir: boolean, x: number, y: number) {
+    const MENU_W = 160
+    const MENU_H = 140
+    const px = Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8))
+    const py = Math.max(8, Math.min(y, window.innerHeight - MENU_H - 8))
+    contextMenu = { x: px, y: py, path, isDir }
+  }
+
+  function closeContextMenu() {
+    contextMenu = null
+  }
+
+  function handleKeydown(e: KeyboardEvent) {
+    if (e.key === 'Escape') closeContextMenu()
+  }
+
+  async function menuOpenFolder() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const rel = menu.path
+    const dir = menu.isDir ? rel : rel.split('/').slice(0, -1).join('/')
+    const full = activePath ? `${activePath}/${dir}` : ''
+    try {
+      await openFolder(full)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function menuCopyPath() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const full = activePath ? `${activePath}/${menu.path}` : menu.path
+    try {
+      await navigator.clipboard.writeText(full)
+    } catch { /* ignore */ }
+  }
+
+  async function menuCopyName() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu) return
+    const name = menu.path.split('/').pop() || menu.path
+    try {
+      await navigator.clipboard.writeText(name)
+    } catch { /* ignore */ }
+  }
 
   function cleanPath(p: string): string {
     return p.replace(/^\\\\\?\\/, '')
@@ -51,7 +104,7 @@
           <div>无文件</div>
         </div>
       {:else}
-        <DirTree paths={trackedFiles} {activePath} />
+        <DirTree paths={trackedFiles} {activePath} onContextMenu={openContextMenu} />
       {/if}
     </div>
     {#if activePath}
@@ -66,6 +119,18 @@
     {/if}
   {/if}
 </div>
+
+{#if contextMenu}
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu() }}></div>
+  <div class="ctx-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px">
+    <button onclick={menuOpenFolder}>打开所在文件夹</button>
+    <button onclick={menuCopyPath}>复制路径</button>
+    <button onclick={menuCopyName}>复制名称</button>
+  </div>
+{/if}
+
+<svelte:window onkeydown={handleKeydown} />
 
 <style>
   .sidebar {
@@ -146,6 +211,41 @@
   }
   .expand-btn:hover {
     background: var(--accent-soft);
+    color: var(--accent);
+  }
+  .ctx-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+  }
+  .ctx-menu {
+    position: fixed;
+    z-index: 91;
+    min-width: 150px;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: var(--shadow-md);
+    padding: 4px;
+    font-size: 12px;
+  }
+  .ctx-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 10px;
+    background: none;
+    border: none;
+    border-radius: 5px;
+    color: var(--text);
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.1s var(--ease), color 0.1s var(--ease);
+  }
+  .ctx-menu button:hover {
+    background: var(--surface2);
     color: var(--accent);
   }
 </style>

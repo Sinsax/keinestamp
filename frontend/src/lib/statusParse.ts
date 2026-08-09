@@ -27,7 +27,11 @@ export function parseStatus(output: string): StatusFile[] {
     .map((l) => {
       const x = l[0] ?? ' '
       const y = l[1] ?? ' '
-      const path = l.length > 3 ? l.substring(3) : ''
+      let path = l.length > 3 ? l.substring(3) : ''
+      if (x === 'R' || y === 'R') {
+        const arrow = path.lastIndexOf(' -> ')
+        if (arrow >= 0) path = path.slice(arrow + 4)
+      }
       return { x, y, path: unquoteC(path.trim()) }
     })
 }

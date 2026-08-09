@@ -10,6 +10,7 @@ pub mod html_gen;
 pub mod init;
 pub mod main_helpers;
 pub mod push;
+pub mod process_util;
 pub mod recent;
 pub mod three_assets;
 pub mod serve;

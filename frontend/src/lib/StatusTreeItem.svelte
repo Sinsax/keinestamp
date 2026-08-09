@@ -17,6 +17,7 @@
     onContextMenu = (_path: string, _isDir: boolean, _x: number, _y: number) => {},
     ignored = false,
     isIgnoredFn = (_path: string) => false,
+    dirAllIgnoredFn = (_path: string) => false,
   }: {
     node: FileTreeNode
     depth?: number
@@ -30,17 +31,19 @@
     onContextMenu?: (path: string, isDir: boolean, x: number, y: number) => void
     ignored?: boolean
     isIgnoredFn?: (path: string) => boolean
+    dirAllIgnoredFn?: (path: string) => boolean
   } = $props()
 
   let indet = $state(false)
   $effect(() => { indet = dirState(node) === 'partial' })
 
-  const isDir = node.children.length > 0
+  const isDir = $derived(node.children.length > 0)
   const status = $derived(isDir ? undefined : statusOf(node.path))
 </script>
 
 {#if isDir}
-  <div class="sp-item sp-dir" class:sp-ignored={ignored} onclick={() => onToggleDir(node)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title="点击 = 选择/取消目录内所有文件">
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="sp-item sp-dir" class:sp-ignored={ignored} onclick={() => { if (!ignored) onToggleDir(node) }} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title="点击 = 选择/取消目录内所有文件">
     <input
       type="checkbox"
       class="sp-check"
@@ -51,6 +54,7 @@
       onchange={() => onToggleDir(node)}
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
+      <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <span class="sp-arrow" onclick={(e) => { e.stopPropagation(); onToggleCollapse(node.path) }} title="展开/折叠">
         {isCollapsed(node.path) ? '▸' : '▾'}
       </span>
@@ -58,6 +62,9 @@
         <svg viewBox="0 0 20 20" width="14" height="14" fill="currentColor" opacity="0.7"><path d="M2 5a2 2 0 012-2h4.586a1 1 0 01.707.293l1.414 1.414A1 1 0 0011.414 5H16a2 2 0 012 2v7a2 2 0 01-2 2H4a2 2 0 01-2-2V5z"/></svg>
       </span>
       <span class="sp-path sp-dir-name">{node.name}</span>
+      {#if isCollapsed(node.path) && (ignored || dirAllIgnoredFn(node.path))}
+        <span class="sp-ignored-badge">已忽略</span>
+      {/if}
     </span>
   </div>
   {#if !isCollapsed(node.path)}
@@ -75,11 +82,13 @@
         {onContextMenu}
         ignored={ignored || isIgnoredFn(child.path)}
         {isIgnoredFn}
+        {dirAllIgnoredFn}
       />
     {/each}
   {/if}
 {:else}
-  <div class="sp-item" class:sp-ignored={ignored} onclick={() => onToggleFile(node.path)} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="sp-item" class:sp-ignored={ignored} onclick={() => { if (!ignored) onToggleFile(node.path) }} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
     <input
       type="checkbox"
       class="sp-check"

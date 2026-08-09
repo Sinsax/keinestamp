@@ -66,15 +66,9 @@ pub fn generate_project_id() -> String {
 }
 
 pub fn generate_access_token() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = now.as_secs();
-    let nanos = now.subsec_nanos();
-    let pid = std::process::id();
-    let mix = secs.wrapping_mul(u64::from(nanos)) ^ u64::from(pid);
-    format!("{:016x}{:08x}{:08x}{:016x}", secs, nanos, pid, mix)
+    let mut bytes = [0u8; 24];
+    getrandom::getrandom(&mut bytes).unwrap_or_default();
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 pub fn validate_site_name(name: &str) -> Result<()> {

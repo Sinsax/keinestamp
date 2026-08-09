@@ -1,15 +1,16 @@
-use anyhow::{Context, Result};
+﻿use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
 pub fn web_commit_and_push(web_root: &Path, message: &str, push_enabled: bool) -> Result<()> {
     eprintln!("[debug] web_commit_and_push: root={:?}, msg={:?}, push={}", web_root, message, push_enabled);
+    let _ = crate::git_project::ensure_git_user(web_root);
     run_web_git(web_root, &["add", "."])?;
     run_web_git(web_root, &["commit", "-m", message])?;
 
     if push_enabled {
         let branch = get_web_branch(web_root)?;
-        let result = Command::new("git")
+        let result = crate::process_util::hide_console(Command::new("git"))
             .args(["push", "-u", "origin", &branch])
             .current_dir(web_root)
             .output();
@@ -39,7 +40,7 @@ pub fn get_web_commit_count(web_root: &Path) -> u64 {
     if !is_web_repo(web_root) {
         return 0;
     }
-    let output = Command::new("git")
+    let output = crate::process_util::hide_console(Command::new("git"))
         .args(["rev-list", "--count", "HEAD"])
         .current_dir(web_root)
         .output();
@@ -55,7 +56,7 @@ pub fn get_web_commit_count(web_root: &Path) -> u64 {
 }
 
 fn get_web_branch(web_root: &Path) -> Result<String> {
-    let output = Command::new("git")
+    let output = crate::process_util::hide_console(Command::new("git"))
         .args(["rev-parse", "--abbrev-ref", "HEAD"])
         .current_dir(web_root)
         .output()
@@ -70,7 +71,7 @@ fn get_web_branch(web_root: &Path) -> Result<String> {
 
 fn run_web_git(path: &Path, args: &[&str]) -> Result<()> {
     eprintln!("[debug] web git {:?} at {:?}", args, path);
-    let output = Command::new("git")
+    let output = crate::process_util::hide_console(Command::new("git"))
         .args(args)
         .current_dir(path)
         .output()
@@ -97,17 +98,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("keinestamp_git_web_{}", name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        Command::new("git")
+        crate::process_util::hide_console(Command::new("git"))
             .args(["init"])
             .current_dir(&dir)
             .output()
             .unwrap();
-        Command::new("git")
+        crate::process_util::hide_console(Command::new("git"))
             .args(["config", "user.email", "web@test"])
             .current_dir(&dir)
             .output()
             .unwrap();
-        Command::new("git")
+        crate::process_util::hide_console(Command::new("git"))
             .args(["config", "user.name", "web"])
             .current_dir(&dir)
             .output()
@@ -122,7 +123,7 @@ mod tests {
 
         web_commit_and_push(&dir, "update timeline", false)?;
 
-        let output = Command::new("git")
+        let output = crate::process_util::hide_console(Command::new("git"))
             .args(["log", "--oneline"])
             .current_dir(&dir)
             .output()

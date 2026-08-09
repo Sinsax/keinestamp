@@ -34,9 +34,4 @@
   .conn-indicator { display: inline-flex; align-items: center; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); transition: background 0.3s; }
   .connected .dot { background: var(--success); }
-  .token-input { width: 120px; font-size: 11px; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); }
-  .token-display { cursor: pointer; letter-spacing: 2px; font-size: 13px; color: var(--text-dim); }
-  .token-display:hover { color: var(--text); }
-  .token-toggle { background: none; border: none; cursor: pointer; color: var(--text-dim); padding: 2px; display: inline-flex; align-items: center; line-height: 1; }
-  .token-toggle:hover { color: var(--text); }
 </style>

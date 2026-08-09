@@ -16,6 +16,7 @@
   } = $props()
 
   function handleKeydown(e: KeyboardEvent) {
+    if ((e.target as HTMLElement)?.tagName === 'BUTTON') return
     if (e.key === 'Enter') {
       e.preventDefault()
       onConfirm()
@@ -28,8 +29,9 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="dialog-overlay" onclick={onCancel} role="dialog">
-  <div class="dialog confirm-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
+<div class="dialog-overlay" onclick={onCancel} role="presentation">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="dialog confirm-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
     <div class="confirm-head">
       <span class="confirm-icon">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10z"/><path d="M7.2 4.6h1.6v4.4H7.2zM7.2 10.4h1.6v1.2H7.2z"/></svg>
@@ -39,7 +41,7 @@
     <div class="confirm-msg">{message}</div>
     <div class="actions">
       <button onclick={onCancel}>{cancelLabel}</button>
-      <button onclick={onConfirm} class="accent" autofocus>{okLabel}</button>
+      <button onclick={onConfirm} class="accent">{okLabel}</button>
     </div>
   </div>
 </div>

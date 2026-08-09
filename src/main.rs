@@ -217,13 +217,14 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
             output_dir: meta.web_root.join("previews_glb"),
             ..Default::default()
         };
+        let mut glb_names: Vec<String> = Vec::new();
         for bf in &changed_files {
             if bf.ends_with(".blend") {
                 let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
                 let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
                 let bpath = meta.project_root.join(bf);
                 match keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
-                    Ok(_) => (),
+                    Ok(_) => glb_names.push(glb_name),
                     Err(e) => eprintln!("GLB 导出跳过: {}", e),
                 }
             }
@@ -232,7 +233,10 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
             &meta.web_root.join("previews_glb"),
             glb_config.max_previews,
         )?;
-        Some(String::new())
+        glb_names
+            .iter()
+            .map(|n| format!("previews_glb/{}.glb", n))
+            .find(|rel| meta.web_root.join(rel).exists())
     } else {
         None
     };
@@ -310,7 +314,9 @@ fn cmd_revert(path: &Path) -> anyhow::Result<()> {
             let timeline_path = meta.web_root.join("timeline.json");
             let mut removed_entry: Option<keinestamp::timeline::TimelineEntry> = None;
             if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
-                if let Some(e) = tl.entries.pop() {
+                let pos = tl.entries.iter().position(|e| e.id == original_hash);
+                if let Some(i) = pos {
+                    let e = tl.entries.remove(i);
                     eprintln!("[debug] revert: removed entry {}", &e.id[..7.min(e.id.len())]);
                     removed_entry = Some(e.clone());
                     keinestamp::timeline::write_timeline(&timeline_path, &tl)?;
@@ -320,6 +326,11 @@ fn cmd_revert(path: &Path) -> anyhow::Result<()> {
                         &meta.web_root,
                         &format!("revert {}", &e.id[..7.min(e.id.len())]),
                         false,
+                    );
+                } else {
+                    eprintln!(
+                        "[debug] revert: no timeline entry matches {} — timeline unchanged",
+                        &original_hash[..7.min(original_hash.len())]
                     );
                 }
             }

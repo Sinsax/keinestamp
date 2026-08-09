@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+﻿use anyhow::{Context, Result};
 use std::path::Path;
 use std::process::Command;
 
@@ -22,7 +22,9 @@ pub fn add_and_commit_files(project_root: &Path, files: &[String], message: &str
     args.extend(files.iter().map(|f| f.as_str()));
     run_git(project_root, &args)?;
 
-    run_git(project_root, &["commit", "-m", message])?;
+    let mut commit_args = vec!["commit", "-m", message, "--"];
+    commit_args.extend(files.iter().map(|f| f.as_str()));
+    run_git(project_root, &commit_args)?;
 
     let hash = get_current_commit_hash(project_root)?;
     eprintln!("[debug] add_and_commit_files → hash={}", hash);
@@ -134,7 +136,7 @@ pub fn tracked_files(project_root: &Path) -> Result<Vec<String>> {
 }
 
 pub fn is_lfs_available() -> bool {
-    Command::new("git")
+    crate::process_util::hide_console(Command::new("git"))
         .args(["lfs", "version"])
         .output()
         .map(|o| o.status.success())
@@ -193,7 +195,7 @@ pub fn is_git_repo(path: &Path) -> bool {
 }
 
 fn run_git(path: &Path, args: &[&str]) -> Result<()> {
-    let output = Command::new("git")
+    let output = crate::process_util::hide_console(Command::new("git"))
         .args(args)
         .current_dir(path)
         .output()
@@ -209,7 +211,7 @@ fn run_git(path: &Path, args: &[&str]) -> Result<()> {
 }
 
 fn run_git_output(path: &Path, args: &[&str]) -> Result<String> {
-    let output = Command::new("git")
+    let output = crate::process_util::hide_console(Command::new("git"))
         .args(args)
         .current_dir(path)
         .output()
@@ -233,17 +235,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("keinestamp_git_project_{}", name));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        Command::new("git")
+        crate::process_util::hide_console(Command::new("git"))
             .args(["init"])
             .current_dir(&dir)
             .output()
             .unwrap();
-        Command::new("git")
+        crate::process_util::hide_console(Command::new("git"))
             .args(["config", "user.email", "test@test"])
             .current_dir(&dir)
             .output()
             .unwrap();
-        Command::new("git")
+        crate::process_util::hide_console(Command::new("git"))
             .args(["config", "user.name", "test"])
             .current_dir(&dir)
             .output()

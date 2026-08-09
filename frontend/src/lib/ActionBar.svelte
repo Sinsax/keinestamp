@@ -12,6 +12,7 @@
     deployAhead = false,
     deployTip = '部署到服务器',
     canRestore = false,
+    busy = false,
   }: {
     projectType: ProjectType | null
     onRecord: () => void
@@ -23,35 +24,36 @@
     deployAhead?: boolean
     deployTip?: string
     canRestore?: boolean
+    busy?: boolean
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
 </script>
 
 <div class="action-bar">
-  <button class="record-btn" onclick={onRecord} disabled={!initialized}>
+  <button class="record-btn" onclick={onRecord} disabled={!initialized || busy}>
     <span class="ab-label">记录</span>
     <span class="ab-hint">record</span>
   </button>
 
-  <button onclick={onExport} disabled={!initialized}>
+  <button onclick={onExport} disabled={!initialized || busy}>
     <span class="ab-label">导出</span>
     <span class="ab-hint">export</span>
   </button>
 
-  <button onclick={onRevert} disabled={!initialized}>
+  <button onclick={onRevert} disabled={!initialized || busy}>
     <span class="ab-label">撤回</span>
     <span class="ab-hint">revert</span>
   </button>
 
-  <button class="restore-btn" class:enabled={canRestore} onclick={onRestore} disabled={!initialized || !canRestore} title={canRestore ? '恢复上次撤回的记录' : '没有可恢复的撤回'}>
+  <button class="restore-btn" class:enabled={canRestore} onclick={onRestore} disabled={!initialized || !canRestore || busy} title={canRestore ? '恢复上次撤回的记录' : '没有可恢复的撤回'}>
     <span class="ab-label">恢复</span>
     <span class="ab-hint">redo</span>
   </button>
 
   <div class="spacer"></div>
 
-  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!initialized || !connected} title={deployTip}>
+  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!initialized || !connected || busy} title={deployTip}>
     <span class="ab-label">部署</span>
     <span class="ab-hint">deploy</span>
   </button>

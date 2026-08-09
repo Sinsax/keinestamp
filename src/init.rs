@@ -1,4 +1,4 @@
-use crate::config::{self, MetaConfig};
+﻿use crate::config::{self, MetaConfig};
 use crate::detect;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -53,6 +53,11 @@ fn perform_init(project_root: &Path) -> Result<()> {
         eprintln!("Web git repository already exists, skipping init");
     }
 
+    let gitignore_path = web_root.join(".gitignore");
+    if !gitignore_path.exists() {
+        std::fs::write(&gitignore_path, "previews_glb/\ntimeline.tmp.*.json\n")?;
+    }
+
     write_timeline_json(web_root)?;
     write_index_html(web_root)?;
 
@@ -76,6 +81,11 @@ fn ensure_web_structure(web_root: &Path) -> Result<()> {
     let web_git = web_root.join(".git");
     if !web_git.exists() {
         git_init(web_root, "web")?;
+    }
+
+    let gitignore_path = web_root.join(".gitignore");
+    if !gitignore_path.exists() {
+        std::fs::write(&gitignore_path, "previews_glb/\ntimeline.tmp.*.json\n")?;
     }
 
     let timeline_path = web_root.join("timeline.json");
@@ -182,7 +192,7 @@ fn ensure_project_gitignore(project_root: &Path) -> Result<()> {
 }
 
 fn git_init(path: &Path, label: &str) -> Result<()> {
-    let output = std::process::Command::new("git")
+    let output = crate::process_util::hide_console(std::process::Command::new("git"))
         .args(["init"])
         .current_dir(path)
         .output()
@@ -277,7 +287,7 @@ mod tests {
         let dir = tmp_dir("existing_with_git");
         std::fs::write(dir.join("test.blend"), b"")?;
 
-        std::process::Command::new("git")
+        crate::process_util::hide_console(std::process::Command::new("git"))
             .args(["init"])
             .current_dir(&dir)
             .output()?;

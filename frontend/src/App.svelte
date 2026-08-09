@@ -10,6 +10,8 @@
   import StatusBar from './lib/StatusBar.svelte'
   import CommitDialog from './lib/CommitDialog.svelte'
   import ConfirmDialog from './lib/ConfirmDialog.svelte'
+  import CloseBehaviorDialog from './lib/CloseBehaviorDialog.svelte'
+  import InputDialog from './lib/InputDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
   import Toast from './lib/Toast.svelte'
   import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress } from './types'
@@ -34,15 +36,16 @@
   let selectedEntryId = $state('')
   let detailEntry = $state<TimelineEntry | null>(null)
   let statusOutput = $state('')
+  let statusError = $state(false)
   let trackedFiles = $state<string[]>([])
   let statusText = $state('Ready')
   let toastId = $state(0)
   let toasts = $state<{ id: number; msg: string; type: string }[]>([])
   let showCommit = $state(false)
   let showSettings = $state(false)
+  let showCloseAsk = $state(false)
   let pendingRemove = $state<string | null>(null)
-  let cachedVersions = $state<string[]>([])
-  let hasRemote = $state(false)
+  let pendingExport = $state<{ parentDir: string; defaultName: string; entryId: string } | null>(null)
   let connected = $state(false)
   let accessToken = $state('')
   let siteName = $state('')
@@ -51,6 +54,8 @@
   let commitSelection = $state<string[] | null>(null)
   let canRestore = $state(false)
   let deploying = $state(false)
+  let recording = $state(false)
+  let loadSeq = 0
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
   $effect(() => {
@@ -86,14 +91,6 @@
     window.addEventListener('pointercancel', onUp)
   }
 
-  async function loadCachedVersions() {
-    if (cachedVersions.length === 0) {
-      try {
-        cachedVersions = await api.listBlenderVersions()
-      } catch { /* ignore */ }
-    }
-  }
-
   function pushToast(msg: string, type: string = 'info') {
     const id = ++toastId
     toasts = [...toasts, { id, msg, type }]
@@ -114,19 +111,27 @@
       return
     }
     try {
-      trackedFiles = await api.getTrackedFiles(path)
+      const files = await api.getTrackedFiles(path)
+      if (path !== activePath) return
+      trackedFiles = files
     } catch {
-      trackedFiles = []
+      if (path === activePath) trackedFiles = []
     }
   }
 
   async function refreshStatus() {
     if (projectType !== 'initialized') return
+    const path = activePath
     try {
-      const s = await api.status(activePath)
+      const s = await api.status(path)
+      if (path !== activePath) return
       statusOutput = s.output
+      statusError = false
     } catch {
-      statusOutput = ''
+      if (path === activePath) {
+        statusOutput = ''
+        statusError = true
+      }
     }
   }
 
@@ -142,14 +147,17 @@
   }
 
   async function refreshDeployStatus() {
-    if (!activePath) { deployStatus = null; return }
+    const path = activePath
+    if (!path) { deployStatus = null; return }
     try {
       const serverUrl = await api.getDeployServerUrl()
+      if (path !== activePath) return
       if (!serverUrl) { deployStatus = null; return }
       const token = await api.getDeployToken()
-      deployStatus = await api.getDeployStatus(serverUrl, token || null, activePath)
+      if (path !== activePath) return
+      deployStatus = await api.getDeployStatus(serverUrl, token || null, path)
     } catch {
-      deployStatus = null
+      if (path === activePath) deployStatus = null
     }
   }
 
@@ -162,35 +170,43 @@
       : `已是最新：本地 v${deployStatus.local} / 服务器 v${r}`
   })
 
-  async function loadProject(path: string) {
+  async function loadProject(path: string, preserveSelection = false) {
+    const seq = ++loadSeq
     activePath = normalizePath(path)
-    commitSelection = null
+    if (!preserveSelection) commitSelection = null
     try {
       const pt = await api.detect(path)
+      if (seq !== loadSeq) return
       projectType = pt
       if (pt === 'initialized') {
         const [timeline, cfg, autoConn] = await Promise.all([api.getTimeline(path), api.readConfig(path), api.getAutoConnect()])
+        if (seq !== loadSeq) return
         entries = timeline.entries.toReversed()
-        hasRemote = await api.hasRemote(path)
         accessToken = cfg.access_token || ''
         siteName = cfg.site_name || ''
         siteLocked = cfg.site_locked
         canRestore = await api.canRestoreRevert(path)
-        await Promise.all([refreshStatus(), loadTrackedFiles(path), refreshDeployStatus()])
+        if (seq !== loadSeq) return
+        await Promise.all([refreshStatus(), loadTrackedFiles(path)])
+        refreshDeployStatus()
         if (autoConn) {
           testConnection()
         }
       } else {
         entries = []
         statusOutput = ''
+        statusError = false
         trackedFiles = []
       }
+      if (seq !== loadSeq) return
       statusText = `${path.split(/[/\\]/).pop() || path} — ${pt}`
     } catch (e: any) {
+      if (seq !== loadSeq) return
       statusText = `Error: ${e}`
       projectType = null
       entries = []
       statusOutput = ''
+      statusError = false
       trackedFiles = []
     }
   }
@@ -217,64 +233,70 @@
   }
 
   async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false): Promise<boolean> {
-    statusText = '记录中...'
-    const unlisten = await listen<CommitProgress>('commit-progress', (event) => {
-      statusText = event.payload.message
-    })
+    if (recording) return false
+    recording = true
+    let unlisten: (() => void) | undefined
     try {
-      let files: string[] | null = commitSelection
-      try {
-        const info = await api.getIgnoreInfo(activePath)
-        const ignoredSet = new Set(info.ignored)
-        const isIgnoredPath = (p: string): boolean => {
-          if (ignoredSet.has(p)) return true
-          const parts = p.split('/')
-          for (let i = 1; i < parts.length; i++) {
-            if (ignoredSet.has(parts.slice(0, i).join('/'))) return true
-          }
+      statusText = '记录中...'
+      unlisten = await listen<CommitProgress>('commit-progress', (event) => {
+        statusText = event.payload.message
+      })
+      const sel = commitSelection
+      let files: string[] | null = null
+      if (sel !== null) {
+        await refreshStatus()
+        const fresh = parseStatus(statusOutput)
+        const freshSet = new Set(fresh.map((f) => f.path))
+        files = sel.filter((f) => freshSet.has(f))
+        if (files.length === 0) {
+          pushToast('所选文件已无变更', 'info')
           return false
         }
-        if (files === null) {
-          files = parseStatus(statusOutput)
-            .filter(
-              (f) =>
-                !isIgnoredPath(f.path) &&
-                f.path !== '.keinestamp.toml' &&
-                f.path !== 'web-timeline' &&
-                !f.path.startsWith('web-timeline/')
-            )
-            .map((f) => f.path)
-        } else {
+        try {
+          const info = await api.getIgnoreInfo(activePath)
+          const ignoredSet = new Set(info.ignored)
+          const isIgnoredPath = (p: string): boolean => {
+            if (ignoredSet.has(p)) return true
+            const parts = p.split('/')
+            for (let i = 1; i < parts.length; i++) {
+              if (ignoredSet.has(parts.slice(0, i).join('/'))) return true
+            }
+            return false
+          }
           for (const f of files) {
             if (isIgnoredPath(f)) {
               await api.removeIgnore(activePath, f)
             }
           }
+          const hiddenAuto = fresh
+            .filter(
+              (f) =>
+                (f.path === '.gitignore' || f.path === '.gitattributes') &&
+                !isIgnoredPath(f.path)
+            )
+            .map((f) => f.path)
+          if (hiddenAuto.length > 0) {
+            files = [...files, ...hiddenAuto.filter((p) => !files!.includes(p))]
+          }
+        } catch {
+          /* ignore info unavailable — fall back to raw selection */
         }
-        const hiddenAuto = parseStatus(statusOutput)
-          .filter(
-            (f) =>
-              (f.path === '.gitignore' || f.path === '.gitattributes') &&
-              !isIgnoredPath(f.path)
-          )
-          .map((f) => f.path)
-        if (hiddenAuto.length > 0) {
-          files = [...files, ...hiddenAuto.filter((p) => !files!.includes(p))]
-        }
-      } catch {
-        /* ignore info unavailable — fall back to raw selection */
       }
       const hash = await api.record(activePath, msg, tag, noPreview, files)
       pushToast(`已记录 ${hash}`, 'success')
-      commitSelection = null
       await loadProject(activePath)
+      if (sel !== null && files) {
+        const committed = new Set(files)
+        commitSelection = sel.filter((f) => !committed.has(f))
+      }
       return true
     } catch (e: any) {
       pushToast(`记录失败: ${e}`, 'error')
       statusText = '记录失败'
       return false
     } finally {
-      unlisten()
+      recording = false
+      if (unlisten) unlisten()
     }
   }
 
@@ -296,14 +318,9 @@
     }
   }
 
-  async function handleTokenChange(val: string) {
-    try {
-      await api.updateConfig(activePath, 'access_token', val || null)
-      accessToken = val
-      pushToast('Token 已保存', 'success')
-    } catch (e: any) {
-      pushToast(`Token 保存失败: ${e}`, 'error')
-    }
+  function handleTokenChange(val: string) {
+    accessToken = val
+    pushToast('Token 已保存', 'success')
   }
 
   async function handleSiteNameChange(val: string): Promise<boolean> {
@@ -340,6 +357,15 @@
     }
   }
 
+  async function handleLocalView() {
+    if (!activePath) return
+    try {
+      await api.openWebTimeline(activePath)
+    } catch (e: any) {
+      pushToast(`本地查看失败: ${e}`, 'error')
+    }
+  }
+
   async function handleRevert() {
     statusText = 'Reverting...'
     try {
@@ -347,7 +373,7 @@
       pushToast('已撤回上次记录（文件保留在工作区）', 'success')
       await loadProject(activePath)
     } catch (e: any) {
-      pushToast(`Revert: ${e}`, 'info')
+      pushToast(`Revert: ${e}`, 'error')
       statusText = 'Revert skipped'
     }
   }
@@ -379,16 +405,9 @@
     projectType = null
     entries = []
     statusOutput = ''
+    statusError = false
     trackedFiles = []
     statusText = 'Ready'
-  }
-
-  async function handleCloseAndRemove(path: string) {
-    try {
-      await api.removeRecent(path)
-    } catch { /* ignore */ }
-    recentProjects = recentProjects.filter((e) => e.path !== path)
-    handleCloseProject()
   }
 
   function handleRemoveRecent(recentPath: string) {
@@ -424,9 +443,28 @@
       pushToast('Select an entry first', 'info')
       return
     }
-    const dir = activePath + '/export_' + selectedEntryId.slice(0, 7)
+    const entryId = selectedEntryId
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择导出位置',
+    })
+    if (!selected) return
+    pendingExport = {
+      parentDir: normalizePath(selected),
+      defaultName: 'export_' + entryId.slice(0, 7),
+      entryId,
+    }
+  }
+
+  async function confirmExport(name: string) {
+    const state = pendingExport
+    pendingExport = null
+    if (!state) return
+    const dirName = name.trim() || state.defaultName
+    const dir = state.parentDir + '/' + dirName
     try {
-      await api.exportEntry(activePath, selectedEntryId, dir)
+      await api.exportEntry(activePath, state.entryId, dir)
       pushToast(`Exported to ${dir}`, 'success')
     } catch (e: any) {
       pushToast(`Export failed: ${e}`, 'error')
@@ -435,14 +473,17 @@
 
   onMount(() => {
     loadRecent()
-    loadCachedVersions()
+    const closeAskUnlisten = listen('close-requested', () => { showCloseAsk = true })
     const timer = setInterval(() => {
       if (activePath && projectType === 'initialized') {
         refreshStatus()
         loadTrackedFiles(activePath)
       }
     }, 3000)
-    return () => clearInterval(timer)
+    return () => {
+      clearInterval(timer)
+      closeAskUnlisten.then((f) => f())
+    }
   })
 </script>
 
@@ -461,13 +502,14 @@
     onReorder={handleReorder}
   />
 
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="body" onclick={() => selectedEntryId = ''}>
     <Sidebar
       {trackedFiles}
       {activePath}
       collapsed={sidebarCollapsed}
       onExpand={() => sidebarCollapsed = false}
-      onCloseProject={handleCloseAndRemove}
+      onCloseProject={handleRemoveRecent}
     />
 
     <div class="main-area">
@@ -486,7 +528,7 @@
         {#if activePath}
           <span class="toolbar-path">
             <span class="path-text" title={cleanPath(activePath)}>{cleanPath(activePath)}</span>
-            <button class="path-folder" onclick={() => openFolder(activePath)} title="Open in file manager">
+            <button class="path-folder" onclick={() => { try { openFolder(activePath) } catch { /* ignore */ } }} title="Open in file manager">
               <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
                 <path d="M1.5 2.5a1 1 0 0 1 1-1h3.672a1 1 0 0 1 .707.293l.828.828A1 1 0 0 0 8.414 3H13.5a1 1 0 0 1 1 1v1.5H1.5V2.5Z"/>
                 <path d="M1.5 6h13l-1.41 5.44a1 1 0 0 1-.97.81H3.88a1 1 0 0 1-.97-.81L1.5 6Z"/>
@@ -511,13 +553,20 @@
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} onRefresh={refreshStatus} {activePath} selection={commitSelection} onSelectionChange={(sel) => commitSelection = sel} />
+            <StatusPanel {statusOutput} {statusError} onRefresh={refreshStatus} {activePath} selection={commitSelection} onSelectionChange={(sel) => commitSelection = sel} />
           {/if}
         </div>
 
         {#if projectType === 'initialized'}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="tl-resize" onpointerdown={startTimelineDrag} onclick={(e) => e.stopPropagation()}></div>
           <div class="timeline-panel" style="width: {timelineWidth}px">
+            <div class="tl-header">
+              <span class="tl-title">时间线</span>
+              <button class="tl-local-btn" onclick={handleLocalView} title="在浏览器中打开本地时间线页面">
+                本地查看
+              </button>
+            </div>
             <EntryList
               entries={entries}
               selectedId={selectedEntryId}
@@ -530,7 +579,8 @@
               siteLocked={siteLocked}
               onSiteNameChange={handleSiteNameChange}
               onOpenSite={handleOpenSite}
-              onMilestoneChange={() => loadProject(activePath)}
+              onOpenLocalView={handleLocalView}
+              onMilestoneChange={() => loadProject(activePath, true)}
             />
           </div>
         {/if}
@@ -547,6 +597,7 @@
         {deployAhead}
         {deployTip}
         {canRestore}
+        busy={deploying || recording}
       />
 
       <StatusBar
@@ -560,7 +611,11 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} busy={recording} />
+{/if}
+
+{#if showCloseAsk}
+  <CloseBehaviorDialog onCancel={() => showCloseAsk = false} />
 {/if}
 
 {#if pendingRemove}
@@ -574,8 +629,20 @@
   />
 {/if}
 
+{#if pendingExport}
+  <InputDialog
+    title="导出到"
+    label="目录名"
+    initial={pendingExport.defaultName}
+    okLabel="导出"
+    cancelLabel="取消"
+    onConfirm={confirmExport}
+    onCancel={() => pendingExport = null}
+  />
+{/if}
+
 {#if showSettings}
-  <SettingsDialog path={activePath || ''} onClose={() => { showSettings = false; cachedVersions = []; if (activePath) { loadProject(activePath); testConnection() } }} cachedVersions={cachedVersions} />
+  <SettingsDialog path={activePath || ''} onClose={() => { showSettings = false; if (activePath) { loadProject(activePath); testConnection() } }} />
 {/if}
 
 <Toast {toasts} />
@@ -600,6 +667,35 @@
     flex-direction: column;
     flex-shrink: 0;
     transition: none;
+  }
+  .tl-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+  .tl-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-dim);
+  }
+  .tl-local-btn {
+    font-size: 11px;
+    padding: 3px 12px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+  }
+  .tl-local-btn:hover {
+    background: var(--accent);
+    color: #fff;
   }
   .toolbar-icon {
     background: none;

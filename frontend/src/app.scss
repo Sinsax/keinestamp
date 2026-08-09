@@ -161,7 +161,12 @@ input:focus, textarea:focus, select:focus {
     transform 0.15s var(--ease);
 }
 .entry-card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
-.entry-card.active { border-color: var(--accent); background: var(--card-active); }
+.entry-card.active {
+  border-color: var(--accent);
+  background: var(--card-active);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
 .entry-card.tagged { border-left: 3px solid var(--tag-color, var(--border)); }
 .entry-card .top {
   display: flex; justify-content: space-between; align-items: baseline;

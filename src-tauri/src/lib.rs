@@ -1,5 +1,9 @@
 ﻿use serde::Serialize;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use tauri::Emitter;
+use tauri::Manager;
 
 fn map_err<T>(r: anyhow::Result<T>) -> Result<T, String> {
     r.map_err(|e| e.to_string())
@@ -115,6 +119,7 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                 output_dir: meta.web_root.join("previews_glb"),
                 ..Default::default()
             };
+            let mut glb_names: Vec<String> = Vec::new();
             for bf in &changed_files {
                 if bf.ends_with(".blend") {
                     let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
@@ -123,6 +128,8 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                     emit("blender_export", &format!("导出 GLB: {}", bf));
                     if let Err(e) = keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
                         eprintln!("[debug] commit: GLB export skipped: {e}");
+                    } else {
+                        glb_names.push(glb_name);
                     }
                 }
             }
@@ -130,7 +137,10 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                 &meta.web_root.join("previews_glb"),
                 glb_config.max_previews,
             );
-            Some(String::new())
+            glb_names
+                .iter()
+                .map(|n| format!("previews_glb/{}.glb", n))
+                .find(|rel| meta.web_root.join(rel).exists())
         } else {
             None
         };
@@ -181,21 +191,24 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
 }
 
 #[tauri::command]
-fn push(path: String) -> Result<(), String> {
+async fn push(path: String) -> Result<(), String> {
     eprintln!("[debug] push({})", path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    eprintln!("[debug] push: project_root={}", meta.project_root.display());
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        eprintln!("[debug] push: project_root={}", meta.project_root.display());
 
-    if keinestamp::git_project::has_remote(&meta.project_root) {
-        map_err(keinestamp::git_project::push(&meta.project_root))?;
-    } else {
-        eprintln!("[debug] push: no git remote, skipping git push");
-    }
+        if keinestamp::git_project::has_remote(&meta.project_root) {
+            map_err(keinestamp::git_project::push(&meta.project_root))?;
+        } else {
+            eprintln!("[debug] push: no git remote, skipping git push");
+        }
 
-    eprintln!("[debug] push → ok");
-    Ok(())
+        eprintln!("[debug] push → ok");
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -315,21 +328,24 @@ async fn get_deploy_status(
 }
 
 #[tauri::command]
-fn pull(path: String) -> Result<(), String> {
+async fn pull(path: String) -> Result<(), String> {
     eprintln!("[debug] pull({})", path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    eprintln!("[debug] pull: project_root={}", meta.project_root.display());
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        eprintln!("[debug] pull: project_root={}", meta.project_root.display());
 
-    if keinestamp::git_project::has_remote(&meta.project_root) {
-        map_err(keinestamp::git_project::pull(&meta.project_root))?;
-    } else {
-        eprintln!("[debug] pull: no git remote, skipping");
-    }
+        if keinestamp::git_project::has_remote(&meta.project_root) {
+            map_err(keinestamp::git_project::pull(&meta.project_root))?;
+        } else {
+            eprintln!("[debug] pull: no git remote, skipping");
+        }
 
-    eprintln!("[debug] pull → ok");
-    Ok(())
+        eprintln!("[debug] pull → ok");
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -362,17 +378,17 @@ fn open_folder(path: String) -> Result<(), String> {
     };
     let path_str = clean.to_string();
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("explorer").arg(&path_str).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("explorer")).arg(&path_str).spawn();
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&path_str).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&path_str).spawn();
     #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(&path_str).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&path_str).spawn();
     result.map_err(|e| format!("failed to open folder: {}", e))?;
     Ok(())
 }
 
 fn git_ls(project_root: &str, args: &[&str]) -> Result<Vec<String>, String> {
-    let output = std::process::Command::new("git")
+    let output = keinestamp::process_util::hide_console(std::process::Command::new("git"))
         .args(["-c", "core.quotepath=false", "ls-files"])
         .args(args)
         .current_dir(project_root)
@@ -408,7 +424,7 @@ fn get_ignore_info(project_root: String) -> Result<serde_json::Value, String> {
 }
 
 fn git_update_index(project_root: &str, args: &[&str]) -> Result<(), String> {
-    let output = std::process::Command::new("git")
+    let output = keinestamp::process_util::hide_console(std::process::Command::new("git"))
         .args(["update-index"])
         .args(args)
         .current_dir(project_root)
@@ -537,51 +553,61 @@ fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn revert(path: String) -> Result<(), String> {
+async fn revert(path: String) -> Result<(), String> {
     eprintln!("[debug] revert({})", path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let original_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
-        .map_err(|e| e.to_string())?;
-    map_err(keinestamp::git_project::revert(&meta.project_root))?;
-    eprintln!("[debug] revert: git reset --soft HEAD~1 ok");
-    let revert_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
-        .map_err(|e| e.to_string())?;
-    let timeline_path = meta.web_root.join("timeline.json");
-    let mut removed_entry: Option<keinestamp::timeline::TimelineEntry> = None;
-    if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
-        if let Some(e) = tl.entries.pop() {
-            eprintln!("[debug] revert: removed entry {}", &e.id[..7.min(e.id.len())]);
-            removed_entry = Some(e.clone());
-            let _ = keinestamp::timeline::write_timeline(&timeline_path, &tl);
-            let project_name = meta
-                .project_root
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let _ = keinestamp::html_gen::generate_index_html(
-                &meta.web_root,
-                &meta.project_root,
-                &tl,
-                &project_name,
-            );
-            let _ = keinestamp::git_web::web_commit_and_push(
-                &meta.web_root,
-                &format!("revert {}", &e.id[..7.min(e.id.len())]),
-                false,
-            );
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let original_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
+            .map_err(|e| e.to_string())?;
+        map_err(keinestamp::git_project::revert(&meta.project_root))?;
+        eprintln!("[debug] revert: git reset --soft HEAD~1 ok");
+        let revert_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
+            .map_err(|e| e.to_string())?;
+        let timeline_path = meta.web_root.join("timeline.json");
+        let mut removed_entry: Option<keinestamp::timeline::TimelineEntry> = None;
+        if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
+            let pos = tl.entries.iter().position(|e| e.id == original_hash);
+            if let Some(i) = pos {
+                let e = tl.entries.remove(i);
+                eprintln!("[debug] revert: removed entry {}", &e.id[..7.min(e.id.len())]);
+                removed_entry = Some(e.clone());
+                let _ = keinestamp::timeline::write_timeline(&timeline_path, &tl);
+                let project_name = meta
+                    .project_root
+                    .file_name()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                let _ = keinestamp::html_gen::generate_index_html(
+                    &meta.web_root,
+                    &meta.project_root,
+                    &tl,
+                    &project_name,
+                );
+                let _ = keinestamp::git_web::web_commit_and_push(
+                    &meta.web_root,
+                    &format!("revert {}", &e.id[..7.min(e.id.len())]),
+                    false,
+                );
+            } else {
+                eprintln!(
+                    "[debug] revert: no timeline entry matches {} — timeline unchanged",
+                    &original_hash[..7.min(original_hash.len())]
+                );
+            }
         }
-    }
-    if let Some(pid) = meta.project_id.clone() {
-        keinestamp::app_config::set_last_revert(Some(keinestamp::app_config::LastRevert {
-            project_id: pid,
-            revert_hash,
-            original_hash,
-            removed_entry,
-        }));
-    }
-    Ok(())
+        if let Some(pid) = meta.project_id.clone() {
+            keinestamp::app_config::set_last_revert(Some(keinestamp::app_config::LastRevert {
+                project_id: pid,
+                revert_hash,
+                original_hash,
+                removed_entry,
+            }));
+        }
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 fn last_revert_state(path: &str) -> Result<Option<keinestamp::app_config::LastRevert>, String> {
@@ -608,46 +634,49 @@ fn can_restore_revert(path: String) -> bool {
 }
 
 #[tauri::command]
-fn restore_revert(path: String) -> Result<(), String> {
+async fn restore_revert(path: String) -> Result<(), String> {
     eprintln!("[debug] restore_revert({})", path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let lr = last_revert_state(&path)?
-        .ok_or_else(|| "没有可恢复的撤回（撤回后可能已有新记录）".to_string())?;
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let lr = last_revert_state(&path)?
+            .ok_or_else(|| "没有可恢复的撤回（撤回后可能已有新记录）".to_string())?;
 
-    map_err(keinestamp::git_project::restore_revert(
-        &meta.project_root,
-        &lr.original_hash,
-    ))?;
-    keinestamp::app_config::set_last_revert(None);
-
-    if let Some(entry) = lr.removed_entry.clone() {
-        let timeline_path = meta.web_root.join("timeline.json");
-        map_err(keinestamp::timeline::append_entry(&timeline_path, entry))?;
-    }
-
-    let timeline_path = meta.web_root.join("timeline.json");
-    let timeline = keinestamp::timeline::read_timeline(&timeline_path).ok();
-    if let Some(tl) = timeline {
-        let project_name = meta
-            .project_root
-            .file_name()
-            .map(|s| s.to_string_lossy().to_string())
-            .unwrap_or_default();
-        let _ = keinestamp::html_gen::generate_index_html(
-            &meta.web_root,
+        map_err(keinestamp::git_project::restore_revert(
             &meta.project_root,
-            &tl,
-            &project_name,
-        );
-        let _ = keinestamp::git_web::web_commit_and_push(
-            &meta.web_root,
-            &format!("restore revert {}", &lr.original_hash[..7.min(lr.original_hash.len())]),
-            false,
-        );
-    }
-    Ok(())
+            &lr.original_hash,
+        ))?;
+        keinestamp::app_config::set_last_revert(None);
+
+        if let Some(entry) = lr.removed_entry.clone() {
+            let timeline_path = meta.web_root.join("timeline.json");
+            map_err(keinestamp::timeline::append_entry(&timeline_path, entry))?;
+        }
+
+        let timeline_path = meta.web_root.join("timeline.json");
+        let timeline = keinestamp::timeline::read_timeline(&timeline_path).ok();
+        if let Some(tl) = timeline {
+            let project_name = meta
+                .project_root
+                .file_name()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+            let _ = keinestamp::html_gen::generate_index_html(
+                &meta.web_root,
+                &meta.project_root,
+                &tl,
+                &project_name,
+            );
+            let _ = keinestamp::git_web::web_commit_and_push(
+                &meta.web_root,
+                &format!("restore revert {}", &lr.original_hash[..7.min(lr.original_hash.len())]),
+                false,
+            );
+        }
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -747,7 +776,11 @@ fn get_timeline(path: String) -> Result<keinestamp::timeline::Timeline, String> 
             for entry in &mut t.entries {
                 if !entry.preview.is_empty() {
                     let abs = meta.web_root.join(&entry.preview);
-                    entry.preview = abs.to_string_lossy().to_string();
+                    if abs.exists() {
+                        entry.preview = abs.to_string_lossy().to_string();
+                    } else {
+                        entry.preview = String::new();
+                    }
                 }
             }
             eprintln!("[debug] get_timeline → {} entries", t.entries.len());
@@ -812,67 +845,73 @@ fn reorder_recent(paths: Vec<String>) -> Vec<keinestamp::recent::RecentEntry> {
 }
 
 #[tauri::command]
-fn set_entry_milestone(path: String, entry_id: String, milestone: bool) -> Result<(), String> {
+async fn set_entry_milestone(path: String, entry_id: String, milestone: bool) -> Result<(), String> {
     eprintln!("[debug] set_entry_milestone({}, entry_id={}, milestone={})", path, entry_id, milestone);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let timeline_path = meta.web_root.join("timeline.json");
-    map_err(keinestamp::timeline::set_entry_milestone(&timeline_path, &entry_id, milestone))?;
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let timeline_path = meta.web_root.join("timeline.json");
+        map_err(keinestamp::timeline::set_entry_milestone(&timeline_path, &entry_id, milestone))?;
 
-    let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
-    let project_name = meta
-        .project_root
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
-    map_err(keinestamp::html_gen::generate_index_html(
-        &meta.web_root,
-        &meta.project_root,
-        &timeline,
-        &project_name,
-    ))?;
+        let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
+        let project_name = meta
+            .project_root
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        map_err(keinestamp::html_gen::generate_index_html(
+            &meta.web_root,
+            &meta.project_root,
+            &timeline,
+            &project_name,
+        ))?;
 
-    let _ = keinestamp::git_web::web_commit_and_push(
-        &meta.web_root,
-        &format!("milestone {}", &entry_id[..7.min(entry_id.len())]),
-        false,
-    );
+        let _ = keinestamp::git_web::web_commit_and_push(
+            &meta.web_root,
+            &format!("milestone {}", &entry_id[..7.min(entry_id.len())]),
+            false,
+        );
 
-    Ok(())
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
+async fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
     eprintln!("[debug] delete_entry({}, entry_id={})", path, entry_id);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let timeline_path = meta.web_root.join("timeline.json");
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let timeline_path = meta.web_root.join("timeline.json");
 
-    map_err(keinestamp::timeline::remove_entry(&timeline_path, &entry_id))?;
+        map_err(keinestamp::timeline::remove_entry(&timeline_path, &entry_id))?;
 
-    let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
-    let project_name = meta
-        .project_root
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_default();
+        let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
+        let project_name = meta
+            .project_root
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
 
-    map_err(keinestamp::html_gen::generate_index_html(
-        &meta.web_root,
-        &meta.project_root,
-        &timeline,
-        &project_name,
-    ))?;
+        map_err(keinestamp::html_gen::generate_index_html(
+            &meta.web_root,
+            &meta.project_root,
+            &timeline,
+            &project_name,
+        ))?;
 
-    let _ = keinestamp::git_web::web_commit_and_push(
-        &meta.web_root,
-        &format!("delete entry {}", &entry_id[..7.min(entry_id.len())]),
-        false,
-    );
+        let _ = keinestamp::git_web::web_commit_and_push(
+            &meta.web_root,
+            &format!("delete entry {}", &entry_id[..7.min(entry_id.len())]),
+            false,
+        );
 
-    Ok(())
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -891,7 +930,7 @@ fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<St
     let meta_path = keinestamp::config::meta_path(&p);
     let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
 
-    let output = std::process::Command::new("git")
+    let output = keinestamp::process_util::hide_console(std::process::Command::new("git"))
         .args([
             "-c", "core.quotepath=false",
             "show",
@@ -910,78 +949,6 @@ fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<St
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     Ok(stdout)
-}
-
-#[tauri::command]
-fn get_glb_preview(path: String, entry_id: String, file_path: String) -> Result<String, String> {
-    eprintln!("[debug] get_glb_preview({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-
-    if !file_path.ends_with(".blend") {
-        return Err("not a .blend file".to_string());
-    }
-
-    let short_hash = &entry_id[..7.min(entry_id.len())];
-    let safe_name = file_path.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-    let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
-
-    let glb_dir = meta.web_root.join("previews_glb");
-    let glb_path = glb_dir.join(format!("{}.glb", glb_name));
-
-    if glb_path.exists() {
-        return Ok(glb_path.to_string_lossy().to_string());
-    }
-
-    let temp_dir = std::env::temp_dir().join(format!("keinestamp_glb_{}", std::process::id()));
-    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("failed to create temp dir: {e}"))?;
-    let temp_blend = temp_dir.join(&safe_name);
-
-    let extract_output = std::process::Command::new("git")
-        .args([
-            "-c", "core.quotepath=false",
-            "show",
-            &format!("{}:{}", entry_id, file_path),
-        ])
-        .current_dir(&meta.project_root)
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .output()
-        .map_err(|e| format!("git show extraction failed: {e}"))?;
-
-    if !extract_output.status.success() {
-        let _ = std::fs::remove_dir_all(&temp_dir);
-        let stderr = String::from_utf8_lossy(&extract_output.stderr);
-        return Err(format!("git show error extracting {}: {}", file_path, stderr.trim()));
-    }
-
-    std::fs::write(&temp_blend, &extract_output.stdout)
-        .map_err(|e| format!("failed to write temp blend file: {e}"))?;
-
-    std::fs::create_dir_all(&glb_dir).map_err(|e| format!("failed to create glb dir: {e}"))?;
-
-    let render_config = keinestamp::blender_render::RenderConfig {
-        output_dir: glb_dir.clone(),
-        ..Default::default()
-    };
-
-    let blender_path_buf = match keinestamp::blender_download::ensure_blender() {
-        Ok(path) => Some(path),
-        Err(e) => {
-            eprintln!("Blender auto-download failed: {}, trying PATH", e);
-            keinestamp::app_config::get_blender_path()
-        }
-    };
-    let blender_path: Option<&Path> = blender_path_buf.as_deref();
-    let result = keinestamp::blender_render::export_to_glb(&temp_blend, &render_config.output_dir, &glb_name, blender_path);
-
-    let _ = std::fs::remove_dir_all(&temp_dir);
-
-    match result {
-        Ok(p) => Ok(p.to_string_lossy().to_string()),
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -1016,7 +983,18 @@ async fn download_blender(app: tauri::AppHandle, version: Option<String>) -> Res
 }
 
 #[tauri::command]
-async fn list_blender_versions() -> Vec<String> {
+async fn refresh_blender_versions() -> Vec<String> {
+    eprintln!("[debug] refresh_blender_versions: fetching from mirrors");
+    let handle = tokio::task::spawn_blocking(|| {
+        keinestamp::blender_download::fetch_blender_versions()
+    });
+    let fetched = handle.await.unwrap_or(Ok(Vec::new()));
+    if let Ok(versions) = fetched {
+        if !versions.is_empty() {
+            keinestamp::app_config::set_blender_versions(&versions);
+            return versions;
+        }
+    }
     let cached = keinestamp::app_config::get_blender_versions();
     if !cached.is_empty() {
         cached
@@ -1029,6 +1007,11 @@ async fn list_blender_versions() -> Vec<String> {
 fn list_installed_blender_versions() -> Vec<String> {
     eprintln!("[debug] list_installed_blender_versions()");
     keinestamp::blender_download::list_installed_blender_versions()
+}
+
+#[tauri::command]
+fn get_cached_blender_versions() -> Vec<String> {
+    keinestamp::app_config::get_blender_versions()
 }
 
 #[tauri::command]
@@ -1072,6 +1055,30 @@ fn set_auto_connect(enabled: bool) {
 }
 
 #[tauri::command]
+fn get_close_action() -> Option<bool> {
+    keinestamp::app_config::get_close_to_tray()
+}
+
+#[tauri::command]
+fn set_close_action(close_to_tray: Option<bool>) {
+    eprintln!("[debug] set_close_action({:?})", close_to_tray);
+    keinestamp::app_config::set_close_to_tray(close_to_tray);
+}
+
+#[tauri::command]
+fn resolve_close_action(app: tauri::AppHandle, close_to_tray: bool) {
+    eprintln!("[debug] resolve_close_action({})", close_to_tray);
+    keinestamp::app_config::set_close_to_tray(Some(close_to_tray));
+    if close_to_tray {
+        if let Some(win) = app.get_webview_window("main") {
+            let _ = win.hide();
+        }
+    } else {
+        app.exit(0);
+    }
+}
+
+#[tauri::command]
 fn get_deploy_server_url() -> String {
     eprintln!("[debug] get_deploy_server_url()");
     keinestamp::app_config::get_deploy_server_url().unwrap_or_default()
@@ -1083,6 +1090,8 @@ fn set_deploy_server_url(url: String) {
     keinestamp::app_config::set_deploy_server_url(&url);
 }
 
+static LOCAL_SERVERS: OnceLock<Mutex<HashMap<String, u16>>> = OnceLock::new();
+
 #[tauri::command]
 fn open_web_timeline(path: String) -> Result<(), String> {
     eprintln!("[debug] open_web_timeline({})", path);
@@ -1093,20 +1102,46 @@ fn open_web_timeline(path: String) -> Result<(), String> {
     if !html_path.exists() {
         return Err("index.html not found — commit first to generate the timeline".to_string());
     }
-    let (tx, rx) = std::sync::mpsc::channel();
+    let key = meta.web_root.to_string_lossy().to_string();
     let wr = meta.web_root.clone();
-    std::thread::spawn(move || {
-        let _ = keinestamp::serve::serve_local(&wr, tx);
-    });
-    let port = rx.recv_timeout(std::time::Duration::from_secs(5))
-        .map_err(|_| "timeline server failed to start".to_string())?;
+    let port = {
+        let map = LOCAL_SERVERS.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut guard = map.lock().map_err(|e| e.to_string())?;
+        let reuse = match guard.get(&key) {
+            Some(p) => {
+                let alive = format!("127.0.0.1:{}", p)
+                    .parse::<std::net::SocketAddr>()
+                    .map(|a| std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(300)).is_ok())
+                    .unwrap_or(false);
+                if alive {
+                    Some(*p)
+                } else {
+                    guard.remove(&key);
+                    None
+                }
+            }
+            None => None,
+        };
+        if let Some(p) = reuse {
+            p
+        } else {
+            let (tx, rx) = std::sync::mpsc::channel();
+            std::thread::spawn(move || {
+                let _ = keinestamp::serve::serve_local(&wr, tx);
+            });
+            let p = rx.recv_timeout(std::time::Duration::from_secs(5))
+                .map_err(|_| "timeline server failed to start".to_string())?;
+            guard.insert(key, p);
+            p
+        }
+    };
     let url = format!("http://127.0.0.1:{}/", port);
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd").args(["/c", "start", &url]).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&url).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&url).spawn();
     #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&url).spawn();
     result.map_err(|e| format!("failed to open timeline: {}", e))?;
     Ok(())
 }
@@ -1118,11 +1153,11 @@ fn open_site(url: String) -> Result<(), String> {
         return Err("invalid URL, must start with http:// or https://".to_string());
     }
     #[cfg(target_os = "windows")]
-    let result = std::process::Command::new("cmd").args(["/c", "start", &url]).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();
     #[cfg(target_os = "macos")]
-    let result = std::process::Command::new("open").arg(&url).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&url).spawn();
     #[cfg(target_os = "linux")]
-    let result = std::process::Command::new("xdg-open").arg(&url).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&url).spawn();
     result.map_err(|e| format!("failed to open site: {}", e))?;
     Ok(())
 }
@@ -1132,14 +1167,56 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .setup(|_app| {
-            std::thread::spawn(|| {
-                let fetched = keinestamp::blender_download::fetch_blender_versions().unwrap_or_default();
-                if !fetched.is_empty() {
-                    keinestamp::app_config::set_blender_versions(&fetched);
-                }
-            });
+        .setup(|app| {
+            use tauri::menu::{Menu, MenuItem};
+            use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+            let open_item = MenuItem::with_id(app, "open", "打开", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+            let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
+            let _tray = TrayIconBuilder::with_id("main-tray")
+                .icon(icon)
+                .tooltip("Keinestamp（左键打开，右键菜单）")
+                .menu(&menu)
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "open" => {
+                        if let Some(win) = app.get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                        if let Some(win) = tray.app_handle().get_webview_window("main") {
+                            let _ = win.show();
+                            let _ = win.set_focus();
+                        }
+                    }
+                })
+                .build(app)?;
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let app = window.app_handle().clone();
+                match keinestamp::app_config::get_close_to_tray() {
+                    Some(true) => {
+                        let _ = window.hide();
+                    }
+                    Some(false) => {
+                        app.exit(0);
+                    }
+                    None => {
+                        let _ = window.emit("close-requested", ());
+                    }
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             detect,
@@ -1176,9 +1253,9 @@ pub fn run() {
             get_project_log,
             get_tracked_files,
             get_file_diff,
-            get_glb_preview,
             download_blender,
-            list_blender_versions,
+            refresh_blender_versions,
+            get_cached_blender_versions,
             list_installed_blender_versions,
             get_blender_path,
             set_blender_path,
@@ -1188,6 +1265,9 @@ pub fn run() {
             set_deploy_server_url,
             get_auto_connect,
             set_auto_connect,
+            get_close_action,
+            set_close_action,
+            resolve_close_action,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

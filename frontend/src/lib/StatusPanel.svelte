@@ -1,4 +1,4 @@
-<script lang="ts">
+﻿<script lang="ts">
   import { parseStatus, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
@@ -9,12 +9,14 @@
     onRefresh,
     activePath = '',
     selection = null,
+    statusError = false,
     onSelectionChange = (_sel: string[] | null) => {},
   }: {
     statusOutput: string
     onRefresh: () => void
     activePath?: string
     selection?: string[] | null
+    statusError?: boolean
     onSelectionChange?: (sel: string[] | null) => void
   } = $props()
 
@@ -74,7 +76,59 @@
     return map
   })
 
+  const dirAllIgnoredMap = $derived.by(() => {
+    const map: Record<string, boolean> = {}
+    const walk = (nodes: FileTreeNode[]) => {
+      for (const n of nodes) {
+        if (n.children.length === 0) continue
+        const leaves: string[] = []
+        const collect = (nn: FileTreeNode) => {
+          if (nn.children.length === 0) leaves.push(nn.path)
+          else nn.children.forEach(collect)
+        }
+        collect(n)
+        map[n.path] = leaves.length === 0 || leaves.every((f) => isIgnored(f))
+        walk(n.children)
+      }
+    }
+    walk(tree)
+    return map
+  })
+
+  function dirAllIgnored(path: string): boolean {
+    return dirAllIgnoredMap[path] ?? false
+  }
+
   let collapsedDirs = $state<Set<string>>(new Set())
+  let userExpanded = $state<Set<string>>(new Set())
+  let userCollapsed = $state<Set<string>>(new Set())
+
+  const autoFoldable = $derived.by(() => {
+    const s = new Set<string>()
+    for (const d of Object.keys(dirAllIgnoredMap)) {
+      if ((dirAllIgnoredMap[d] || isIgnored(d)) && !userExpanded.has(d)) s.add(d)
+    }
+    return s
+  })
+
+  $effect(() => {
+    const next = new Set(collapsedDirs)
+    let changed = false
+    for (const d of autoFoldable) {
+      if (!next.has(d)) { next.add(d); changed = true }
+    }
+    for (const d of collapsedDirs) {
+      if (!autoFoldable.has(d) && !userCollapsed.has(d)) { next.delete(d); changed = true }
+    }
+    if (changed) collapsedDirs = next
+  })
+
+  $effect(() => {
+    activePath
+    collapsedDirs = new Set()
+    userExpanded = new Set()
+    userCollapsed = new Set()
+  })
 
   function isCollapsed(path: string): boolean {
     return collapsedDirs.has(path)
@@ -82,9 +136,20 @@
 
   function toggleCollapse(path: string) {
     const next = new Set(collapsedDirs)
-    if (next.has(path)) next.delete(path)
-    else next.add(path)
+    const ue = new Set(userExpanded)
+    const uc = new Set(userCollapsed)
+    if (next.has(path)) {
+      next.delete(path)
+      ue.add(path)
+      uc.delete(path)
+    } else {
+      next.add(path)
+      uc.add(path)
+      ue.delete(path)
+    }
     collapsedDirs = next
+    userExpanded = ue
+    userCollapsed = uc
   }
 
   function isChecked(path: string): boolean {
@@ -175,13 +240,15 @@
   })
 
   $effect(() => {
-    if (!activePath) {
+    const path = activePath
+    if (!path) {
       trackedSet = new Set()
       ignoredSet = new Set()
       return
     }
-    getIgnoreInfo(activePath)
+    getIgnoreInfo(path)
       .then((info) => {
+        if (path !== activePath) return
         trackedSet = new Set(info.tracked)
         ignoredSet = new Set(info.ignored)
       })
@@ -317,9 +384,15 @@
   {#if statusFiles.length === 0 && ignoredSet.size === 0}
     <div class="sp-empty">
       <div class="sp-empty-icon"><svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor" opacity="0.5"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg></div>
-      <div>无变更 — 工作区干净</div>
+      {#if statusError}
+        <div>状态获取失败</div>
+        <div style="font-size:12px">git status 读取出错，点击刷新重试</div>
+      {:else}
+        <div>无变更 — 工作区干净</div>
+      {/if}
     </div>
   {:else}
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="sp-list" oncontextmenu={(e) => e.preventDefault()}>
       {#each tree as node (node.path)}
         <StatusTreeItem
@@ -335,12 +408,14 @@
           onContextMenu={openContextMenu}
           ignored={isIgnored(node.path)}
           isIgnoredFn={isIgnored}
+          dirAllIgnoredFn={dirAllIgnored}
         />
       {/each}
     </div>
   {/if}
 
   {#if contextMenu}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu() }}></div>
     <div class="ctx-menu" bind:this={menuEl} style="left: {contextMenu.x ?? contextMenu.cursorX}px; top: {contextMenu.y ?? contextMenu.cursorY}px">
       <button onclick={menuOpenFolder}>打开所在文件夹</button>

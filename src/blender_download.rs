@@ -1,4 +1,4 @@
-use anyhow::Result;
+﻿use anyhow::Result;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -27,6 +27,10 @@ const KNOWN_VERSIONS: &[&str] = &[
     "4.0.2", "4.0.1", "4.0.0",
     "3.6.20", "3.6.19", "3.6.18",
 ];
+
+const VERSION_FETCH_LIMIT: usize = 12;
+const INDEX_TIMEOUT_SECS: u64 = 12;
+const SUBPAGE_TIMEOUT_SECS: u64 = 4;
 
 pub struct DownloadProgress {
     pub phase: String,
@@ -89,49 +93,83 @@ pub fn fetch_blender_versions() -> Result<Vec<String>> {
             }
         }
     }
-    eprintln!("[debug] fetch_blender_versions: all mirrors failed, using fallback");
-    Ok(list_blender_versions())
+    eprintln!("[debug] fetch_blender_versions: all mirrors failed");
+    anyhow::bail!("all version mirrors failed")
+}
+
+fn collect_hrefs(html: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = html;
+    while let Some(idx) = rest.find("href=\"") {
+        rest = &rest[idx + 6..];
+        if let Some(end) = rest.find('"') {
+            out.push(rest[..end].to_string());
+            rest = &rest[end..];
+        }
+    }
+    out
+}
+
+fn parse_version_dirs(html: &str) -> Vec<String> {
+    collect_hrefs(html)
+        .into_iter()
+        .filter_map(|href| {
+            let ver = href.trim_end_matches('/').strip_prefix("Blender")?;
+            if ver.contains('.') && ver.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                Some(ver.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn parse_installer_versions(html: &str, suffix: &str) -> Vec<String> {
+    collect_hrefs(html)
+        .into_iter()
+        .filter_map(|href| {
+            let v = href.strip_prefix("blender-")?.strip_suffix(suffix)?;
+            if v.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+                Some(v.to_string())
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 fn fetch_versions_from(base_url: &str) -> Result<Vec<String>> {
     let url = if base_url.ends_with('/') { base_url.to_string() } else { format!("{}/", base_url) };
-    let html = fetch_url(&url)?;
+    let html = fetch_url(&url, INDEX_TIMEOUT_SECS)?;
+
+    let dirs = parse_version_dirs(&html);
+
+    let suffix = if cfg!(target_os = "windows") {
+        "-windows-x64.zip"
+    } else if cfg!(target_os = "macos") {
+        "-macos-arm64.dmg"
+    } else {
+        "-linux-x64.tar.xz"
+    };
 
     let mut versions = Vec::new();
-    for line in html.lines() {
-        if let Some(href) = line.split("href=\"").nth(1) {
-            if let Some(dir) = href.split('"').next() {
-                if let Some(ver) = dir.strip_prefix("Blender") {
-                    let ver = ver.trim_end_matches('/');
-                    if ver.contains('.') && ver.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-                        let sub_url = format!("{}Blender{}/", url.trim_end_matches('/'), ver);
-                        if let Ok(sub_html) = fetch_url(&sub_url) {
-                            for sub_line in sub_html.lines() {
-                                if let Some(sub_href) = sub_line.split("href=\"").nth(1) {
-                                    if let Some(file) = sub_href.split('"').next() {
-                                        let prefix = "blender-";
-                                        let suffix = if cfg!(target_os = "windows") {
-                                            "-windows-x64.zip"
-                                        } else if cfg!(target_os = "macos") {
-                                            "-macos-arm64.dmg"
-                                        } else {
-                                            "-linux-x64.tar.xz"
-                                        };
-                                        if let Some(rest) = file.strip_prefix(prefix) {
-                                            if let Some(v) = rest.strip_suffix(suffix) {
-                                                if v.chars().next().map_or(false, |c| c.is_ascii_digit()) {
-                                                    versions.push(v.to_string());
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+    for chunk in dirs.chunks(8) {
+        let handles: Vec<_> = chunk.iter().map(|ver| {
+            let sub_url = format!("{}/Blender{}/", url.trim_end_matches('/'), ver);
+            std::thread::spawn(move || {
+                let sub_html = fetch_url(&sub_url, SUBPAGE_TIMEOUT_SECS).ok()?;
+                Some(parse_installer_versions(&sub_html, suffix))
+            })
+        }).collect();
+        for handle in handles {
+            if let Ok(Some(found)) = handle.join() {
+                versions.extend(found);
             }
         }
+    }
+
+    if versions.is_empty() {
+        anyhow::bail!("no installer files found under {} ({} version dirs)", url, dirs.len());
     }
 
     versions.sort_by(|a, b| {
@@ -140,35 +178,19 @@ fn fetch_versions_from(base_url: &str) -> Result<Vec<String>> {
         bp.cmp(&ap)
     });
     versions.dedup();
+    versions.truncate(VERSION_FETCH_LIMIT);
 
     Ok(versions)
 }
 
-fn fetch_url(url: &str) -> Result<String> {
-    if cfg!(target_os = "windows") {
-        let script = format!(
-            "(New-Object System.Net.WebClient).DownloadString('{}')",
-            url
-        );
-        let output = std::process::Command::new("powershell")
-            .args(["-NoProfile", "-Command", &script])
-            .output()
-            .map_err(|e| anyhow::anyhow!("获取版本列表失败: {}", e))?;
-        if !output.status.success() {
-            anyhow::bail!("获取版本列表失败");
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    } else {
-        let output = std::process::Command::new("curl")
-            .args(["-sL", url])
-            .output()
-            .or_else(|_| std::process::Command::new("wget").args(["-qO-", url]).output())
-            .map_err(|e| anyhow::anyhow!("获取版本列表失败: {}", e))?;
-        if !output.status.success() {
-            anyhow::bail!("获取版本列表失败");
-        }
-        Ok(String::from_utf8_lossy(&output.stdout).to_string())
-    }
+fn fetch_url(url: &str, timeout_secs: u64) -> Result<String> {
+    let body = ureq::get(url)
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .call()
+        .map_err(|e| anyhow::anyhow!("获取版本列表失败: {}", e))?
+        .into_string()
+        .map_err(|e| anyhow::anyhow!("获取版本列表失败: {}", e))?;
+    Ok(body)
 }
 
 pub fn download_blender(version: Option<&str>) -> Result<PathBuf> {
@@ -259,12 +281,12 @@ fn extract_blender(
             archive_path.to_string_lossy(),
             app_dir.to_string_lossy()
         );
-        std::process::Command::new("powershell")
+        crate::process_util::hide_console(std::process::Command::new("powershell"))
             .args(["-NoProfile", "-Command", &script])
             .output()
             .map_err(|e| anyhow::anyhow!("解压失败: {}", e))?
     } else {
-        std::process::Command::new("tar")
+        crate::process_util::hide_console(std::process::Command::new("tar"))
             .args([
                 "xf",
                 &archive_path.to_string_lossy(),
@@ -460,6 +482,40 @@ mod tests {
     #[test]
     fn test_default_version() {
         assert!(!DEFAULT_BLENDER_VERSION.is_empty());
+    }
+
+    #[test]
+    fn test_parse_version_dirs_single_line() {
+        let html = "<!DOCTYPE html> <html> <head></head> <body> <table id=\"list\"><tbody>\
+<tr><td class=\"link\"><a href=\"../\">Parent</a></td></tr>\
+<tr><td class=\"link\"><a href=\"Blender4.2/\" title=\"Blender4.2/\">Blender4.2/</a></td></tr>\
+<tr><td class=\"link\"><a href=\"Blender5.1/\" title=\"Blender5.1/\">Blender5.1/</a></td></tr>\
+<tr><td class=\"link\"><a href=\"BlenderBenchmark1.0/\" title=\"BlenderBenchmark1.0/\">BlenderBenchmark1.0/</a></td></tr>\
+<tr><td class=\"link\"><a href=\"GPL-license.txt\" title=\"GPL-license.txt\">GPL-license.txt</a></td></tr>\
+</tbody></table> </body></html>";
+        let dirs = parse_version_dirs(html);
+        assert_eq!(dirs, vec!["4.2".to_string(), "5.1".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_version_dirs_multiline_apache() {
+        let html = "<html>\n<h1>Index of /release/</h1><hr><pre><a href=\"../\">../</a>\n<a href=\"Blender2.83/\">Blender2.83/</a>  05-Jul-2020 07:17 -\n<a href=\"Blender3.6/\">Blender3.6/</a>  01-Jan-2021 10:00 -\n<a href=\"blender2.04-ipaq.zip\">blender2.04-ipaq.zip</a>\n</pre></html>";
+        let dirs = parse_version_dirs(html);
+        assert_eq!(dirs, vec!["2.83".to_string(), "3.6".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_installer_versions_multiline() {
+        let html = "<a href=\"blender-4.2.8-windows-x64.zip\">blender-4.2.8-windows-x64.zip</a>\n<a href=\"blender-4.2.8-linux-x64.tar.xz\">...</a>\n<a href=\"blender-4.2.8-windows-x64.msi\">...</a>";
+        let versions = parse_installer_versions(html, "-windows-x64.zip");
+        assert_eq!(versions, vec!["4.2.8".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_installer_versions_single_line() {
+        let html = "<a href=\"blender-5.1.0-windows-x64.zip\">x</a> <a href=\"blender-5.1.0-macos-arm64.dmg\">y</a> <a href=\"blender-4.2.0-windows-x64.zip\">z</a>";
+        let versions = parse_installer_versions(html, "-windows-x64.zip");
+        assert_eq!(versions, vec!["5.1.0".to_string(), "4.2.0".to_string()]);
     }
 
     #[test]

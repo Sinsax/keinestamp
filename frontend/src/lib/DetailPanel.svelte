@@ -29,11 +29,9 @@
 </script>
 
 {#if entry}
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="detail-overlay" onclick={onClose} role="dialog">
+  <div class="detail-overlay" onclick={onClose} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="detail-panel" onclick={(e: MouseEvent) => e.stopPropagation()} role="document">
+    <div class="detail-panel" onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
       <h2>{entry.message}
         {#if entry.tag}
           <span class="tag-badge" style="--tag-c:{tagColor(entry.tag)}">{entry.tag}</span>
@@ -42,19 +40,22 @@
       <div class="meta">{entry.id.slice(0, 7)} &mdash; {entry.author}</div>
 
       <div class="field">
+        <!-- svelte-ignore a11y_label_has_associated_control -->
         <label>时间戳</label>
         <div class="value">{entry.timestamp.slice(0, 19).replace('T', ' ')}</div>
       </div>
 
       <div class="field">
+        <!-- svelte-ignore a11y_label_has_associated_control -->
         <label>文件 ({entry.files.length})</label>
         <div class="value ft">
           <DirTree paths={entry.files} />
         </div>
       </div>
 
-      {#if blendFiles.length > 0}
+      {#if blendFiles.length > 0 && entry.preview}
         <div class="field">
+          <!-- svelte-ignore a11y_label_has_associated_control -->
           <label>3D 模型</label>
           <div class="value" style="margin-top:4px">
             {#each blendFiles as f}

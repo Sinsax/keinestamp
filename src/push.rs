@@ -159,4 +159,36 @@ mod tests {
     fn sanitize_empty_name_falls_back() {
         assert_eq!(safe_name("", "deadbeef"), "projectdeadbeef");
     }
+
+    #[test]
+    fn create_zip_includes_files_excludes_git_and_three() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("ks_push_zip_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join(".git"))?;
+        std::fs::create_dir_all(dir.join("three"))?;
+        std::fs::create_dir_all(dir.join("previews_glb"))?;
+        std::fs::write(dir.join("index.html"), b"<html>")?;
+        std::fs::write(dir.join(".git/config"), b"x")?;
+        std::fs::write(dir.join("three/three.cjs"), b"x")?;
+        std::fs::write(dir.join("previews_glb/a.glb"), b"glb")?;
+
+        let bytes = create_zip(&dir)?;
+        let cursor = std::io::Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(cursor)?;
+        let names: Vec<String> = (0..archive.len())
+            .map(|i| archive.by_index(i).unwrap().name().to_string())
+            .collect();
+        assert!(names.iter().any(|n| n == "index.html"), "index.html should be in zip: {:?}", names);
+        assert!(names.iter().any(|n| n == "previews_glb/a.glb"), "nested file should be in zip: {:?}", names);
+        assert!(!names.iter().any(|n| n.contains(".git") || n.contains("three")), ".git/three must be excluded: {:?}", names);
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn create_zip_missing_dir_fails() {
+        let missing = std::env::temp_dir().join(format!("ks_push_missing_{}", std::process::id()));
+        assert!(create_zip(&missing).is_err());
+    }
 }

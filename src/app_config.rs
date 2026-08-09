@@ -25,6 +25,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub auto_connect: bool,
     #[serde(default)]
+    pub close_to_tray: Option<bool>,
+    #[serde(default)]
     pub last_revert: Option<LastRevert>,
 }
 
@@ -72,6 +74,7 @@ impl Default for AppConfig {
             deploy_server_url: None,
             deploy_token: None,
             auto_connect: false,
+            close_to_tray: None,
             last_revert: None,
         }
     }
@@ -99,6 +102,17 @@ pub fn get_blender_versions() -> Vec<String> {
 pub fn set_blender_versions(versions: &[String]) {
     let mut cfg = AppConfig::load();
     cfg.blender_versions = Some(versions.join(","));
+    cfg.save();
+}
+
+pub fn get_close_to_tray() -> Option<bool> {
+    let cfg = AppConfig::load();
+    cfg.close_to_tray
+}
+
+pub fn set_close_to_tray(close_to_tray: Option<bool>) {
+    let mut cfg = AppConfig::load();
+    cfg.close_to_tray = close_to_tray;
     cfg.save();
 }
 
@@ -184,7 +198,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, last_revert: None };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, close_to_tray: Some(true), last_revert: None };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);
@@ -193,6 +207,7 @@ assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
     assert_eq!(loaded.blender_versions, None);
     assert_eq!(loaded.deploy_server_url, None);
     assert_eq!(loaded.deploy_token, None);
+    assert_eq!(loaded.close_to_tray, Some(true));
     assert_eq!(loaded.last_revert, None);
 
         std::fs::remove_dir_all(&dir).unwrap();
@@ -225,6 +240,7 @@ assert_eq!(loaded.blender_path, None);
             deploy_server_url: None,
             deploy_token: None,
             auto_connect: false,
+            close_to_tray: None,
             last_revert: Some(lr),
         };
         cfg.save_to(&path);

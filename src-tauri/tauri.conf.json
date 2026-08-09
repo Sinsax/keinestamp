@@ -1,7 +1,7 @@
 {
   "productName": "Keinestamp",
   "version": "0.1.0",
-  "identifier": "com.keinestamp.app",
+  "identifier": "com.keinestamp.desktop",
   "build": {
     "frontendDist": "../frontend/dist",
     "devUrl": "http://localhost:5173",

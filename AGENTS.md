@@ -5,7 +5,7 @@ Single-binary CLI + Tauri GUI Blender Git Progress Board. Rust Edition 2024.
 ## Commands
 
 ```powershell
-cargo test                          # 70 unit + 7 integration (was 74+7, removed url_prefix tests)
+cargo test                          # 97 unit + 8 integration
 cargo test --lib <module>           # Single module (config/detect/init/timeline/...)
 cargo test --test cli_tests         # Integration only
 cargo run -- init <path>            # CLI entry
@@ -62,7 +62,7 @@ web_root = "C:/Projects/Alice/web-timeline"
 - **URL prefix routing**: Each project is accessible at `/<project_name>/`. Cookie `keinestamp_token` is scoped to `Path=/<project_name>/` for multi-project isolation.
 - Login page at `GET /<project>/login`. On success, sets `keinestamp_token` cookie with `Path=/<project>/` and saves token to `localStorage` for auto-fill.
 - Static files: try Bearer → Cookie auth (checks both config access_tokens and stored project tokens via `HashMap`), fallback to login page for browser requests
-- Per-user `last_update` timestamps (not global)
+- Single server-global `last_update` timestamp on `/health` (updated on any deploy)
 - Rate limiter: 10 failures / 60s per IP → 120s block. `retain()` cleanup on each `check()`.
 - Bearer deploy_token only for `/upload` and `/health`; Bearer access_token or Cookie for browser endpoints (access_token stored per-project during deploy). No Basic auth support.
 - Path traversal: `..` string check + `canonicalize()` prefix check (defense-in-depth) + project name sanitization
@@ -100,7 +100,7 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (34)
+### Tauri commands (36)
 
 All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
 
@@ -126,12 +126,13 @@ All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T,
 | `get_project_log` | `String[]` | git log lines |
 | `get_tracked_files` | `String[]` | walks dir (skips hidden/node_modules/target/web-timeline) |
 | `get_file_diff` | `String` | `git show <entry> -- <file>` |
-| `get_glb_preview` | `String` path | extracts .blend from git + Blender export |
 | `download_blender` | `String` path | emits `blender-download-progress` |
-| `list_blender_versions` / `list_installed_blender_versions` | `String[]` | |
+| `refresh_blender_versions` / `get_cached_blender_versions` / `list_installed_blender_versions` | `String[]` | manual-only check (manual button) / persisted cache (no network) / installed local |
 | `get_blender_path` / `set_blender_path` | `String` / `()` | AppConfig |
 | `get_deploy_token` / `set_deploy_token` | `String` / `()` | AppConfig deploy_token |
 | `get_auto_connect` / `set_auto_connect` | `bool` / `()` | AppConfig auto_connect |
+| `get_close_action` / `set_close_action` | `bool|null` / `()` | AppConfig close_to_tray（关窗行为：null=未决定，true=后台驻留，false=退出）|
+| `resolve_close_action` | `()` | 首次关窗弹窗后的落定：记录选择并执行（true=隐藏窗口，false=退出）|
 | `set_entry_milestone` | `()` | toggles `milestone` on timeline.json entry (atomic write); regenerates web page + web commit |
 
 ### Frontend components
@@ -149,7 +150,7 @@ All in `frontend/src/`. Key files:
 - `api.ts` — 31 Tauri invoke wrappers
 - `types.ts` — Interfaces
 
-**Dead code (don't use)**: `InitDialog.svelte` (replaced by native `@tauri-apps/plugin-dialog`), `ModelViewer.svelte` (3D preview via browser `openWebTimeline` instead).
+**Dead code (don't use)**: (none — `InitDialog.svelte`/`ModelViewer.svelte` deleted, replaced by native `@tauri-apps/plugin-dialog` and browser `openWebTimeline`)
 
 ### Key design decisions
 
@@ -158,7 +159,7 @@ All in `frontend/src/`. Key files:
 - **URL prefix routing**: Each project served at `/<project_name>/` based on `X-Project-Name` deploy header. Cookie scoped to `Path=/<project_name>/`, localStorage key scoped to project name. Multiple projects coexist in one browser.
 - **No page_password**: Auth handled by serve.rs Bearer + Cookie. HTTPS via Caddy/nginx.
 - **Diff data externalized**: `web-timeline/diffs.json` loaded via fetch()
-- **push/pull gated by `has_remote()`**: Buttons only enabled when git `origin` remote exists
+- **push/pull gated by `has_remote()`**: Tauri `push`/`pull` commands skip when no git `origin` remote (no GUI buttons exist; CLI prints skip message)
 - **Notifications**: Toast auto-dismiss after 3s. No manual dismiss.
 - **Day/night dual theme**: Day = 人形 (white bg + deep blue + ice blue + red), Night = 白泽 (green-black bg + dark green + green-white + red). `[data-theme="night"]` override block at end of app.scss. Manual ☀/🌙 toggle, localStorage key `keinestamp_theme` (desktop) / `keinestamp_web_theme` (web). Inline pre-read script in `frontend/index.html` head prevents white flash. No system-follow, no animations.
 - **Theme toggle location**: ☀/🌙 sits in ProjectTabs fixed right actions area; TitleBar is pure window controls (no theme button).
@@ -171,7 +172,7 @@ At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/keinestamp_int_*`. 
 
 ## Test gaps (high-risk)
 
-- `push.rs` — 0 tests (zip creation, auth header)
+- `push.rs` — zip creation tested; `deploy_to_server` network path untested
 - `main_helpers.rs` — 0 unit tests
 - `serve.rs` — HTTP handlers untested
 - `git_helpers.rs` — core functions only integration-tested
@@ -179,4 +180,4 @@ At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/keinestamp_int_*`. 
 
 ## Known dead code
 
-- `blender_render::render_preview` — never called (only `export_to_glb` is used)
+- (none — `blender_render::render_preview`, `ModelViewer.svelte`, `InitDialog.svelte` removed)

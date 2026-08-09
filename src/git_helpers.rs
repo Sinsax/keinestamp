@@ -1,7 +1,7 @@
 ﻿use std::path::Path;
 
 pub fn get_changed_files(project_root: &Path, commit_hash: &str) -> anyhow::Result<Vec<String>> {
-    let is_root = std::process::Command::new("git")
+    let is_root = crate::process_util::hide_console(std::process::Command::new("git"))
         .args(["rev-parse", &format!("{}^", commit_hash)])
         .current_dir(project_root)
         .output()
@@ -20,7 +20,7 @@ pub fn get_changed_files(project_root: &Path, commit_hash: &str) -> anyhow::Resu
     }
     args.push(commit_hash);
 
-    let output = std::process::Command::new("git")
+    let output = crate::process_util::hide_console(std::process::Command::new("git"))
         .args(&args)
         .current_dir(project_root)
         .output()?;
@@ -35,7 +35,7 @@ pub fn get_changed_files(project_root: &Path, commit_hash: &str) -> anyhow::Resu
 }
 
 pub fn get_changed_files_status(project_root: &Path, commit_hash: &str) -> anyhow::Result<Vec<String>> {
-    let is_root = std::process::Command::new("git")
+    let is_root = crate::process_util::hide_console(std::process::Command::new("git"))
         .args(["rev-parse", &format!("{}^", commit_hash)])
         .current_dir(project_root)
         .output()
@@ -54,7 +54,7 @@ pub fn get_changed_files_status(project_root: &Path, commit_hash: &str) -> anyho
     }
     args.push(commit_hash);
 
-    let output = std::process::Command::new("git")
+    let output = crate::process_util::hide_console(std::process::Command::new("git"))
         .args(&args)
         .current_dir(project_root)
         .output()?;
@@ -80,7 +80,7 @@ pub fn has_blend_files(files: &[String]) -> bool {
 }
 
 pub fn get_git_author(project_root: &Path) -> String {
-    std::process::Command::new("git")
+    crate::process_util::hide_console(std::process::Command::new("git"))
         .args(["config", "user.name"])
         .current_dir(project_root)
         .output()
