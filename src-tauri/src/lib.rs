@@ -553,128 +553,78 @@ fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn revert(path: String) -> Result<(), String> {
-    eprintln!("[debug] revert({})", path);
+async fn rollback(path: String, entry_id: String) -> Result<(), String> {
+    eprintln!("[debug] rollback({}, {})", path, &entry_id[..7.min(entry_id.len())]);
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta_path = keinestamp::config::meta_path(&p);
         let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-        let original_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
-            .map_err(|e| e.to_string())?;
-        map_err(keinestamp::git_project::revert(&meta.project_root))?;
-        eprintln!("[debug] revert: git reset --soft HEAD~1 ok");
-        let revert_hash = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
-            .map_err(|e| e.to_string())?;
-        let timeline_path = meta.web_root.join("timeline.json");
-        let mut removed_entry: Option<keinestamp::timeline::TimelineEntry> = None;
-        if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
-            let pos = tl.entries.iter().position(|e| e.id == original_hash);
-            if let Some(i) = pos {
-                let e = tl.entries.remove(i);
-                eprintln!("[debug] revert: removed entry {}", &e.id[..7.min(e.id.len())]);
-                removed_entry = Some(e.clone());
-                let _ = keinestamp::timeline::write_timeline(&timeline_path, &tl);
-                let project_name = meta
-                    .project_root
-                    .file_name()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_default();
-                let _ = keinestamp::html_gen::generate_index_html(
-                    &meta.web_root,
-                    &meta.project_root,
-                    &tl,
-                    &project_name,
-                );
-                let _ = keinestamp::git_web::web_commit_and_push(
-                    &meta.web_root,
-                    &format!("revert {}", &e.id[..7.min(e.id.len())]),
-                    false,
-                );
-            } else {
-                eprintln!(
-                    "[debug] revert: no timeline entry matches {} — timeline unchanged",
-                    &original_hash[..7.min(original_hash.len())]
-                );
-            }
-        }
-        if let Some(pid) = meta.project_id.clone() {
-            keinestamp::app_config::set_last_revert(Some(keinestamp::app_config::LastRevert {
-                project_id: pid,
-                revert_hash,
-                original_hash,
-                removed_entry,
-            }));
-        }
+        map_err(keinestamp::git_project::rollback(&meta.project_root, &entry_id))?;
         Ok(())
     });
     handle.await.map_err(|e| e.to_string())?
 }
 
-fn last_revert_state(path: &str) -> Result<Option<keinestamp::app_config::LastRevert>, String> {
-    let p = PathBuf::from(path);
+#[tauri::command]
+fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
+    eprintln!("[debug] get_rollback_state({})", path);
+    let p = PathBuf::from(&path);
     let meta_path = keinestamp::config::meta_path(&p);
     let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let lr = keinestamp::app_config::get_last_revert();
-    if let Some(ref r) = lr {
-        if meta.project_id.as_deref() == Some(r.project_id.as_str()) {
-            let head = keinestamp::git_project::get_current_commit_hash(&meta.project_root)
-                .map_err(|e| e.to_string())?;
-            if head == r.revert_hash {
-                return Ok(lr);
-            }
-        }
-    }
-    Ok(None)
+    let st = map_err(keinestamp::git_project::get_rollback_state(&meta.project_root))?;
+    Ok(serde_json::json!({
+        "rollback_point": st.rollback_point,
+        "head_matches": st.head_matches,
+    }))
 }
 
 #[tauri::command]
-fn can_restore_revert(path: String) -> bool {
-    eprintln!("[debug] can_restore_revert({})", path);
-    last_revert_state(&path).unwrap_or(None).is_some()
-}
-
-#[tauri::command]
-async fn restore_revert(path: String) -> Result<(), String> {
-    eprintln!("[debug] restore_revert({})", path);
+async fn restore_rollback(path: String) -> Result<(), String> {
+    eprintln!("[debug] restore_rollback({})", path);
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta_path = keinestamp::config::meta_path(&p);
         let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-        let lr = last_revert_state(&path)?
-            .ok_or_else(|| "没有可恢复的撤回（撤回后可能已有新记录）".to_string())?;
-
-        map_err(keinestamp::git_project::restore_revert(
-            &meta.project_root,
-            &lr.original_hash,
-        ))?;
-        keinestamp::app_config::set_last_revert(None);
-
-        if let Some(entry) = lr.removed_entry.clone() {
-            let timeline_path = meta.web_root.join("timeline.json");
-            map_err(keinestamp::timeline::append_entry(&timeline_path, entry))?;
+        match keinestamp::git_project::restore_rollback(&meta.project_root) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                if let Ok(files) = keinestamp::git_project::get_rollback_conflicts(&meta.project_root) {
+                    if !files.is_empty() {
+                        return Err(format!("CONFLICT|{}", files.join("\n")));
+                    }
+                }
+                Err(e.to_string())
+            }
         }
+    });
+    handle.await.map_err(|e| e.to_string())?
+}
 
-        let timeline_path = meta.web_root.join("timeline.json");
-        let timeline = keinestamp::timeline::read_timeline(&timeline_path).ok();
-        if let Some(tl) = timeline {
-            let project_name = meta
-                .project_root
-                .file_name()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
-            let _ = keinestamp::html_gen::generate_index_html(
-                &meta.web_root,
-                &meta.project_root,
-                &tl,
-                &project_name,
-            );
-            let _ = keinestamp::git_web::web_commit_and_push(
-                &meta.web_root,
-                &format!("restore revert {}", &lr.original_hash[..7.min(lr.original_hash.len())]),
-                false,
-            );
-        }
-        Ok(())
+#[tauri::command]
+fn get_rollback_conflicts(path: String) -> Result<Vec<String>, String> {
+    eprintln!("[debug] get_rollback_conflicts({})", path);
+    let p = PathBuf::from(&path);
+    let meta_path = keinestamp::config::meta_path(&p);
+    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+    map_err(keinestamp::git_project::get_rollback_conflicts(&meta.project_root))
+}
+
+#[tauri::command]
+async fn resolve_rollback_conflicts(path: String, choices: Vec<Vec<String>>) -> Result<(), String> {
+    eprintln!("[debug] resolve_rollback_conflicts({}, {} files)", path, choices.len());
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let parsed: Vec<(String, bool)> = choices
+            .into_iter()
+            .map(|c| {
+                let path = c.first().cloned().unwrap_or_default();
+                let use_latest = c.get(1).map(|s| s == "latest").unwrap_or(false);
+                (path, use_latest)
+            })
+            .collect();
+        map_err(keinestamp::git_project::resolve_rollback_conflicts(&meta.project_root, &parsed))
     });
     handle.await.map_err(|e| e.to_string())?
 }
@@ -1228,9 +1178,11 @@ pub fn run() {
             get_deploy_status,
             pull,
             has_remote,
-            revert,
-            restore_revert,
-            can_restore_revert,
+            rollback,
+            get_rollback_state,
+            restore_rollback,
+            get_rollback_conflicts,
+            resolve_rollback_conflicts,
             status,
             log,
             read_config,
