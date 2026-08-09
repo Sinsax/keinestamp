@@ -18,6 +18,10 @@
     onOpenSite = () => {},
     onOpenLocalView = () => {},
     onMilestoneChange = async () => {},
+    rollbackPoint = null,
+    onExportEntry = (entry: TimelineEntry) => {},
+    onRollback = (entry: TimelineEntry) => {},
+    rollbackBusy = false,
   }: {
     entries: TimelineEntry[]
     selectedId: string
@@ -32,6 +36,10 @@
     onOpenSite?: () => void
     onOpenLocalView?: () => void
     onMilestoneChange?: () => Promise<void>
+    rollbackPoint?: string | null
+    onExportEntry?: (entry: TimelineEntry) => void
+    onRollback?: (entry: TimelineEntry) => void
+    rollbackBusy?: boolean
   } = $props()
 
   let milestoneBusy = $state('')
@@ -44,6 +52,36 @@
       await onMilestoneChange()
     } catch { /* ignore */ }
     milestoneBusy = ''
+  }
+
+  let ctxMenu = $state<{ x: number; y: number; entry: TimelineEntry } | null>(null)
+
+  function openCtx(e: MouseEvent, entry: TimelineEntry) {
+    e.preventDefault()
+    e.stopPropagation()
+    ctxMenu = { x: e.clientX, y: e.clientY, entry }
+  }
+
+  function closeCtx() {
+    ctxMenu = null
+  }
+
+  function ctxExport() {
+    const m = ctxMenu
+    closeCtx()
+    if (m) onExportEntry(m.entry)
+  }
+
+  function ctxRollback() {
+    const m = ctxMenu
+    closeCtx()
+    if (m) onRollback(m.entry)
+  }
+
+  let rollbackIndex = $derived(rollbackPoint ? entries.findIndex((e) => e.id === rollbackPoint) : -1)
+
+  function isDimmed(index: number): boolean {
+    return rollbackIndex >= 0 && index < rollbackIndex
   }
 
   let editingToken = $state(false)
@@ -254,7 +292,7 @@
         <div style="font-size:12px">使用记录按钮记录进度</div>
       </div>
     {:else}
-      {#each grouped as g (g.entry.id)}
+      {#each grouped as g, i (g.entry.id)}
       {@const entry = g.entry}
       {@const entryTag = entry.tag || null}
       {@const textF = entry.files.map((f, i) => ({ file: f, status: entry.file_status?.[i] || '', idx: i })).filter(x => !x.file.endsWith('.blend') && x.status !== 'A')}
@@ -272,9 +310,11 @@
         class:active={entry.id === selectedId}
         class:tagged={!!entryTag}
         class:milestone={!!entry.milestone}
+        class:dimmed={isDimmed(i)}
         style={entryTag ? `--tag-color:${tagColor(entryTag)}` : ''}
         onclick={(e) => { e.stopPropagation(); onSelect(entry.id); }}
         ondblclick={(e) => { e.stopPropagation(); onDblClick(entry); }}
+        oncontextmenu={(e) => openCtx(e, entry)}
       >
         <button
           class="ms-badge"
@@ -370,6 +410,14 @@
     {/each}
     {/if}
   </div>
+  {#if ctxMenu}
+    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+    <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
+    <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+      <button class="ctx-item" onclick={ctxExport}>导出</button>
+      <button class="ctx-item" onclick={ctxRollback} disabled={!!rollbackPoint || rollbackBusy} title={rollbackPoint ? '回退状态下不可回退' : ''}>回退</button>
+    </div>
+  {/if}
   <div class="entries-footer">
     <div class="at-section">
       <label for="el-site-name">网页名称</label>
@@ -746,5 +794,44 @@
     font-size: 10px;
     color: var(--text-dim);
     margin-top: 4px;
+  }
+  .entry-card.dimmed {
+    opacity: 0.45;
+    filter: saturate(0.6);
+  }
+  .ctx-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  .ctx-menu {
+    position: fixed;
+    z-index: 41;
+    min-width: 120px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 4px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  }
+  .ctx-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 10px;
+    font-size: 12px;
+    border-radius: 6px;
+    background: transparent;
+    border: none;
+    color: var(--text);
+    cursor: pointer;
+  }
+  .ctx-item:hover:not(:disabled) {
+    background: var(--accent);
+    color: #fff;
+  }
+  .ctx-item:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 </style>
