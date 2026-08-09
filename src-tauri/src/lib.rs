@@ -434,12 +434,16 @@ fn get_ignore_info(project_root: String, files: Option<Vec<String>>) -> Result<s
             }
         }
     }
-    // 传入的 status 文件中命中 .gitignore 规则的路径（含已跟踪文件的删除/修改差异）
-    let rule_ignored: Vec<String> = match files {
-        Some(fs) => keinestamp::git_project::check_ignore(std::path::Path::new(&project_root), &fs)
-            .unwrap_or_default(),
-        None => Vec::new(),
-    };
+    // 传入的 status 文件 + 全部 tracked 文件中命中 .gitignore 规则的路径
+    // （含已跟踪文件的删除/修改差异；tracked 全量检查保证前端隐藏稳定，不随传入列表波动）
+    let mut check_files: Vec<String> = tracked.clone();
+    if let Some(fs) = files {
+        check_files.extend(fs);
+    }
+    check_files.sort();
+    check_files.dedup();
+    let rule_ignored: Vec<String> = keinestamp::git_project::check_ignore(std::path::Path::new(&project_root), &check_files)
+        .unwrap_or_default();
     Ok(serde_json::json!({ "tracked": tracked, "ignored": ignored, "rule_ignored": rule_ignored }))
 }
 

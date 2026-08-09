@@ -2,6 +2,7 @@
   import { parseStatus, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
+  import { untrack } from 'svelte'
   import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore, keepRollbackFile } from '../api'
 
   let {
@@ -246,13 +247,15 @@
 
   $effect(() => {
     const path = activePath
+    statusOutput
     if (!path) {
       trackedSet = new Set()
       ignoredSet = new Set()
       ruleIgnoredSet = new Set()
       return
     }
-    const files = statusFiles.map((f) => f.path)
+    // untrack：写 ruleIgnoredSet 不触发本 effect 重跑（避免循环刷屏）
+    const files = untrack(() => statusFiles.map((f) => f.path))
     getIgnoreInfo(path, files)
       .then((info) => {
         if (path !== activePath) return
