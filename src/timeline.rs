@@ -174,12 +174,12 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
         None
     };
     let hist = crate::lore_backend::revision_history(project_root)?;
-    let entries: Vec<TimelineEntry> = hist
+    let mut entries: Vec<TimelineEntry> = hist
         .iter()
         .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
         .map(|r| TimelineEntry {
             id: r.id.clone(),
-            timestamp: r.date.clone(),
+            timestamp: lore_date_to_iso(&r.date),
             author: "lore".to_string(),
             message: r.message.clone(),
             files: entry_files(project_root, &r.id),
@@ -189,6 +189,8 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
         })
         .collect();
+    // v1 语义：entries 旧→新（最新在尾部，append 顺序）；revision_history 是最新在前
+    entries.reverse();
     let timeline = Timeline {
         project: project_root
             .file_name()
@@ -198,6 +200,14 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
         rollback_marker,
     };
     write_timeline(&timeline_path, &timeline)
+}
+
+/// Lore revision date（RFC2822，如 `Mon, 10 Aug 2026 11:57:09 +0000`）→ ISO 8601（v1 格式，web 模板与前端按 ISO 解析）。
+/// 解析失败时原样返回。
+fn lore_date_to_iso(date: &str) -> String {
+    chrono::DateTime::parse_from_rfc2822(date)
+        .map(|d| d.to_rfc3339())
+        .unwrap_or_else(|_| date.to_string())
 }
 
 /// 该 revision 相对其父的改动文件列表（`revision diff <parent> --target <sig>` 状态行解析）。
@@ -455,16 +465,20 @@ mod tests {
         crate::lore_backend::create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "1").unwrap();
         std::fs::write(root.join("b.txt"), "2").unwrap();
-        crate::lore_project::record(&root, "first", None, &vec!["web/".to_string()]).unwrap();
+        crate::lore_project::record(&root, "first", None, None, &vec!["web/".to_string()]).unwrap();
         std::fs::write(root.join("a.txt"), "3").unwrap();
-        crate::lore_project::record(&root, "second", None, &vec!["web/".to_string()]).unwrap();
+        crate::lore_project::record(&root, "second", None, None, &vec!["web/".to_string()]).unwrap();
 
         rebuild_cache(&root)?;
         let timeline = read_timeline(&timeline_cache_path(&root))?;
         assert_eq!(timeline.entries.len(), 2);
-        assert_eq!(timeline.entries[0].message, "second");
-        assert!(!timeline.entries[0].files.is_empty());
-        assert!(!timeline.entries[0].timestamp.is_empty());
+        // entries 旧→新（v1 语义，最新在尾部）
+        assert_eq!(timeline.entries[0].message, "first");
+        assert_eq!(timeline.entries[1].message, "second");
+        assert!(!timeline.entries[1].files.is_empty());
+        assert!(!timeline.entries[1].timestamp.is_empty());
+        // 时间戳应为 ISO 8601（含 T，可被 split('T')/slice(0,10) 解析）
+        assert!(timeline.entries[1].timestamp.contains('T'));
         Ok(())
     }
 }

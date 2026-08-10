@@ -64,3 +64,55 @@ export function ext(path: string): string {
   const i = path.lastIndexOf('.')
   return i >= 0 ? path.slice(i + 1).toUpperCase() : 'FILE'
 }
+
+// ---- 隐藏规则匹配（与后端 hidden.rs is_hidden 同语义）----
+
+/** path 是否命中任一规则：含 `*`/`?` 的按通配匹配（无 `/` 规则匹配任意层级文件名），否则前缀匹配 */
+export function ruleHidden(path: string, rules: Iterable<string>): boolean {
+  for (const rule of rules) {
+    if (ruleHiddenOne(rule, path)) return true
+  }
+  return false
+}
+
+function ruleHiddenOne(rule: string, path: string): boolean {
+  if (rule.includes('*') || rule.includes('?')) {
+    const ruleSegs = rule.split('/')
+    if (ruleSegs.length === 1) {
+      const file = path.split('/').pop() ?? path
+      return wildcardMatch(rule, file)
+    }
+    const pathSegs = path.split('/')
+    return (
+      pathSegs.length === ruleSegs.length &&
+      ruleSegs.every((r, i) => wildcardMatch(r, pathSegs[i]))
+    )
+  }
+  return path === rule || path.startsWith(rule)
+}
+
+/** 经典贪心通配符匹配：`*` 匹配任意字符序列，`?` 匹配单字符 */
+function wildcardMatch(pattern: string, text: string): boolean {
+  let pi = 0
+  let ti = 0
+  let star = -1
+  let mark = 0
+  while (ti < text.length) {
+    if (pi < pattern.length && (pattern[pi] === '?' || pattern[pi] === text[ti])) {
+      pi++
+      ti++
+    } else if (pi < pattern.length && pattern[pi] === '*') {
+      star = pi
+      mark = ti
+      pi++
+    } else if (star !== -1) {
+      pi = star + 1
+      mark++
+      ti = mark
+    } else {
+      return false
+    }
+  }
+  while (pi < pattern.length && pattern[pi] === '*') pi++
+  return pi === pattern.length
+}

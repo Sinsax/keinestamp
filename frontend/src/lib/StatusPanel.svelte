@@ -1,5 +1,5 @@
 ﻿<script lang="ts">
-  import { parseStatus, type StatusFile } from './statusParse'
+  import { parseStatus, ruleHidden, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
   import { untrack } from 'svelte'
@@ -265,11 +265,11 @@
   })
 
   function isIgnored(path: string): boolean {
-    if (ignoredSet.has(path) || ruleIgnoredSet.has(path)) return true
+    if (ruleHidden(path, ignoredSet) || ruleHidden(path, ruleIgnoredSet)) return true
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) {
       const prefix = parts.slice(0, i).join('/')
-      if (ignoredSet.has(prefix) || ruleIgnoredSet.has(prefix)) return true
+      if (ruleHidden(prefix, ignoredSet) || ruleHidden(prefix, ruleIgnoredSet)) return true
     }
     return false
   }

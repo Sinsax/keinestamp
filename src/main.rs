@@ -179,7 +179,7 @@ fn cmd_record(path: &Path, message: &str) -> anyhow::Result<()> {
         }
     }
 
-    let rev = keinestamp::lore_project::record(&meta.project_root, message, None, &hidden)?;
+    let rev = keinestamp::lore_project::record(&meta.project_root, message, None, None, &hidden)?;
     // 回退状态下记录 = 顶替，成功后清除回退标记
     let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
 

@@ -107,8 +107,8 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
         // 记录（回退状态下 = 顶替：Lore branch reset 后 HEAD 即回退点，新记录自然顶替）；
         // 成功后清回退标记
         let hash: String = match files {
-            Some(f) => map_err(keinestamp::lore_project::record(&meta.project_root, &message, Some(&f), &hidden))?,
-            None => map_err(keinestamp::lore_project::record(&meta.project_root, &message, None, &hidden))?,
+            Some(f) => map_err(keinestamp::lore_project::record(&meta.project_root, &message, tag.as_deref(), Some(&f), &hidden))?,
+            None => map_err(keinestamp::lore_project::record(&meta.project_root, &message, tag.as_deref(), None, &hidden))?,
         };
         map_err(keinestamp::lore_project::clear_rollback(&meta.project_root))?;
         let short_hash = hash[..7.min(hash.len())].to_string();

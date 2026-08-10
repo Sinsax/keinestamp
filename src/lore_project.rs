@@ -9,7 +9,13 @@ pub fn changed_files(project_root: &Path, hidden: &[String]) -> Result<Vec<LoreS
         .collect())
 }
 
-pub fn record(project_root: &Path, message: &str, selected: Option<&[String]>, hidden: &[String]) -> Result<String> {
+pub fn record(
+    project_root: &Path,
+    message: &str,
+    tag: Option<&str>,
+    selected: Option<&[String]>,
+    hidden: &[String],
+) -> Result<String> {
     let paths: Vec<String> = match selected {
         None => changed_files(project_root, hidden)?
             .into_iter()
@@ -24,7 +30,11 @@ pub fn record(project_root: &Path, message: &str, selected: Option<&[String]>, h
     if paths.is_empty() {
         bail!("无改动可记录");
     }
-    let rev = lore_backend::commit_files(project_root, message, &[("kind", "user")], &paths)?;
+    let mut meta: Vec<(&str, &str)> = vec![("kind", "user")];
+    if let Some(t) = tag {
+        meta.push(("tag", t));
+    }
+    let rev = lore_backend::commit_files(project_root, message, &meta, &paths)?;
     crate::timeline::rebuild_cache(project_root)?;
     Ok(rev)
 }
@@ -80,8 +90,13 @@ pub fn undo_rollback(project_root: &Path, hidden: &[String]) -> Result<()> {
 }
 
 /// 回退状态下记录 = 顶替（branch reset 后正常 commit，父=回退点），成功后清除回退标记。
-pub fn record_after_rollback(project_root: &Path, message: &str, hidden: &[String]) -> Result<String> {
-    let rev = record(project_root, message, None, hidden)?;
+pub fn record_after_rollback(
+    project_root: &Path,
+    message: &str,
+    tag: Option<&str>,
+    hidden: &[String],
+) -> Result<String> {
+    let rev = record(project_root, message, tag, None, hidden)?;
     crate::timeline::clear_rollback(project_root)?;
     Ok(rev)
 }
@@ -231,11 +246,25 @@ mod tests {
         let root = tmp_root("rec");
         create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "x").unwrap();
-        record(&root, "msg", None, &vec!["web/".to_string()]).unwrap();
+        record(&root, "msg", None, None, &vec!["web/".to_string()]).unwrap();
         let hist = revision_history(&root).unwrap();
         assert_eq!(hist.len(), 1);
         assert_eq!(hist[0].metadata.get("kind").map(String::as_str), Some("user"));
         assert!(root.join("web/timeline.json").exists());
+    }
+
+    #[test]
+    fn test_record_with_tag_writes_metadata() {
+        require_server();
+        let root = tmp_root("rectag");
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        record(&root, "msg", Some("建模"), None, &vec!["web/".to_string()]).unwrap();
+        let hist = revision_history(&root).unwrap();
+        assert_eq!(hist[0].metadata.get("tag").map(String::as_str), Some("建模"));
+        // timeline 缓存也应带 tag
+        let timeline = crate::timeline::read_timeline(&crate::timeline::timeline_cache_path(&root)).unwrap();
+        assert_eq!(timeline.entries[0].tag.as_deref(), Some("建模"));
     }
 
     #[test]
@@ -244,7 +273,7 @@ mod tests {
         let root = tmp_root("webcnt");
         create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "user").unwrap();
-        record(&root, "user record", None, &vec!["web/".to_string()]).unwrap();
+        record(&root, "user record", None, None, &vec!["web/".to_string()]).unwrap();
         assert_eq!(web_revision_count(&root).unwrap(), 0);
         std::fs::create_dir_all(root.join("web")).unwrap();
         std::fs::write(root.join("web/index.html"), "<html></html>").unwrap();
@@ -268,11 +297,11 @@ mod tests {
         let root = tmp_root("rb");
         create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "v1").unwrap();
-        let r1 = record(&root, "r1", None, &vec!["web/".to_string()]).unwrap();
+        let r1 = record(&root, "r1", None, None, &vec!["web/".to_string()]).unwrap();
         std::fs::write(root.join("a.txt"), "v2").unwrap();
-        let r2 = record(&root, "r2", None, &vec!["web/".to_string()]).unwrap();
+        let r2 = record(&root, "r2", None, None, &vec!["web/".to_string()]).unwrap();
         std::fs::write(root.join("a.txt"), "v3").unwrap();
-        let r3 = record(&root, "r3", None, &vec!["web/".to_string()]).unwrap();
+        let r3 = record(&root, "r3", None, None, &vec!["web/".to_string()]).unwrap();
 
         // 回退到 r2（工作区应回到 v2 状态）
         rollback(&root, &r2, &vec!["web/".to_string()]).unwrap();
@@ -287,7 +316,7 @@ mod tests {
         // 再回退到 r2 然后顶替记录（新记录取代 r3）
         rollback(&root, &r2, &vec!["web/".to_string()]).unwrap();
         std::fs::write(root.join("a.txt"), "v4-supersede").unwrap();
-        let r4 = record_after_rollback(&root, "r4", &vec!["web/".to_string()]).unwrap();
+        let r4 = record_after_rollback(&root, "r4", None, &vec!["web/".to_string()]).unwrap();
         assert_ne!(r4, r3);
         let hist = lore_backend::revision_history(&root).unwrap();
         assert_eq!(hist[0].message, "r4"); // 最新 revision 是 r4（r3 被顶替出主线）
@@ -300,9 +329,9 @@ mod tests {
         let root = tmp_root("rbdirty");
         create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "v1").unwrap();
-        let r1 = record(&root, "r1", None, &vec!["web/".to_string()]).unwrap();
+        let r1 = record(&root, "r1", None, None, &vec!["web/".to_string()]).unwrap();
         std::fs::write(root.join("a.txt"), "v2").unwrap();
-        let r2 = record(&root, "r2", None, &vec!["web/".to_string()]).unwrap();
+        let r2 = record(&root, "r2", None, None, &vec!["web/".to_string()]).unwrap();
 
         // dirty: tracked 文件改动 + untracked 新文件
         std::fs::write(root.join("a.txt"), "DIRTY").unwrap();
@@ -325,9 +354,9 @@ mod tests {
         let root = tmp_root("pe");
         create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "x").unwrap();
-        let r1 = record(&root, "r1", None, &vec!["web/".to_string()]).unwrap();
+        let r1 = record(&root, "r1", None, None, &vec!["web/".to_string()]).unwrap();
         std::fs::write(root.join("a.txt"), "y").unwrap();
-        let r2 = record(&root, "r2", None, &vec!["web/".to_string()]).unwrap();
+        let r2 = record(&root, "r2", None, None, &vec!["web/".to_string()]).unwrap();
 
         let dest = tmp_root("pe_dest");
         export_entry(&root, &r1, &dest).unwrap();

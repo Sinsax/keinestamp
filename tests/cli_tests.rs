@@ -86,7 +86,9 @@ fn test_init_then_commit_and_log() {
     let timeline_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&timeline_path).unwrap();
     assert_eq!(timeline.entries.len(), 2, "timeline 缓存应有 2 条记录");
-    assert_eq!(timeline.entries[0].message, "second commit");
+    // v1 语义：entries 旧→新（最新在尾部）
+    assert_eq!(timeline.entries[0].message, "first commit");
+    assert_eq!(timeline.entries[1].message, "second commit");
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -211,10 +213,10 @@ fn test_cli_rollback_then_record_supersedes_after() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "D"]);
     assert!(ok, "record D failed: {}", out);
 
-    // 回退到 B 后记录 D：B 及更早保留，C 被顶替出主线（entries 最新在前）
+    // 回退到 B 后记录 D：B 及更早保留，C 被顶替出主线（entries 旧→新，最新在尾部）
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
     let messages: Vec<&str> = timeline.entries.iter().map(|e| e.message.as_str()).collect();
-    assert_eq!(messages, vec!["D", "B", "A"], "C 应被顶替: {:?}", messages);
+    assert_eq!(messages, vec!["A", "B", "D"], "C 应被顶替: {:?}", messages);
 
     let (out, ok) = run(&["log", &dir.to_string_lossy(), "--count", "10"]);
     assert!(ok, "log failed: {}", out);
@@ -242,7 +244,8 @@ fn test_cli_rollback_first_entry() {
 
     let tl_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
-    let a_id = timeline.entries.get(1).unwrap().id.clone();
+    // entries 旧→新（最新在尾部）
+    let a_id = timeline.entries.get(0).unwrap().id.clone();
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &a_id[..7]]);
     assert!(ok, "rollback first failed: {}", out);
@@ -253,10 +256,10 @@ fn test_cli_rollback_first_entry() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
     assert!(ok, "record C failed: {}", out);
 
-    // 首条记录后记录 C：A 保留，B 被顶替出主线（entries 最新在前）
+    // 首条记录后记录 C：A 保留，B 被顶替出主线（entries 旧→新）
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
     let messages: Vec<&str> = timeline.entries.iter().map(|e| e.message.as_str()).collect();
-    assert_eq!(messages, vec!["C", "A"], "B 应被顶替: {:?}", messages);
+    assert_eq!(messages, vec!["A", "C"], "B 应被顶替: {:?}", messages);
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -281,7 +284,8 @@ fn test_cli_rollback_while_in_rollback_auto_restores() {
 
     let tl_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
-    let a_id = timeline.entries.get(2).unwrap().id.clone();
+    // entries 旧→新（最新在尾部）
+    let a_id = timeline.entries.get(0).unwrap().id.clone();
     let b_id = timeline.entries.get(1).unwrap().id.clone();
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
@@ -294,7 +298,7 @@ fn test_cli_rollback_while_in_rollback_auto_restores() {
 
     let st = keinestamp::lore_project::rollback_state(&dir).unwrap();
     assert!(st.active, "应处于回退状态");
-    assert_eq!(st.revision.as_deref(), Some(timeline.entries[2].id.as_str()), "回退点应为 A");
+    assert_eq!(st.revision.as_deref(), Some(timeline.entries[0].id.as_str()), "回退点应为 A");
 
     let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
     assert!(ok, "restore failed: {}", out);
