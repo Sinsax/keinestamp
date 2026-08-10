@@ -1098,6 +1098,7 @@ mod tests {
         let timeline = Timeline {
             project: "Test".to_string(),
             entries: vec![],
+        rollback_marker: None,
         };
 
         generate_index_html(&dir, &dir, &timeline, "Test Project")?;
@@ -1129,6 +1130,7 @@ mod tests {
                 preview: "previews/abc123.png".to_string(),
                 tag: Some("建模".to_string()), milestone: false,
             }],
+        rollback_marker: None,
         };
 
         generate_index_html(&dir, &dir, &timeline, "My Project")?;
@@ -1164,6 +1166,7 @@ mod tests {
                 tag: None,
                 milestone: true,
             }],
+        rollback_marker: None,
         };
 
         generate_index_html(&dir, &dir, &timeline, "Ms")?;
@@ -1195,6 +1198,7 @@ mod tests {
                 preview: String::new(),
                 tag: None, milestone: false,
             }],
+        rollback_marker: None,
         };
 
         generate_index_html(&dir, &dir, &timeline, "GlbTest")?;
@@ -1228,6 +1232,7 @@ mod tests {
                 preview: String::new(),
                 tag: None, milestone: false,
             }],
+        rollback_marker: None,
         };
 
         generate_index_html(&dir, &dir, &timeline, "NoTag Project")?;

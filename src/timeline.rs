@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+﻿use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -6,6 +6,16 @@ use std::path::Path;
 pub struct Timeline {
     pub project: String,
     pub entries: Vec<TimelineEntry>,
+    #[serde(default)]
+    pub rollback_marker: Option<RollbackMarker>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RollbackMarker {
+    /// 回退点（branch reset 到的 revision sig）
+    pub rollback_point: String,
+    /// 回退前 HEAD revision sig（撤销回退目标）
+    pub head_before: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -64,6 +74,7 @@ pub fn append_entry(path: &Path, entry: TimelineEntry) -> Result<()> {
         Timeline {
             project: String::new(),
             entries: Vec::new(),
+        rollback_marker: None,
         }
     };
 
@@ -121,11 +132,46 @@ pub fn get_entry<'a>(timeline: &'a Timeline, id: &str) -> Option<&'a TimelineEnt
         .find(|e| e.id == id || e.id.starts_with(id))
 }
 
+pub fn timeline_cache_path(project_root: &Path) -> std::path::PathBuf {
+    project_root.join(crate::hidden::WEB_DIR).join("timeline.json")
+}
+
+pub fn read_marker(project_root: &Path) -> Result<Option<RollbackMarker>> {
+    let path = timeline_cache_path(project_root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    Ok(read_timeline(&path)?.rollback_marker)
+}
+
+pub fn write_marker(project_root: &Path, marker: &RollbackMarker) -> Result<()> {
+    let path = timeline_cache_path(project_root);
+    let mut timeline = if path.exists() {
+        read_timeline(&path)?
+    } else {
+        Timeline { project: String::new(), entries: Vec::new(), rollback_marker: None }
+    };
+    timeline.rollback_marker = Some(marker.clone());
+    write_timeline(&path, &timeline)
+}
+
+pub fn clear_rollback(project_root: &Path) -> Result<()> {
+    let path = timeline_cache_path(project_root);
+    let mut timeline = read_timeline(&path)?;
+    timeline.rollback_marker = None;
+    write_timeline(&path, &timeline)
+}
+
 /// 从 revision history 重建展示缓存（web/timeline.json）。
-/// Task 3 骨架：files/preview/时间戳暂缺，Task 5 完善。
+/// Task 3 骨架：files/preview/时间戳暂缺，Task 5 完善。marker 保留。
 pub fn rebuild_cache(project_root: &Path) -> Result<()> {
     let web = project_root.join(crate::hidden::WEB_DIR);
     let timeline_path = web.join("timeline.json");
+    let rollback_marker = if timeline_path.exists() {
+        read_timeline(&timeline_path).ok().and_then(|t| t.rollback_marker)
+    } else {
+        None
+    };
     let hist = crate::lore_backend::revision_history(project_root)?;
     let entries: Vec<TimelineEntry> = hist
         .iter()
@@ -148,6 +194,7 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             .map(|s| s.to_string_lossy().into_owned())
             .unwrap_or_default(),
         entries,
+        rollback_marker,
     };
     write_timeline(&timeline_path, &timeline)
 }
@@ -183,6 +230,7 @@ mod tests {
         let mut timeline = Timeline {
             project: "P".to_string(),
             entries: vec![make_entry("abc123def456")],
+        rollback_marker: None,
         };
         write_timeline(&path, &timeline)?;
 
@@ -216,6 +264,7 @@ mod tests {
         let mut timeline = Timeline {
             project: "Test".to_string(),
             entries: vec![],
+        rollback_marker: None,
         };
         timeline.entries.push(make_entry("abc123"));
 

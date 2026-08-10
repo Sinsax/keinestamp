@@ -351,8 +351,7 @@ fn html_gen_contains_daynight_theme() {
     let dir = tmp_dir("theme");
     let timeline = keinestamp::timeline::Timeline {
         project: "ThemeTest".to_string(),
-        entries: vec![keinestamp::timeline::TimelineEntry {
-            id: "abc123def456".to_string(),
+        entries: vec![keinestamp::timeline::TimelineEntry {            id: "abc123def456".to_string(),
             timestamp: "2026-06-13T12:00:00Z".to_string(),
             author: "artist".to_string(),
             message: "theme test".to_string(),
@@ -361,6 +360,7 @@ fn html_gen_contains_daynight_theme() {
             preview: "previews/abc123.png".to_string(),
             tag: Some("建模".to_string()), milestone: false,
         }],
+        rollback_marker: None,
     };
 
     keinestamp::html_gen::generate_index_html(&dir, &dir, &timeline, "ThemeTest").unwrap();

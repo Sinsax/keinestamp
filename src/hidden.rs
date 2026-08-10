@@ -5,13 +5,20 @@ use crate::app_config::AppConfig;
 pub const WEB_DIR: &str = "web/";
 
 pub fn load_hidden(_project_root: &Path) -> Vec<String> {
-    let list = AppConfig::load().hidden_paths.unwrap_or_default();
-    if list.is_empty() { vec![WEB_DIR.to_string()] } else { list }
+    let mut list = AppConfig::load().hidden_paths.unwrap_or_default();
+    if !list.iter().any(|h| h == WEB_DIR) {
+        list.insert(0, WEB_DIR.to_string());
+    }
+    list
 }
 
 pub fn save_hidden(_project_root: &Path, list: &[String]) -> Result<()> {
+    let mut list = list.to_vec();
+    if !list.iter().any(|h| h == WEB_DIR) {
+        list.insert(0, WEB_DIR.to_string());
+    }
     let mut cfg = AppConfig::load();
-    cfg.hidden_paths = Some(list.to_vec());
+    cfg.hidden_paths = Some(list);
     cfg.save();
     Ok(())
 }

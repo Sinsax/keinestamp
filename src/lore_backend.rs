@@ -72,14 +72,13 @@ pub fn commit(project_root: &Path, message: &str, metadata: &[(&str, &str)]) -> 
 }
 
 pub fn commit_files(project_root: &Path, message: &str, metadata: &[(&str, &str)], paths: &[String]) -> Result<String> {
-    if paths.is_empty() {
-        return commit(project_root, message, metadata);
+    if !paths.is_empty() {
+        let mut args: Vec<&str> = vec!["stage"];
+        for p in paths {
+            args.push(p);
+        }
+        run_lore(project_root, &args)?;
     }
-    let mut args: Vec<&str> = vec!["stage"];
-    for p in paths {
-        args.push(p);
-    }
-    run_lore(project_root, &args)?;
     commit_staged(project_root, message, metadata)
 }
 
@@ -147,6 +146,34 @@ pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
 pub fn status_lines(project_root: &Path) -> Result<Vec<LoreStatusLine>> {
     let out = run_lore(project_root, &["status", "--scan"])?;
     Ok(parse_status(&out))
+}
+
+/// 当前分支 latest revision 签名（status 头行 "On branch main revision N -> <sig>"）
+pub fn current_revision(project_root: &Path) -> Result<String> {
+    let out = run_lore(project_root, &["status", "--revision-only"])?;
+    out.lines()
+        .find_map(|l| {
+            let t = l.trim();
+            if t.starts_with("On branch") {
+                t.split("-> ").nth(1).map(|s| s.trim().to_string())
+            } else {
+                None
+            }
+        })
+        .context("status --revision-only 输出解析失败：未找到 On branch 行")
+}
+
+/// 回退/撤销回退/顶替：重置分支 latest 指针并同步工作区到指定 revision。
+/// 要求无 staged state、无 dirty 文件（否则 lore 拒绝）。
+pub fn branch_reset(project_root: &Path, revision: &str) -> Result<()> {
+    run_lore(project_root, &["branch", "reset", revision])?;
+    Ok(())
+}
+
+/// 撤销某 revision 的改动（产生新 revision，冲突时进入 staged 冲突状态）
+pub fn revert(project_root: &Path, revision: &str) -> Result<()> {
+    run_lore(project_root, &["revision", "revert", revision])?;
+    Ok(())
 }
 
 pub fn parse_status(out: &str) -> Vec<LoreStatusLine> {
