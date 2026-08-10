@@ -56,6 +56,7 @@
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false })
   let rollbackBusy = $state(false)
   let deploying = $state(false)
+  let backupBusy = $state(false)
   let recording = $state(false)
   let busyText = $state('')
   let commitProgressMsg = $state('')
@@ -327,6 +328,22 @@
       statusText = '部署失败'
     } finally {
       deploying = false
+    }
+  }
+
+  async function handleBackup() {
+    if (!activePath) return
+    backupBusy = true
+    statusText = '备份中...'
+    try {
+      await api.backup(activePath)
+      pushToast('备份成功', 'success')
+      statusText = '备份完成'
+    } catch (e: any) {
+      pushToast(`备份失败: ${e}`, 'error')
+      statusText = '备份失败'
+    } finally {
+      backupBusy = false
     }
   }
 
@@ -623,6 +640,7 @@
         onRecord={() => showCommit = true}
         onRestore={handleRestore}
         onDeploy={handleDeploy}
+        onBackup={handleBackup}
         {connected}
         {deployAhead}
         {deployTip}
@@ -632,7 +650,7 @@
           : rollbackState.head_matches
             ? '恢复回退前的状态'
             : '回退后已有新记录，无法恢复'}
-        busy={deploying || recording || rollbackBusy}
+        busy={deploying || recording || rollbackBusy || backupBusy}
       />
 
       <StatusBar

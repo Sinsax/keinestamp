@@ -14,6 +14,8 @@ pub struct AppConfig {
     #[serde(default)]
     pub deploy_token: Option<String>,
     #[serde(default)]
+    pub lore_server_url: Option<String>,
+    #[serde(default)]
     pub auto_connect: bool,
     #[serde(default)]
     pub close_to_tray: Option<bool>,
@@ -64,6 +66,7 @@ impl Default for AppConfig {
             blender_versions: None,
             deploy_server_url: None,
             deploy_token: None,
+            lore_server_url: None,
             auto_connect: false,
             close_to_tray: None,
             hidden_paths: None,
@@ -131,6 +134,13 @@ pub fn get_auto_connect() -> bool {
     AppConfig::load().auto_connect
 }
 
+/// loreserver 地址（局域网备份链路）；未配置时回退本机默认 41337。
+pub fn get_lore_server_url() -> String {
+    AppConfig::load()
+        .lore_server_url
+        .unwrap_or_else(|| crate::lore_backend::LORE_SERVER_URL.to_string())
+}
+
 pub fn set_auto_connect(v: bool) {
     let mut cfg = AppConfig::load();
     cfg.auto_connect = v;
@@ -179,7 +189,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, close_to_tray: Some(true), hidden_paths: None };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, lore_server_url: Some("lore://127.0.0.1:41337".to_string()), auto_connect: false, close_to_tray: Some(true), hidden_paths: None };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);
@@ -188,6 +198,7 @@ assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
     assert_eq!(loaded.blender_versions, None);
     assert_eq!(loaded.deploy_server_url, None);
     assert_eq!(loaded.deploy_token, None);
+    assert_eq!(loaded.lore_server_url, Some("lore://127.0.0.1:41337".to_string()));
     assert_eq!(loaded.close_to_tray, Some(true));
 
         std::fs::remove_dir_all(&dir).unwrap();

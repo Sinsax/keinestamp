@@ -6,6 +6,7 @@
     onRecord,
     onRestore,
     onDeploy,
+    onBackup = () => {},
     connected = false,
     deployAhead = false,
     deployTip = '部署到服务器',
@@ -17,6 +18,7 @@
     onRecord: () => void
     onRestore: () => void
     onDeploy: () => void
+    onBackup?: () => void
     connected?: boolean
     deployAhead?: boolean
     deployTip?: string
@@ -37,6 +39,11 @@
   <button class="restore-btn" class:enabled={restoreEnabled} onclick={onRestore} disabled={!initialized || !restoreEnabled || busy} title={restoreTitle}>
     <span class="ab-label">恢复</span>
     <span class="ab-hint">redo</span>
+  </button>
+
+  <button class="backup-btn" onclick={onBackup} disabled={!initialized || busy} title="备份到局域网 loreserver">
+    <span class="ab-label">备份</span>
+    <span class="ab-hint">backup</span>
   </button>
 
   <div class="spacer"></div>
@@ -109,6 +116,20 @@
     border-color: var(--success) !important;
     color: var(--success) !important;
     background: transparent !important;
+  }
+  .backup-btn {
+    border-color: var(--tint) !important;
+    color: var(--tint) !important;
+    background: transparent !important;
+  }
+  .backup-btn:hover:not(:disabled) {
+    background: var(--tint-soft) !important;
+    border-color: var(--tint) !important;
+    color: var(--tint) !important;
+  }
+  .backup-btn .ab-hint {
+    color: var(--tint);
+    opacity: 0.75;
   }
   .deploy-btn:hover:not(:disabled) {
     background: var(--success-soft) !important;

@@ -218,6 +218,23 @@ async fn push(path: String) -> Result<(), String> {
     handle.await.map_err(|e| e.to_string())?
 }
 
+/// 局域网备份：推送全部本地 revision 到 loreserver（同机/局域网，配置见 app_config lore_server_url）。
+#[tauri::command]
+async fn backup(path: String) -> Result<(), String> {
+    eprintln!("[debug] backup({})", path);
+    tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        if !keinestamp::lore_backend::repo_exists(&p) {
+            return Err("项目尚未初始化 lore 仓库".to_string());
+        }
+        map_err(keinestamp::lore_backend::push_to_server(&p).map(|_| ()))?;
+        eprintln!("[debug] backup → ok");
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 #[tauri::command]
 async fn deploy(path: String) -> Result<(), String> {
     eprintln!("[debug] deploy({})", path);
@@ -1065,6 +1082,7 @@ pub fn run() {
             init_project,
             record,
             push,
+            backup,
             deploy,
             test_connection,
             get_deploy_status,

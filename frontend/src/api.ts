@@ -17,6 +17,10 @@ export async function deploy(path: string): Promise<void> {
   return invoke<void>('deploy', { path })
 }
 
+export async function backup(path: string): Promise<void> {
+  return invoke<void>('backup', { path })
+}
+
 export async function testConnection(serverUrl: string, deployToken?: string | null): Promise<boolean> {
   return invoke<boolean>('test_connection', { serverUrl, deployToken: deployToken ?? null })
 }

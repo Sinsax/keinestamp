@@ -1065,8 +1065,67 @@ web_root = "{}"
 
 // --- Server start ---
 
+/// loreserver 可执行文件（同 LORE_BIN 风格，可用环境变量 KEINESTAMP_LORESERVER_BIN 覆盖）。
+const LORESERVER_BIN: &str = "C:\\Users\\para\\AppData\\Local\\lore\\bin\\loreserver.exe";
+
+fn loreserver_bin() -> String {
+    std::env::var("KEINESTAMP_LORESERVER_BIN").unwrap_or_else(|_| LORESERVER_BIN.to_string())
+}
+
+/// 局域网备份链路：确保本机 loreserver 在线（serve 退出后子进程成为守护进程继续运行，不 kill）。
+/// - 探测 41339 端口，已有在线实例则直接复用（Ok(None)）
+/// - 否则用最小配置（immutable/mutable store 均指向 %APPDATA%/Keinestamp/lore-server-store）
+///   拉起 `loreserver.exe --config <dir>`，spawn 后轮询健康直至超时
+/// - 拉起失败/不健康仅打 warning（serve 继续，备份功能不可用）
+fn ensure_loreserver() -> Result<Option<std::process::Child>> {
+    if crate::lore_backend::server_available() {
+        return Ok(None);
+    }
+    let base = std::env::var("APPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("."));
+    let cfg_dir = base.join("Keinestamp").join("lore-server-config");
+    let store_dir = base.join("Keinestamp").join("lore-server-store");
+    std::fs::create_dir_all(&cfg_dir).with_context(|| format!("failed to create {:?}", cfg_dir))?;
+    std::fs::create_dir_all(&store_dir).with_context(|| format!("failed to create {:?}", store_dir))?;
+    let store = store_dir.to_string_lossy().replace('\\', "\\\\");
+    let local_toml = format!(
+        r#"[immutable_store.local]
+path = "{}"
+flush_delay_seconds = 10
+[mutable_store.local]
+path = "{}"
+flush_delay_seconds = 10
+"#,
+        store, store
+    );
+    std::fs::write(cfg_dir.join("local.toml"), &local_toml)
+        .with_context(|| format!("failed to write {:?}", cfg_dir.join("local.toml")))?;
+    log_info("LORESERVER", &format!("spawning loreserver with config {:?}", cfg_dir));
+    let child = std::process::Command::new(loreserver_bin())
+        .arg("--config")
+        .arg(&cfg_dir)
+        .spawn()
+        .context("failed to spawn loreserver (备份不可用，请检查 loreserver 安装)")?;
+    for _ in 0..5 {
+        std::thread::sleep(Duration::from_secs(1));
+        if crate::lore_backend::server_available() {
+            return Ok(Some(child));
+        }
+    }
+    log_warn("LORESERVER", "loreserver 已拉起但未通过健康检查 (127.0.0.1:41339)，备份功能不可用");
+    Ok(Some(child))
+}
+
 pub fn start(config: ServeConfig) -> Result<()> {
     let _ = TRUST_PROXY.set(config.trust_proxy);
+    // 拉起 loreserver（局域网备份链路）：已有实例复用，失败仅告警不阻断 serve。
+    // 注意：serve 退出后该子进程会继续在后台运行（守护语义），需停止时手动结束进程。
+    match ensure_loreserver() {
+        Ok(Some(_child)) => log_info("LORESERVER", "loreserver ready (41337/41339), 备份功能可用"),
+        Ok(None) => log_info("LORESERVER", "loreserver already running, reusing"),
+        Err(e) => log_warn("LORESERVER", &format!("loreserver 启动失败: {}（备份功能不可用）", e)),
+    }
     let addr = format!("{}:{}", config.host, config.port);
     let server = Server::http(&addr)
         .map_err(|e| anyhow::anyhow!("failed to start server on {}: {}", addr, e))?;

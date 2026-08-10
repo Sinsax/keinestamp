@@ -278,6 +278,17 @@ pub fn revert(project_root: &Path, revision: &str) -> Result<()> {
     Ok(())
 }
 
+/// 推送全部本地 revision 到远端（config.toml remote_url 对应服务器，局域网备份链路）。
+/// 输出含 `Pushed N fragment(s)` / `Pushed revision N -> <sig> to branch main`（实测 §9）。
+pub fn push_to_server(project_root: &Path) -> Result<String> {
+    run_lore(project_root, &["push"])
+}
+
+/// 从远端同步到本地（要求无 staged state）。
+pub fn sync_from_server(project_root: &Path) -> Result<String> {
+    run_lore(project_root, &["sync"])
+}
+
 pub fn parse_status(out: &str) -> Vec<LoreStatusLine> {
     let mut lines = Vec::new();
     let mut section = "";
@@ -458,5 +469,17 @@ mod tests {
         assert!(diff.contains("+++"));
         let first = file_diff(&root, &hist[1].id, "a.txt").unwrap();
         assert!(first.is_empty() || first.contains("首次记录"));
+    }
+
+    #[test]
+    fn test_push_to_server() {
+        require_server();
+        let root = tmp_root("push");
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "hello").unwrap();
+        commit(&root, "first", &[("kind", "user")]).unwrap();
+        let out = push_to_server(&root).unwrap();
+        assert!(out.contains("Pushed"), "push 输出应含 Pushed: {}", out);
+        sync_from_server(&root).unwrap();
     }
 }
