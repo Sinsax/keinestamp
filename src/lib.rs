@@ -15,3 +15,5 @@ pub mod recent;
 pub mod three_assets;
 pub mod serve;
 pub mod timeline;
+
+pub mod lore_backend;
