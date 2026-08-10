@@ -23,7 +23,7 @@
     onSelectionChange?: (sel: string[] | null) => void
   } = $props()
 
-  const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp.toml', 'web-timeline']
+  const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp.toml', 'web']
 
   function isHiddenPath(p: string): boolean {
     return HIDDEN_PREFIXES.some((h) => p === h || p.startsWith(h + '/'))

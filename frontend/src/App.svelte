@@ -280,16 +280,6 @@
               await api.removeIgnore(activePath, f)
             }
           }
-          const hiddenAuto = fresh
-            .filter(
-              (f) =>
-                (f.path === '.gitignore' || f.path === '.gitattributes') &&
-                !isIgnoredPath(f.path)
-            )
-            .map((f) => f.path)
-          if (hiddenAuto.length > 0) {
-            files = [...files, ...hiddenAuto.filter((p) => !files!.includes(p))]
-          }
         } catch {
           /* ignore info unavailable — fall back to raw selection */
         }

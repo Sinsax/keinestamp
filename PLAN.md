@@ -1,36 +1,33 @@
-# Keinestamp 重构计划
+# Keinestamp v2 计划
 
-## 目标
-客户端→服务端改用 Bearer Token 认证，部署改为手动，拆分软件配置和项目配置。
+**状态**: 已落定（2026-08-11，lore 分支）。实施计划与设计规格见：
+- `docs/superpowers/plans/2026-08-10-keinestamp-lore-v2.md`（Task 0-11）
+- `docs/superpowers/specs/2026-08-10-keinestamp-lore-v2-design.md`（决策 D1-D10）
+- `docs/lore-commands.md`（Lore v0.8.6 实测速查表）
 
-## 两种 Token
+## 完成情况
 
-| Token | 作用域 | 用途 | 存在哪里 |
-|---|---|---|---|
-| 部署 Token | 软件全局 | 客户端→服务端认证，用于上传网页 | `app-config.toml` |
-| 访问 Token | 每个项目 | 访客→服务端，查看网页时必须输入 | `.keinestamp.toml` |
+| Task | 内容 | 提交 |
+|---|---|---|
+| 0 | 克隆 v1 → lore 分支（clone 替代 robocopy） | `68229f2` |
+| 1 | 验证门：Lore 能力实测 + 速查表（去重率 99.9%） | `57b9385` |
+| 2 | lore_backend.rs 基础封装（repo/status/commit/history） | `b3df3f5` |
+| 3 | hidden 隐藏列表 + lore_project 记录流程 | `a46d81b` |
+| 4 | 回退/撤销回退/顶替（branch reset + dirty 备份） | `d63e910` |
+| 5 | 导出/文件 diff + timeline 从 history 重建 | `5b0d3af` |
+| 6 | web 产物并入主仓库（kind=web），删 git_web | `60c609f` |
+| 7 | CLI 命令 lore 化（删 git_project/git_helpers） | `048710d` |
+| 8 | Tauri 命令 lore 化 | `2109794` |
+| 9 | 前端 UI 适配（statusParse/隐藏管理/删冲突 UI） | `6aba7b5` |
+| 10 | serve 拉起 loreserver + backup 命令 | `358bd96` |
+| 11 | 收尾：清理 + 文档（本文档 + AGENTS.md/README） | 当前 |
 
-## 实施顺序
+## 关键结论（Task 1 实测）
 
-### Phase 1 — 配置层
-1. `app_config.rs` — 新增 `deploy_server_url`、`deploy_token`、`auto_connect`
-2. `config.rs` — 新增 `access_token`；删除旧字段
-3. `types.ts` — 更新接口定义
-
-### Phase 2 — 服务端认证
-4-8. `serve.rs` — Bearer Token + access_token 页面守卫 + /ping
-
-### Phase 3 — 客户端推送
-9-11. `push.rs` — Token 认证 + 超时 + test_connection
-
-### Phase 4 — Tauri 命令
-12-18. `lib.rs` — 新增 deploy/test_connection/get/update_app_config；重构 commit/push
-
-### Phase 5 — CLI 重构
-19-22. `main.rs` — 移除部署逻辑，deploy 改读 AppConfig
-
-### Phase 6 — 前端 GUI
-23-27. SettingsDialog / App / ActionBar / api.ts
-
-### Phase 7 — 文档
-28. `AGENTS.md`
+- `lore revision restore` 在 0.8.6 不可用（Invalid head）→ 回退 = `branch reset`
+- 撤销回退 = `branch reset <回退前 HEAD sig>`（timeline.json marker 记录 rollback_point + head_before）
+- revert = 撤销某 revision 改动（冲突 resolve mine/theirs），非"撤销回退"
+- Lore 无原生忽略规则 → 隐藏列表方案（app-config）
+- 所有操作依赖 loreserver 在线（无纯本地模式）→ serve/GUI 拉起
+- 空提交被拒（"Nothing staged for commit"）→ record 需有实际改动
+- 去重率 99.9%（6MB × 10 次增长 81KB）

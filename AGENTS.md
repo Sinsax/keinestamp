@@ -1,52 +1,64 @@
-# Keinestamp
+# Keinestamp v2（Lore 后端）
 
-Single-binary CLI + Tauri GUI Blender Git Progress Board. Rust Edition 2024.
+Single-binary CLI + Tauri GUI Blender Git Progress Board，后端为 Epic Games **Lore** 0.8.6（分块去重 VCS）。Rust Edition 2024。
 
 ## Commands
 
 ```powershell
-cargo test                          # 100 unit + 8 integration
-cargo test --lib <module>           # Single module (config/detect/init/timeline/...)
+cargo test                          # 99 unit + 11 integration
+cargo test --lib <module>           # Single module (config/detect/init/lore_backend/lore_project/...)
 cargo test --test cli_tests         # Integration only
 cargo run -- init <path>            # CLI entry
+cd src-tauri; cargo build           # Tauri backend only
 cd frontend; npm run check          # svelte-check + tsc (no other lint/format)
 ```
+
+**Lore 依赖**：CLI/服务器二进制位于 `C:\Users\para\AppData\Local\lore\bin\`（lore.exe + loreserver.exe，锁版本 v0.8.6）。所有 lore 操作要求本机 loreserver 在线（无纯本地模式）。`KEINESTAMP_LORE_BIN` / `KEINESTAMP_LORESERVER_BIN` 环境变量可覆盖路径。
 
 ## Architecture
 
 ```
 main ──→ init ──→ detect ──→ config
-  └──→ git_project ──→ blender_render, timeline, html_gen, git_web
+  └──→ lore_project ──→ lore_backend ──→ loreserver (127.0.0.1:41337/41339)
+            ├──→ hidden (app-config 隐藏列表)
+            ├──→ timeline (展示缓存 web/timeline.json)
+            └──→ html_gen → web/ → commit_web (kind=web)
 main_helpers ──→ config, timeline
 recent, app_config ──→ independent (app-level config dir)
-git_helpers ──→ shared by CLI and Tauri
+serve ──→ ensure_loreserver (spawn loreserver 子进程) + 多租户 HTTP
 ```
 
-Build order (crate): config → detect → init → git_project → git_web → blender_render → timeline → html_gen → git_helpers → app_config → main → main_helpers → recent
+Build order (crate): config → detect → init → lore_backend → lore_project → hidden → timeline → html_gen → app_config → main → main_helpers → recent
 
 ## Constraints
 
-- **Git safety**: Only `add/commit/push/pull/reset --soft`. No checkout/branch/merge/rebase/reset --hard. Exceptions: `git update-index --skip-worktree/--no-skip-worktree` (local index flag only, used for tracked-file local ignore, zero repo impact, fully reversible); `git stash push/pop/drop` (回退暂存/恢复工作区状态, stash 兜底可逆); `git restore --source=<commit> --staged --worktree` (文件回退, 配合 stash 可逆); `git update-ref refs/keinestamp/*` (本地回退状态标记, 仅项目 .git 内, 可 `-d` 删除); `git show <stash>:<path>` 写回文件 (冲突二选一).
-- **rollback mechanism** (replaces old revert): 回退 = 工作区有改动先 `stash push -u` (message 前缀 `keinestamp-rollback`) + `git restore --source=<记录> --staged --worktree` 将文件还原到所选记录**本身**的状态 (可基于该记录继续修改; 回退首条记录 = 首条状态, init 提交不参与); 状态标记在项目 .git 的 `refs/keinestamp/rollback` (回退前 HEAD) 与 `refs/keinestamp/rollback-point` (回退点). **回退状态下再次回退 = 自动先恢复再回退** (rollback 内部先调 restore_rollback, 冲突则中止返回 `CONFLICT|`). 恢复 = 三向合并 (base=回退点, 手工实现: 对比 stash 与回退点差异 + 当前工作区差异, 无冲突则 `git restore --source=<stash>` 合并带回 + `stash drop` + 清 refs; 无 stash 时直接 `restore --source=<回退前 HEAD>` 还原被回退记录修改的文件, **回退期间改动自动合并带回** — 改动文件与被回退记录重叠则弹二选一, 不覆盖不拦截; 恢复保留 skip-worktree 标志). 冲突 = GUI 逐文件二选一 (`resolve_rollback_conflicts`, "回退前状态"内容源: 有 stash = stash 树, 无 stash = 回退前 HEAD; 写回用 `git restore --worktree` 过 smudge filter, LFS 文件不落指针文本). 回退状态下**记录 = 顶替**: `git reset --soft <回退记录^>` 后提交 (新记录父 = 被回退记录的父, 被回退记录及之后记录从 git 历史与 timeline 移除), 然后 `clear_rollback` (CLI 与 Tauri record 成功路径均调用). 回退后未记录而 HEAD 前进则无法恢复 (`head_matches=false`, 恢复按钮禁用). 核心在 `git_project.rs`.
-- **pull**: Always `git pull --rebase` to avoid merge commits.
-- **Entry ID**: Full git commit hash. `get_entry()` supports prefix matching.
-- **MetaConfig** (`.keinestamp.toml`): `version`, `init_time`, `project_root`, `web_root`, `access_token`, `project_id`, `site_name`, `site_locked`. Old fields silently ignored via `#[serde(default)]` (`web_remote`/`auto_connect` removed — legacy `web_remote` was a never-effective web git remote, and `auto_connect` moved to AppConfig). `access_token` is per-project, for browser login only. `project_id` is a unique identifier generated on init to prevent cross-project overwrites on server. `site_name` (ASCII `[A-Za-z0-9-_]` only, URL prefix / `X-Project-Name`) locks permanently after first deploy (`site_locked = true`); `config::resolve_site_name()` picks `site_name` → sanitized folder name → `project<id前8>` fallback, shared by deploy + jump button.
-- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`): `blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`. Server connection settings are all app-level: `deploy_token` authenticates upload/health, `deploy_server_url` is the server address, `auto_connect` is the global auto-test-on-load switch.
-- **auto_connect**: App-level (AppConfig). When true, app tests server connection on every project load. GUI: SettingsDialog checkbox; Tauri commands `get_auto_connect`/`set_auto_connect`; CLI `config auto_connect=` writes app config.
-- **serve web_root default**: Auto-generated `serve.toml` uses `<exe_dir>/web-root/` (stable, not CWD); explicit `web_root` in `serve.toml` or `--config` overrides. Deployed sites land in `web_root/<site_name>/`, shared three.js in `web_root/_three/`.
-- **Deploy version hint**: Client sends `X-Web-Count` (web-timeline `rev-list --count HEAD`) on upload; server records it in `web_root/.versions.json` and serves it at `GET /<project>/version` (deploy_token Bearer). GUI deploy button turns red (`deployAhead`) when `local > remote ?? 0`, tooltip shows version comparison. Purely a hint — no server-side blocking.
-- **Atomic writes**: Temp file + rename (name includes PID + target filename).
-- **init idempotent**: Re-init fills gaps, does not overwrite `init_time`.
-- **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands.
-- **Export**: `git ls-tree --name-only` + per-file `git show` (not checkout).
-- **Web-timeline/**: Separate git repo, excluded via `.gitignore`.
-- **Git user**: `ensure_git_user()` sets fallback name/email before commit if not configured globally.
-- **Chinese filenames**: `git -c core.quotepath=false` in `get_changed_files`.
-- **CLI output**: Chinese labels (`已提交`, `已推送到远端`, `已回退到记录 ...`, `已恢复回退前的状态`). Log format: `  {short_hash}  {date}  {author}  ({file_count} 文件)`.
+- **Lore CLI 锁版本 v0.8.6**（Windows x86_64 MSVC），不得用 latest；命令形态以 `docs/lore-commands.md`（Task 1 实测速查表）为准，禁止凭空猜参数
+- **lore 调用集中点**：所有 `lore`/`loreserver` 命令必须经 `src/lore_backend.rs`（唯一 spawn 点），其他模块不得直接调
+- **revision 定位**：必须用签名（完整或前缀 hash），数字 N 不被接受；数字→签名用 `lore revision find number N`
+- **metadata**：用户提交 `kind=user`，web 程序提交 `kind=web`；tag/milestone/message 语义以 revision metadata 为准；timeline.json 仅展示缓存（web 部署用，可重建）
+- **隐藏列表**（替代 gitignore/skip-worktree）：app-config 持久化（`hidden_paths`），预设 `web/`、`.keinestamp.toml` 不可移除；前缀匹配（`web/` 匹配 `web/xxx`）
+- **回退模型**（替代 v1 stash/refs/三向合并状态机）：
+  - 回退到记录 = `lore branch reset <记录sig>`（工作区同步还原；要求无 staged/dirty，dirty 由 lore_project 备份还原处理）
+  - 撤销回退 = `branch reset <回退前 HEAD sig>`（marker 存 timeline.json：rollback_point + head_before）
+  - 顶替 = 回退后直接 record（新 revision 父 = 回退点，被顶替 revision 从主线消失但数据保留）
+  - `lore revision restore` 在 0.8.6 不可用（Invalid head）→ 弃用；`revert` = 撤销某 revision 改动（非撤销回退），冲突用 `resolve mine|theirs`
+  - 回退前 dirty 文件：备份复制到临时目录 → `lore file reset` 还原 → branch reset → 恢复备份
+- **Git safety 不适用**：v2 无 git；禁止在项目里建 git 仓库（集成测试除外）
+- **MetaConfig** (`.keinestamp.toml`)：`version`, `init_time`, `project_root`, `web_root`, `access_token`, `project_id`, `site_name`, `site_locked`（结构与 v1 相同；.keinestamp.toml 在隐藏列表，不参与提交）
+- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`)：`blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`, `close_to_tray`, `hidden_paths`, `lore_server_url`
+- **web 产物**：`web/` 子目录（主 Lore 仓库内，隐藏），html_gen 输出 + timeline.json 缓存；`commit_web` 自动提交（kind=web）；zip 打包 `web/` 上传（push.rs）；web 版本号 = kind=web revision 计数（`web_revision_count`）
+- **Atomic writes**: Temp file + rename (name includes PID + target filename)
+- **init idempotent**: Re-init fills gaps, does not overwrite `init_time`
+- **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands
+- **Export**: `lore repository dump` 解析文件树 + 逐文件 `lore file write`（不支持目录级 write）
+- **Chinese filenames**: Lore 原生 UTF-8，无需 quotepath 处理
+- **CLI output**: 中文标签（`已提交`、`已回退到记录 ...`、`已恢复回退前的状态`、`已推送到远端`）。Log 格式：`  {short_hash}  {date}  {author}  ({file_count} 文件)`
+- **serve → loreserver**：serve 启动时探测 41339 health，离线则 spawn loreserver（`--config %APPDATA%/Keinestamp/lore-server-config`，store 持久化于 `lore-server-store`）；serve 退出时 child 不强制 kill
+- **备份**：Tauri `backup` 命令 = `lore push`（推 config.toml remote_url 对应服务器）
 
 ## serve.rs
 
-Multi-tenant HTTP with two-token auth (deploy_token + access_token). Dynamic project name routing — project name comes from `X-Project-Name` deploy header, becomes URL prefix automatically. Config via `serve.toml`:
+多租户 HTTP 服务器（web 部署）+ loreserver 拉起。结构与 v1 相同（两 token 认证、动态项目名路由、X-Project-Name、限速、路径穿越防护、100MB 上传限制），配置 `serve.toml`：
 
 ```toml
 host = "0.0.0.0"
@@ -55,39 +67,19 @@ deploy_token = "hex-token"      # app → server upload/health auth
 web_root = "C:/Projects/Alice/web-timeline"
 ```
 
-- No `serve.toml` → auto-generates one with random `deploy_token` on first run (no `url_prefix` — project names are dynamic)
-- All endpoints require valid deploy_token.
-- **Dynamic project names**: Deploy sends `X-Project-Name` header. Server creates `web_root/<project_name>/` directory and stores access_token in `HashMap<project_name, token>`.
-- **Token separation**: `/upload` and `/health` accept only `deploy_token` (Bearer). Browser endpoints (`/<project>/...`) accept `access_token` (cookie or Bearer).
-- **URL prefix routing**: Each project is accessible at `/<project_name>/`. Cookie `keinestamp_token` is scoped to `Path=/<project_name>/` for multi-project isolation.
-- Login page at `GET /<project>/login`. On success, sets `keinestamp_token` cookie with `Path=/<project>/` and saves token to `localStorage` for auto-fill.
-- Static files: try Bearer → Cookie auth (checks both config access_tokens and stored project tokens via `HashMap`), fallback to login page for browser requests
-- Single server-global `last_update` timestamp on `/health` (updated on any deploy)
-- Rate limiter: 10 failures / 60s per IP → 120s block. `retain()` cleanup on each `check()`.
-- Bearer deploy_token only for `/upload` and `/health`; Bearer access_token or Cookie for browser endpoints (access_token stored per-project during deploy). No Basic auth support.
-- Path traversal: `..` string check + `canonicalize()` prefix check (defense-in-depth) + project name sanitization
-- Zip Slip: `canonicalize()` check before extraction
-- 100MB upload limit
-- Upload response: `{"status":"ok","prefix":"/<project_name>"}`
-- HTTP warning printed when no HTTPS
-
 ## detect.rs
 
 | Condition | Result |
 |---|---|
 | Path not a dir | `Fresh` |
 | No `.keinestamp.toml`, has `.blend` | `Existing` |
-
 | Has `.keinestamp.toml` | `Initialized(MetaConfig)` |
+
 Non-recursive `*.blend` scan. File path → error.
 
-## serve.toml auto-detect
+## lore-commands.md
 
-`serve` command auto-detects `serve.toml` in project root before falling back to `--config` flag.
-
-## has_remote()
-
-Checks for git remote named `origin` specifically (not any remote). Consistent with `push()` which requires `origin`. Tauri command does NOT include `web_remote` in this check.
+`docs/lore-commands.md` — Lore v0.8.6 全部实测命令形态/输出格式/回退语义/去重率结论（Task 1 产物）。**任何新 lore 命令先补速查表再写代码。**
 
 ## Tauri GUI (src-tauri/)
 
@@ -100,94 +92,77 @@ cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
 
-### Tauri commands (51)
+### Tauri commands
 
-All in `src-tauri/src/lib.rs`. Wrapped via `map_err(anyhow::Result) -> Result<T, String>`.
+全部在 `src-tauri/src/lib.rs`，lore 语义（v1 命令名保留，内部换后端）：
 
 | Command | Returns | Notes |
 |---|---|---|
-| `detect` | `"fresh"\|"existing"\|"initialized"` | |
-| `init_project` | `MetaConfig` | + init commit + add_recent |
-| `record` | short hash (7) | async, emits `commit-progress` events (5 phases). No auto-deploy. Optional `files` param: selected-files commit (`add_and_commit_files`), otherwise full commit. Success clears rollback state (`clear_rollback`). |
-| `push` / `pull` | `()` | push only does git push, no deploy |
-| `deploy` | `()` | manual deploy to server (zip upload); on success writes `site_name` (resolved) + `site_locked = true` |
-| `test_connection` | `bool` | tests server connectivity via /health with Bearer deploy_token |
-| `get_deploy_status` | `{local, remote}` | web-timeline commit count vs server record via `GET /<project>/version` (Bearer deploy_token); remote null = no record |
-| `has_remote` | `bool` | checks git `origin` only |
-| `rollback` | `()` | 回退到指定记录**之前** (父提交): 工作区有改动先 `stash push -u` (前缀 `keinestamp-rollback`), 再 `git restore --source=<记录^> --staged --worktree` 还原文件, 写 `refs/keinestamp/rollback` + `rollback-point`; 第一条记录无父提交则报错 |
-| `get_rollback_state` | `{rollback_point, head_matches}` | rollback_point null = 无回退状态; head_matches = HEAD 仍停在回退前 (回退后新记录则为 false, 无法恢复) |
-| `restore_rollback` | `()` | 恢复回退前状态 (三向合并); 冲突时返回 `CONFLICT|<files…>` 错误, 前端弹逐文件二选一 |
-| `get_rollback_conflicts` | `String[]` | 未解决冲突文件列表 (`git diff --diff-filter=U`) |
-| `keep_rollback_file` | `()` | 回退状态下保留被回退记录删除的文件 (`git restore --source=<回退前HEAD> --staged --worktree -- <path>`, 取消删除差异; 仅回退状态 + HEAD 有/回退点无的文件) |
-| `resolve_rollback_conflicts` | `()` | choices: `[path, "current"\|"latest"]` 逐文件二选一; 全部解决后 drop stash + 清 refs |
-| `status` | `{clean, output}` | |
-| `log` | `LogEntry[]` | timeline entries (short hash/date/message) |
-| `read_config` / `update_config` | `MetaConfig` / `()` | key-based string matching (`access_token`, `site_name`); `site_name` key validates ASCII `[A-Za-z0-9-_]` and rejects when locked |
-| `get_timeline` | `Timeline` | resolves preview paths to absolute |
-| `export_entry` | `()` | 导出 entry 文件到指定目录 (`git ls-tree` + `git show`) |
+| `detect` | `"fresh"\|"existing"\|"initialized"` | `.lore` 目录判断 |
+| `init_project` | `MetaConfig` | lore 建仓 + 隐藏列表初始化 + add_recent |
+| `record` | short hash (7) | `lore_project::record`；async emits `commit-progress`（5 阶段壳）；files 参数 = selected 提交；成功清回退标记 |
+| `push` / `pull` | `()` | `lore push` / `lore sync` |
+| `deploy` | `()` | web 部署（zip web/ 上传）；成功写 site_name + site_locked |
+| `backup` | `()` | `lore push` 到本机/局域网 loreserver |
+| `test_connection` / `get_deploy_status` / `has_remote` | 同 v1 | has_remote 检查 `.lore/config.toml` remote_url |
+| `rollback` | `()` | branch reset + dirty 备份 + marker |
+| `get_rollback_state` | `{rollback_point, head_matches}` | marker 读取；head_matches = current == rollback_point |
+| `restore_rollback` | `()` | 撤销回退（branch reset 回 head_before） |
+| `get_rollback_conflicts` / `keep_rollback_file` / `resolve_rollback_conflicts` | `[]` / `()` | v1 兼容签名，Lore 无 git 式冲突（UI 已移除） |
+| `status` | `{clean, output}` | `changed_files`（过滤隐藏）；output 中文标签 `未提交的修改：` + `  {A/M/D/??} {path}` |
+| `log` / `get_project_log` | `LogEntry[]` / `String[]` | revision_history 过滤 kind=web |
+| `read_config` / `update_config` | 同 v1 | site_name 校验 ASCII + 锁定 |
+| `get_timeline` | `Timeline` | 读 `web/timeline.json`（含 rollback_marker） |
+| `export_entry` | `()` | dump + 逐文件 file write |
 | `get_recent` / `add_recent` / `remove_recent` / `reorder_recent` | recent mgmt | |
-| `open_folder` / `open_web_timeline` / `open_site` | `()` | platform-specific shell cmds; `open_site(url)` requires http(s):// prefix |
-| `get_ignore_info` | `{tracked, ignored, rule_ignored}` | tracked via `git ls-files`; ignored = ignore 规则命中 + skip-worktree (S 前缀); rule_ignored = 传入 status 文件中命中 .gitignore 规则者 (`git check-ignore -v --no-index`, 含已跟踪文件, 前端据此隐藏) |
-| `add_to_gitignore` / `add_skip_worktree` / `remove_ignore` | `()` | 忽略管理: .gitignore 规则 / 已跟踪文件本地忽略 (skip-worktree, 零 repo 影响) / 移除忽略 |
-| `delete_entry` | `()` | timeline.json only, not git |
-| `get_project_log` | `String[]` | git log lines |
-| `get_tracked_files` | `String[]` | walks dir (skips hidden/node_modules/target/web-timeline) |
-| `get_file_diff` | `String` | `git show <entry> -- <file>` |
-| `download_blender` | `String` path | emits `blender-download-progress` |
-| `refresh_blender_versions` / `get_cached_blender_versions` / `list_installed_blender_versions` | `String[]` | manual-only check (manual button) / persisted cache (no network) / installed local |
-| `get_blender_path` / `set_blender_path` | `String` / `()` | AppConfig |
-| `get_deploy_token` / `set_deploy_token` | `String` / `()` | AppConfig deploy_token |
-| `get_deploy_server_url` / `set_deploy_server_url` | `String` / `()` | AppConfig deploy_server_url |
-| `get_auto_connect` / `set_auto_connect` | `bool` / `()` | AppConfig auto_connect |
-| `get_close_action` / `set_close_action` | `bool|null` / `()` | AppConfig close_to_tray（关窗行为：null=未决定，true=后台驻留，false=退出）|
-| `resolve_close_action` | `()` | 首次关窗弹窗后的落定：记录选择并执行（true=隐藏窗口，false=退出）|
-| `set_entry_milestone` | `()` | toggles `milestone` on timeline.json entry (atomic write); regenerates web page + web commit |
+| `open_folder` / `open_web_timeline` / `open_site` | `()` | 同 v1 |
+| `get_ignore_info` | `{tracked: [], ignored, rule_ignored: []}` | ignored = 隐藏列表（hidden.rs load_hidden） |
+| `add_to_gitignore` / `add_skip_worktree` / `remove_ignore` | `()` | 均为隐藏列表读写（add=添加路径，remove=移除；命令名保留） |
+| `delete_entry` | `()` | timeline.json 删条目（不删 revision）+ 重建页面 + commit_web |
+| `set_entry_milestone` | `()` | 写 timeline.json milestone 字段（revision metadata 回写不可行，实测 `metadata set --revision` 报错）+ 重建页面 + commit_web |
+| `get_tracked_files` | `String[]` | walks dir（skips hidden/node_modules/target/web） |
+| `get_file_diff` | `String` | `lore file diff --source <父> --target <rev>` |
+| blender / settings / close_action 命令 | 同 v1 | |
 
 ### Frontend components
 
-All in `frontend/src/`. Key files:
+All in `frontend/src/`（组件在 `lib/`）。Key files:
 
-- `App.svelte` — Main layout, state, 3s status polling. 恢复 button in `ActionBar` (常驻置灰: 非回退状态/head_matches=false 时禁用), click 直接执行恢复 (无 5s 确认), 冲突时弹 `ConflictDialog` (per-file 二选一).
-- `SettingsDialog.svelte` — deploy_server_url/deploy_token + Blender download. Connect button with connection test (uses deploy_token), auto-connect toggle (app-level). Save does not close dialog.
-- `ActionBar.svelte` — 主操作区: 记录 (record) / 恢复 (常驻置灰, 回退状态下可用) / 部署 (deploy)（旧导出/撤回按钮已移除, 导出移至 EntryList 右键）.
-- `EntryList.svelte` — Timeline cards with collapsible files/diff/3D sections. ★ milestone toggle per card (`set_entry_milestone`); milestone cards get full accent-tinted background + accent border. Right-click context menu per card: 导出 (`export_entry` via InputDialog) / 回退 (`rollback`, 回退状态下禁用; 第一条记录禁用 — 无更早状态). 回退状态下, 比回退点新的记录灰显 (`dimmed` class; 回退点不在时间线时全部灰显). Site name + access token sections at bottom (token only after deploy).
-- `StatusPanel.svelte` — Changes panel: directory-tree view of working files (`git status --porcelain -uall` so untracked dirs are not collapsed). Per-row checkboxes (default all = full commit; unchecking some → record commits only selected via `files` param, selection persists across 3s auto-refresh). Dir checkbox = select/deselect all files under it (indeterminate when partial), dir row click collapses/expands, file row click toggles. Header shows `selected/total` count + 全选/全不选 buttons.
-- `CommitDialog.svelte` — record dialog: message/tag/3D-preview only (file selection lives in StatusPanel); closes after each commit (batch = re-open, selection persists on main panel). 回退未恢复时显示警告 (`回退未恢复，继续记录将无法再恢复`).
-- `statusParse.ts` — shared `parseStatus(output)` used by StatusPanel + CommitDialog.
-- `StatusBar.svelte` — Connection indicator (green/red dot) only.
-- `ProjectTabs.svelte` — Project tabs bar: scrollable tabs area (`overflow-x: auto` + wheel-scroll action + hover-only thin scrollbar + edge mask fade when scrollable + active tab auto `scrollIntoView`). Active tab shows × (wired to `onRemoveRecent`, reuses confirm logic, `stopPropagation` so it doesn't select). Fixed right actions area (☀/🌙 theme toggle + ⚙ settings, divided by border). Props: `theme`/`onToggleTheme`/`onRemoveRecent`.
-- `RollbackDialog.svelte` / `ConflictDialog.svelte` — 恢复确认 (5s 延时按钮) / 冲突逐文件二选一 (`current` 保留当前版 vs `latest` 恢复最新版).
-- `api.ts` — 42 Tauri invoke wrappers
-- `types.ts` — Interfaces
+- `App.svelte` — 主布局、状态、3s 轮询。恢复按钮（`rollback_point && head_matches` 时可用）；备份按钮接线；无冲突对话框（v2 已删 ConflictDialog）
+- `lib/SettingsDialog.svelte` — 服务器/Blender 设置 + **隐藏路径管理**（列表 + 添加 + 删除，预设 web/、.keinestamp.toml 不可删）
+- `lib/ActionBar.svelte` — 记录 / 恢复 / 备份 / 部署
+- `lib/EntryList.svelte` — 时间线卡片（id = lore revision sig）、★ milestone、右键导出/回退、回退点灰显
+- `lib/StatusPanel.svelte` — 变更面板（lore status 中文格式解析），勾选提交（files 参数），右键忽略/隐藏
+- `lib/CommitDialog.svelte` — 记录弹窗（无回退警告，v2 顶替正常）
+- `lib/statusParse.ts` — 解析 `未提交的修改：` + `  {code} {path}` 格式
+- `api.ts` — Tauri invoke wrappers；`types.ts` — Interfaces（含 rollback_marker）
+- 其余（TitleBar/ProjectTabs/Toast/BusyOverlay/DetailPanel/ConfirmDialog/InputDialog/CloseBehaviorDialog/StatusBar/Sidebar/DirTree）— 同 v1
 
-**Dead code (don't use)**: (none — `InitDialog.svelte`/`ModelViewer.svelte` deleted, replaced by native `@tauri-apps/plugin-dialog` and browser `openWebTimeline`)
+**Dead code (don't use)**: ConflictDialog.svelte（已删除）；v1 的 git_project/git_helpers/git_web 已删除。
 
 ### Key design decisions
 
-- **Config split**: Project-level MetaConfig vs app-level AppConfig (blender_path, deploy_token)
-- **Token separation**: `deploy_token` (app-level, for upload/health) vs `access_token` (per-project, for browser login). Server routes enforce which token is accepted per endpoint.
-- **URL prefix routing**: Each project served at `/<project_name>/` based on `X-Project-Name` deploy header. Cookie scoped to `Path=/<project_name>/`, localStorage key scoped to project name. Multiple projects coexist in one browser.
-- **No page_password**: Auth handled by serve.rs Bearer + Cookie. HTTPS via Caddy/nginx.
-- **Diff data externalized**: `web-timeline/diffs.json` loaded via fetch()
-- **push/pull gated by `has_remote()`**: Tauri `push`/`pull` commands skip when no git `origin` remote (no GUI buttons exist; CLI prints skip message)
-- **Notifications**: Toast auto-dismiss after 3s. No manual dismiss.
-- **Day/night dual theme**: Day = 人形 (white bg + deep blue + ice blue + red), Night = 白泽 (green-black bg + dark green + green-white + red). `[data-theme="night"]` override block at end of app.scss. Manual ☀/🌙 toggle, localStorage key `keinestamp_theme` (desktop) / `keinestamp_web_theme` (web). Inline pre-read script in `frontend/index.html` head prevents white flash. No system-follow, no animations.
-- **Theme toggle location**: ☀/🌙 sits in ProjectTabs fixed right actions area; TitleBar is pure window controls (no theme button).
-- **Tag badges**: inline `--tag-c` + CSS `color-mix` — auto-adapts to both themes, no `tagSoft`.
-- **Web page theme**: `html_gen.rs` template has `:root`/`[data-theme="night"]` dual palettes; 3D viewer and calendar heat colors stay dark/hardcoded. Login page (`serve.rs login_page_html`) uses the same dual palettes and shares the `keinestamp_web_theme` localStorage key (same origin → theme carries over between login and timeline pages). Timeline page extras: entry card hover lift, empty state with ice-blue clock icon, diff-row hover brightness, ★ milestone badge + red left border (`entry.milestone`). Web pages have NO logo (removed; desktop TitleBar keeps it) but both pages embed the logo as a data-URI favicon (`three_assets::logo_favicon_b64`, compiled via `include_bytes!`). Root path `GET /` serves a static branded landing page (`serve.rs INDEX_HTML_TEMPLATE` + `index_page_html`): editorial asymmetric layout (top brand bar, left-text/right-art hero with moon-phase art + ring decorations + progress tick scale, `$ record <hash> ✓` code block, offset feature cards 01/02/03, eyebrow label, wave band + glow blobs + faint mono code texture background), grayscale palette with a single saturated red accent, dual theme, no project info, no preview-only toggle. The moon-phase art is computed client-side in the page (embedded JS): the visitor's LOCAL day start → phase via synodic month (reference new moon 2000-01-06T18:14Z), 8-phase Chinese names, `#moonLight` path + `#moonName` rendered at load; day-fixed per visitor timezone.
+- **Config split**: Project-level MetaConfig vs app-level AppConfig（hidden_paths、deploy_token 等）
+- **Token separation**: `deploy_token`（app 级，上传/健康）vs `access_token`（项目级，浏览器登录）；serve.rs 按端点区分
+- **URL prefix routing**: `/<project_name>/` 动态路由，cookie 按 Path 隔离
+- **Diff data externalized**: `web/diffs.json` loaded via fetch()
+- **push/pull 门控**: `has_remote` 检查 config.toml remote_url（本机 loreserver 恒在 → 恒 true）
+- **Notifications**: Toast auto-dismiss after 3s
+- **Day/night dual theme**: 同 v1（人形/白泽，localStorage `keinestamp_theme` / `keinestamp_web_theme`）
+- **Web page theme**: html_gen 模板双主题；登录页同主题；无 logo，data-URI favicon；根路径品牌落地页
 
 ## Integration tests
 
-At `tests/cli_tests.rs`. Create real git repos in `$env:TEMP/keinestamp_int_*`. Require `user.email`/`user.name` git config. Binary via `CARGO_BIN_EXE_keinestamp`.
+At `tests/cli_tests.rs`. Create real lore repos in `$env:TEMP/keinestamp_int_*`. Require loreserver 在线（127.0.0.1:41339）。Binary via `CARGO_BIN_EXE_keinestamp`。
 
 ## Test gaps (high-risk)
 
 - `push.rs` — zip creation tested; `deploy_to_server` network path untested
 - `main_helpers.rs` — 0 unit tests
-- `serve.rs` — HTTP handlers untested
-- `git_helpers.rs` — core functions only integration-tested
-- `git_project.rs` — push/pull/remote/has_remote untested
+- `serve.rs` — HTTP handlers + `ensure_loreserver` spawn 未单测（探测分支手工冒烟过）
+- `lore_backend.rs` — revert/export_files 集成测试；loreserver 重启信任链实测通过未落测试
+- `lore_project.rs` — undo_rollback 冲突路径（current != rollback_point 报错分支）测试
 
 ## Known dead code
 
-- (none — `blender_render::render_preview`, `ModelViewer.svelte`, `InitDialog.svelte` removed)
+- (none — v1 git 后端、ConflictDialog 已删除)
