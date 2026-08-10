@@ -83,6 +83,29 @@ pub fn commit_files(project_root: &Path, message: &str, metadata: &[(&str, &str)
     commit_staged(project_root, message, metadata)
 }
 
+/// 提交 web/ 目录全部产物（index.html、timeline.json、previews_glb 等），metadata kind=web。
+/// web/ 不存在、为空或本次无改动时跳过提交返回 Ok（部署不应因无 web 产物而报错）。
+/// 命令形态（实测）：`lore stage --scan web/` 只 stage web/ 下 dirty 文件（`lore stage web/`
+/// 目录不 --scan 只 stage 已 dirty 文件）；无改动时 stage 输出 "No changes staged" 且 exit 0，
+/// 故先经 `status --scan` 判断 changed 非空再 stage/commit，避免空提交。
+pub fn commit_web(project_root: &Path) -> Result<()> {
+    let web_dir = project_root.join("web");
+    if !web_dir.is_dir() || std::fs::read_dir(&web_dir)?.next().is_none() {
+        return Ok(());
+    }
+    let changed: Vec<String> = status_lines(project_root)?
+        .into_iter()
+        .filter(|f| f.path.starts_with(crate::hidden::WEB_DIR))
+        .map(|f| f.path)
+        .collect();
+    if changed.is_empty() {
+        return Ok(());
+    }
+    run_lore(project_root, &["stage", "--scan", "web/"])?;
+    commit_staged(project_root, "web update", &[("kind", "web")])?;
+    Ok(())
+}
+
 fn commit_staged(project_root: &Path, message: &str, metadata: &[(&str, &str)]) -> Result<String> {
     if !metadata.is_empty() {
         let _ = run_lore(project_root, &["revision", "metadata", "clear"]);
@@ -349,6 +372,57 @@ mod tests {
         let lines = status_lines(&root).unwrap();
         assert!(lines.iter().any(|l| l.path == "a.txt"));
         assert!(lines.iter().any(|l| l.path == "web/b.txt"));
+    }
+
+    #[test]
+    fn test_commit_web_stages_only_web_and_skips_no_change() {
+        require_server();
+        let root = tmp_root("webcommit");
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "user").unwrap();
+        std::fs::create_dir_all(root.join("web")).unwrap();
+        std::fs::write(root.join("web/index.html"), "<html></html>").unwrap();
+        commit_web(&root).unwrap();
+        let hist = revision_history(&root).unwrap();
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].metadata.get("kind").map(String::as_str), Some("web"));
+        assert_eq!(hist[0].message, "web update");
+        // 用户文件不应被 web 提交卷入（仍 untracked）
+        let lines = status_lines(&root).unwrap();
+        assert!(lines.iter().any(|l| l.path == "a.txt"), "a.txt 应保持未跟踪");
+        assert!(!lines.iter().any(|l| l.path.starts_with("web/")), "web 文件应已提交");
+        // 无改动时再次 commit_web 应跳过（不产生空提交）
+        commit_web(&root).unwrap();
+        assert_eq!(revision_history(&root).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_commit_web_skips_without_web_dir_or_empty() {
+        require_server();
+        let root = tmp_root("webmissing");
+        create_repo(&root).unwrap();
+        commit_web(&root).unwrap();
+        assert_eq!(revision_history(&root).unwrap().len(), 0);
+        std::fs::create_dir_all(root.join("web")).unwrap();
+        commit_web(&root).unwrap();
+        assert_eq!(revision_history(&root).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_commit_web_commits_timeline_json() {
+        require_server();
+        let root = tmp_root("webtl");
+        create_repo(&root).unwrap();
+        std::fs::create_dir_all(root.join("web")).unwrap();
+        std::fs::write(root.join("web/timeline.json"), "{}").unwrap();
+        commit_web(&root).unwrap();
+        let hist = revision_history(&root).unwrap();
+        assert_eq!(hist.len(), 1);
+        assert_eq!(hist[0].metadata.get("kind").map(String::as_str), Some("web"));
+        // 再次改动 timeline.json 后重提（验证第二次 web 提交成功）
+        std::fs::write(root.join("web/timeline.json"), "{\"x\":1}").unwrap();
+        commit_web(&root).unwrap();
+        assert_eq!(crate::lore_project::web_revision_count(&root).unwrap(), 2);
     }
 
     #[test]

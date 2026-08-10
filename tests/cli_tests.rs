@@ -44,10 +44,10 @@ fn test_init_creates_structure() {
     assert!(ok, "init failed: {}", out);
     assert!(dir.join(".keinestamp.toml").exists());
     assert!(dir.join(".git").exists());
-    assert!(dir.join("web-timeline").exists());
-    assert!(dir.join("web-timeline/.git").exists());
-    assert!(dir.join("web-timeline/timeline.json").exists());
-    assert!(dir.join("web-timeline/index.html").exists());
+    assert!(dir.join("web").exists());
+    assert!(!dir.join("web/.git").exists(), "web 产物并入主仓库，不应有独立 git 仓库");
+    assert!(dir.join("web/timeline.json").exists());
+    assert!(dir.join("web/index.html").exists());
     std::fs::remove_dir_all(&dir).unwrap();
 }
 
@@ -135,7 +135,7 @@ fn test_cli_rollback_and_restore() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "third"]);
     assert!(ok, "third record failed: {}", out);
 
-    let timeline = keinestamp::timeline::read_timeline(&dir.join("web-timeline").join("timeline.json")).unwrap();
+    let timeline = keinestamp::timeline::read_timeline(&dir.join("web").join("timeline.json")).unwrap();
     let second_id = timeline.entries.get(1).unwrap().id.clone();
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &second_id[..7]]);
@@ -165,7 +165,7 @@ fn test_cli_rollback_then_record_replaces() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
     assert!(ok, "record B failed: {}", out);
 
-    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let tl_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
     let a_id = timeline.entries[0].id.clone();
     let b_id = timeline.entries[1].id.clone();
@@ -206,7 +206,7 @@ fn test_cli_rollback_first_entry() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
     assert!(ok, "record B failed: {}", out);
 
-    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let tl_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
     let a_id = timeline.entries[0].id.clone();
 
@@ -244,7 +244,7 @@ fn test_cli_rollback_while_in_rollback_auto_restores() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
     assert!(ok, "record C failed: {}", out);
 
-    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let tl_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
     let a_id = timeline.entries[0].id.clone();
     let b_id = timeline.entries[1].id.clone();
@@ -285,7 +285,7 @@ fn test_cli_rollback_conflict_aborts_chain() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
     assert!(ok, "record C failed: {}", out);
 
-    let tl_path = dir.join("web-timeline").join("timeline.json");
+    let tl_path = dir.join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
     let b_id = timeline.entries[1].id.clone();
     let c_id = timeline.entries[2].id.clone();
@@ -320,7 +320,7 @@ fn test_export_with_real_hash() {
     let (out, ok) = run(&["commit", &dir.to_string_lossy(), "-m", "first"]);
     assert!(ok, "commit failed: {}", out);
 
-    let timeline_path = dir.join("web-timeline").join("timeline.json");
+    let timeline_path = dir.join("web").join("timeline.json");
     let content = std::fs::read_to_string(&timeline_path).unwrap();
     let timeline: serde_json::Value = serde_json::from_str(&content).unwrap();
     let first_id = timeline["entries"][0]["id"]

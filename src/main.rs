@@ -278,11 +278,7 @@ fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -
         &project_name,
     )?;
 
-    let _ = keinestamp::git_web::web_commit_and_push(
-        &meta.web_root,
-        &format!("update timeline: {}", message),
-        false,
-    );
+    let _ = keinestamp::lore_backend::commit_web(&meta.project_root);
 
     let _ = keinestamp::git_project::clear_rollback(&meta.project_root);
 

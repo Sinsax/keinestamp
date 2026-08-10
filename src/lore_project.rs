@@ -91,6 +91,18 @@ pub fn clear_rollback(project_root: &Path) -> Result<()> {
     crate::timeline::clear_rollback(project_root)
 }
 
+/// kind=web 的 revision 数（部署版本号 hint，替代 v1 web 仓库 rev-list --count）。
+/// 非 lore 仓库返回 0（兼容迁移期间项目部署不报错）。
+pub fn web_revision_count(project_root: &Path) -> Result<u64> {
+    if !lore_backend::repo_exists(project_root) {
+        return Ok(0);
+    }
+    Ok(lore_backend::revision_history(project_root)?
+        .iter()
+        .filter(|r| r.metadata.get("kind").map(String::as_str) == Some("web"))
+        .count() as u64)
+}
+
 /// 导出 entry 全部文件到指定目录（dump 解析 + 逐文件导出）
 pub fn export_entry(project_root: &Path, revision: &str, dest: &Path) -> Result<()> {
     lore_backend::export_files(project_root, revision, dest)
@@ -184,7 +196,7 @@ fn copy_tree(src: &Path, dst: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lore_backend::{self, create_repo, revision_history};
+    use crate::lore_backend::{self, commit_web, create_repo, revision_history};
     use std::path::PathBuf;
 
     fn tmp_root(name: &str) -> PathBuf {
@@ -224,6 +236,30 @@ mod tests {
         assert_eq!(hist.len(), 1);
         assert_eq!(hist[0].metadata.get("kind").map(String::as_str), Some("user"));
         assert!(root.join("web/timeline.json").exists());
+    }
+
+    #[test]
+    fn test_web_commit_and_count() {
+        require_server();
+        let root = tmp_root("webcnt");
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "user").unwrap();
+        record(&root, "user record", None, &vec!["web/".to_string()]).unwrap();
+        assert_eq!(web_revision_count(&root).unwrap(), 0);
+        std::fs::create_dir_all(root.join("web")).unwrap();
+        std::fs::write(root.join("web/index.html"), "<html></html>").unwrap();
+        commit_web(&root).unwrap();
+        assert_eq!(web_revision_count(&root).unwrap(), 1);
+        let hist = lore_backend::revision_history(&root).unwrap();
+        assert_eq!(hist.len(), 2);
+        assert!(hist.iter().any(|r| r.metadata.get("kind").map(String::as_str) == Some("user")), "用户记录应保留 kind=user");
+        assert!(hist.iter().any(|r| r.metadata.get("kind").map(String::as_str) == Some("web")), "web 提交应为 kind=web");
+    }
+
+    #[test]
+    fn test_web_revision_count_zero_on_non_lore_repo() {
+        let root = tmp_root("webcnt_nolore");
+        assert_eq!(web_revision_count(&root).unwrap(), 0);
     }
 
     #[test]

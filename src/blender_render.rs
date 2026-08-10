@@ -14,7 +14,7 @@ impl Default for RenderConfig {
         Self {
             resolution: (1920, 1080),
             camera_name: "ProgressCamera".to_string(),
-            output_dir: PathBuf::from("web-timeline/previews"),
+            output_dir: PathBuf::from("web/previews"),
             max_previews: 50,
         }
     }

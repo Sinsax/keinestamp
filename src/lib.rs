@@ -5,7 +5,6 @@ pub mod config;
 pub mod detect;
 pub mod git_helpers;
 pub mod git_project;
-pub mod git_web;
 pub mod html_gen;
 pub mod init;
 pub mod main_helpers;

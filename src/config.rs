@@ -26,7 +26,7 @@ pub struct MetaConfig {
 
 impl MetaConfig {
     pub fn new(project_root: PathBuf) -> Self {
-        let web_root = project_root.join("web-timeline");
+        let web_root = project_root.join("web");
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             init_time: chrono::Utc::now().to_rfc3339(),
@@ -143,7 +143,7 @@ pub fn read_meta(path: &Path) -> Result<MetaConfig> {
         config.project_root = parent.to_path_buf();
     }
     if config.web_root.as_os_str().is_empty() {
-        config.web_root = config.project_root.join("web-timeline");
+        config.web_root = config.project_root.join("web");
     }
     Ok(config)
 }

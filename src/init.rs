@@ -57,18 +57,6 @@ fn perform_init(project_root: &Path) -> Result<()> {
     std::fs::create_dir_all(web_root)
         .with_context(|| format!("failed to create web directory {:?}", web_root))?;
 
-    let web_git = web_root.join(".git");
-    if !web_git.exists() {
-        git_init(web_root, "web")?;
-    } else {
-        eprintln!("Web git repository already exists, skipping init");
-    }
-
-    let gitignore_path = web_root.join(".gitignore");
-    if !gitignore_path.exists() {
-        std::fs::write(&gitignore_path, "previews_glb/\ntimeline.tmp.*.json\n")?;
-    }
-
     write_timeline_json(web_root)?;
     write_index_html(web_root)?;
 
@@ -87,16 +75,6 @@ fn perform_init(project_root: &Path) -> Result<()> {
 fn ensure_web_structure(web_root: &Path) -> Result<()> {
     if !web_root.exists() {
         std::fs::create_dir_all(web_root)?;
-    }
-
-    let web_git = web_root.join(".git");
-    if !web_git.exists() {
-        git_init(web_root, "web")?;
-    }
-
-    let gitignore_path = web_root.join(".gitignore");
-    if !gitignore_path.exists() {
-        std::fs::write(&gitignore_path, "previews_glb/\ntimeline.tmp.*.json\n")?;
     }
 
     let timeline_path = web_root.join("timeline.json");
@@ -187,7 +165,7 @@ fn ensure_project_gitignore(project_root: &Path) -> Result<()> {
     if gitignore_path.exists() {
         content = std::fs::read_to_string(&gitignore_path)?;
     }
-    for pattern in &["web-timeline/", ".keinestamp.toml"] {
+    for pattern in &["web/", ".keinestamp.toml"] {
         if !content.contains(pattern) {
             if !content.is_empty() && !content.ends_with('\n') {
                 content.push('\n');
@@ -268,10 +246,10 @@ mod tests {
 
         assert!(config::meta_path(&dir).exists());
         assert!(dir.join(".git").exists());
-        assert!(dir.join("web-timeline").exists());
-        assert!(dir.join("web-timeline").join(".git").exists());
-        assert!(dir.join("web-timeline").join("timeline.json").exists());
-        assert!(dir.join("web-timeline").join("index.html").exists());
+        assert!(dir.join("web").exists());
+        assert!(!dir.join("web/.git").exists(), "web 产物并入主仓库，不应有独立 git 仓库");
+        assert!(dir.join("web").join("timeline.json").exists());
+        assert!(dir.join("web").join("index.html").exists());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -286,8 +264,8 @@ mod tests {
 
         assert!(config::meta_path(&dir).exists());
         assert!(dir.join(".git").exists());
-        assert!(dir.join("web-timeline").exists());
-        assert!(dir.join("web-timeline").join(".git").exists());
+        assert!(dir.join("web").exists());
+        assert!(!dir.join("web/.git").exists());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -310,8 +288,8 @@ mod tests {
 
         assert!(git_dir_before.exists());
         assert!(config::meta_path(&dir).exists());
-        assert!(dir.join("web-timeline").exists());
-        assert!(dir.join("web-timeline").join(".git").exists());
+        assert!(dir.join("web").exists());
+        assert!(!dir.join("web/.git").exists());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -324,14 +302,14 @@ mod tests {
         init_project(&dir)?;
         let meta_after_first = config::read_meta(&config::meta_path(&dir))?;
 
-        let index_before = std::fs::read_to_string(dir.join("web-timeline").join("index.html"))?;
+        let index_before = std::fs::read_to_string(dir.join("web").join("index.html"))?;
 
         init_project(&dir)?;
 
         let meta_after_second = config::read_meta(&config::meta_path(&dir))?;
         assert_eq!(meta_after_first.init_time, meta_after_second.init_time);
 
-        let index_after = std::fs::read_to_string(dir.join("web-timeline").join("index.html"))?;
+        let index_after = std::fs::read_to_string(dir.join("web").join("index.html"))?;
         assert_eq!(index_before, index_after);
 
         std::fs::remove_dir_all(&dir)?;
@@ -344,7 +322,7 @@ mod tests {
 
         init_project(&dir)?;
 
-        let index_path = dir.join("web-timeline").join("index.html");
+        let index_path = dir.join("web").join("index.html");
         std::fs::remove_file(&index_path)?;
         assert!(!index_path.exists());
 

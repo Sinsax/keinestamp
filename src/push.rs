@@ -32,7 +32,8 @@ pub fn deploy_to_server(
     let upload_url = format!("{}/upload", server_url.trim_end_matches('/'));
     eprintln!("[debug] deploy_to_server: posting to {}", upload_url);
 
-    let web_count = crate::git_web::get_web_commit_count(web_root);
+    let project_root = web_root.parent().unwrap_or(web_root);
+    let web_count = crate::lore_project::web_revision_count(project_root).unwrap_or(0);
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(120))
         .build();
