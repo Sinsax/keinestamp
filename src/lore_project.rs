@@ -91,6 +91,16 @@ pub fn clear_rollback(project_root: &Path) -> Result<()> {
     crate::timeline::clear_rollback(project_root)
 }
 
+/// 导出 entry 全部文件到指定目录（dump 解析 + 逐文件导出）
+pub fn export_entry(project_root: &Path, revision: &str, dest: &Path) -> Result<()> {
+    lore_backend::export_files(project_root, revision, dest)
+}
+
+/// 该 entry 中某文件相对其父记录的改动 diff 文本
+pub fn get_file_diff(project_root: &Path, revision: &str, path: &str) -> Result<String> {
+    lore_backend::file_diff(project_root, revision, path)
+}
+
 struct DirtyBackup {
     dir: PathBuf,
     deleted: Vec<String>,
@@ -271,5 +281,23 @@ mod tests {
         assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "DIRTY");
         assert!(!rollback_state(&root).unwrap().active);
         let _ = r2;
+    }
+
+    #[test]
+    fn test_export_entry_and_diff() {
+        require_server();
+        let root = tmp_root("pe");
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "x").unwrap();
+        let r1 = record(&root, "r1", None, &vec!["web/".to_string()]).unwrap();
+        std::fs::write(root.join("a.txt"), "y").unwrap();
+        let r2 = record(&root, "r2", None, &vec!["web/".to_string()]).unwrap();
+
+        let dest = tmp_root("pe_dest");
+        export_entry(&root, &r1, &dest).unwrap();
+        assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "x");
+
+        let diff = get_file_diff(&root, &r2, "a.txt").unwrap();
+        assert!(diff.contains("+++"));
     }
 }

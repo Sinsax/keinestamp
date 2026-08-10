@@ -27,6 +27,7 @@ pub struct LoreRevision {
     pub number: u32,
     pub id: String,
     pub message: String,
+    pub date: String,
     pub metadata: HashMap<String, String>,
 }
 
@@ -101,11 +102,6 @@ fn parse_commit_signature(out: &str) -> Option<String> {
     })
 }
 
-fn find_signature(project_root: &Path, number: u32) -> Result<String> {
-    let out = run_lore(project_root, &["revision", "find", "number", &number.to_string()])?;
-    Ok(out.trim().to_string())
-}
-
 const META_SKIP: [&str; 7] = ["Branch", "Date", "Repository", "Revision", "Signature", "Parent", "Tree"];
 
 pub fn revision_metadata(project_root: &Path, revision: &str) -> Result<HashMap<String, String>> {
@@ -126,21 +122,104 @@ pub fn revision_metadata(project_root: &Path, revision: &str) -> Result<HashMap<
     Ok(map)
 }
 
+/// 全部 revision 历史（最新在前）。解析 `lore history`（非 --oneline）输出块：
+/// 每块含 Revision/Signature/Date/message 行，message 为 Date 后缩进行。
 pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
-    let out = run_lore(project_root, &["history", "--oneline"])?;
-    let mut revs = Vec::new();
+    let out = run_lore(project_root, &["history"])?;
+    let mut revs: Vec<(u32, String, String, Vec<String>)> = Vec::new();
+    let mut cur: Option<(u32, String, String, Vec<String>)> = None;
+    let mut in_message = false;
     for line in out.lines() {
-        let line = line.trim();
-        if line.is_empty() {
+        let t = line.trim_end();
+        if let Some(rest) = t.strip_prefix("Revision") {
+            if let Some(prev) = cur.take() {
+                revs.push(prev);
+            }
+            in_message = false;
+            if let Ok(number) = rest.trim_start_matches([' ', ':']).trim().parse::<u32>() {
+                cur = Some((number, String::new(), String::new(), Vec::new()));
+            }
+        } else if let Some(c) = cur.as_mut() {
+            if let Some(rest) = t.strip_prefix("Signature") {
+                c.1 = rest.trim_start_matches([' ', ':']).trim().to_string();
+            } else if let Some(rest) = t.strip_prefix("Date") {
+                c.2 = rest.trim_start_matches([' ', ':']).trim().to_string();
+                in_message = true;
+            } else if in_message {
+                let trimmed = t.trim();
+                if !trimmed.is_empty() {
+                    c.3.push(trimmed.to_string());
+                }
+            }
+        }
+    }
+    if let Some(prev) = cur.take() {
+        revs.push(prev);
+    }
+    let mut out_revs = Vec::new();
+    for (number, id, date, msg_lines) in revs {
+        let metadata = revision_metadata(project_root, &id).unwrap_or_default();
+        out_revs.push(LoreRevision {
+            number,
+            id,
+            message: msg_lines.join("\n"),
+            date,
+            metadata,
+        });
+    }
+    Ok(out_revs)
+}
+
+/// 该 revision 的父 revision 签名（`revision info` 的 Parent 行；首条 revision 无父返回 None）
+pub fn revision_parent(project_root: &Path, revision: &str) -> Result<Option<String>> {
+    let out = run_lore(project_root, &["revision", "info", revision])?;
+    Ok(out.lines().find_map(|l| {
+        let l = l.trim();
+        l.strip_prefix("Parent")
+            .map(|s| s.trim_start_matches([' ', ':']).trim().to_string())
+    }))
+}
+
+/// 目录级导出：`repository dump` 解析文件树 → 逐文件 `file write` 到 dest（v1 export_entry 对应）。
+/// dump 文件行含 ` addr `，目录行以 `/` 结尾（含 ` child N`），仅解析前者。
+pub fn export_files(project_root: &Path, revision: &str, dest: &Path) -> Result<()> {
+    let out = run_lore(project_root, &["repository", "dump", "--revision", revision])?;
+    let mut written = 0usize;
+    for line in out.lines() {
+        if !line.contains(" addr ") {
             continue;
         }
-        let Some((num, msg)) = line.split_once(' ') else { continue };
-        let Ok(number) = num.parse::<u32>() else { continue };
-        let id = find_signature(project_root, number)?;
-        let metadata = revision_metadata(project_root, &id).unwrap_or_default();
-        revs.push(LoreRevision { number, id, message: msg.trim().to_string(), metadata });
+        let Some(path) = line.split_whitespace().next() else { continue };
+        if path.ends_with('/') {
+            continue;
+        }
+        let target = dest.join(path);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let out_path = target.to_string_lossy();
+        run_lore(
+            project_root,
+            &["file", "write", "--path", path, "--revision", revision, "--output", out_path.as_ref()],
+        )?;
+        written += 1;
     }
-    Ok(revs)
+    if written == 0 {
+        bail!("dump 中未解析到任何文件（revision {}）", revision);
+    }
+    Ok(())
+}
+
+/// 底层 diff：该 revision 中该文件相对其父 revision 的改动（unified diff 文本）。
+/// 首条 revision（无父）返回提示文本。
+pub fn file_diff(project_root: &Path, revision: &str, path: &str) -> Result<String> {
+    let Some(parent) = revision_parent(project_root, revision)? else {
+        return Ok("首次记录（无父版本，无改动差异）".to_string());
+    };
+    Ok(run_lore(
+        project_root,
+        &["file", "diff", path, "--source", &parent, "--target", revision],
+    )?)
 }
 
 pub fn status_lines(project_root: &Path) -> Result<Vec<LoreStatusLine>> {
@@ -270,5 +349,40 @@ mod tests {
         let lines = status_lines(&root).unwrap();
         assert!(lines.iter().any(|l| l.path == "a.txt"));
         assert!(lines.iter().any(|l| l.path == "web/b.txt"));
+    }
+
+    #[test]
+    fn test_export_files() {
+        require_server();
+        let root = tmp_root("export");
+        create_repo(&root).unwrap();
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        std::fs::write(root.join("a.txt"), "hello v1").unwrap();
+        std::fs::write(root.join("models/m.blend"), "blend1").unwrap();
+        commit(&root, "first", &[("kind", "user")]).unwrap();
+        let sig = revision_history(&root).unwrap()[0].id.clone();
+        let dest = tmp_root("export_dest");
+        export_files(&root, &sig, &dest).unwrap();
+        assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "hello v1");
+        assert_eq!(std::fs::read_to_string(dest.join("models/m.blend")).unwrap(), "blend1");
+    }
+
+    #[test]
+    fn test_file_diff() {
+        require_server();
+        let root = tmp_root("fdiff");
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        commit(&root, "first", &[("kind", "user")]).unwrap();
+        std::fs::write(root.join("a.txt"), "v2 changed").unwrap();
+        commit(&root, "second", &[("kind", "user")]).unwrap();
+        let hist = revision_history(&root).unwrap();
+        assert_eq!(hist.len(), 2);
+        assert!(!hist[0].date.is_empty());
+        let diff = file_diff(&root, &hist[0].id, "a.txt").unwrap();
+        assert!(diff.contains("---"));
+        assert!(diff.contains("+++"));
+        let first = file_diff(&root, &hist[1].id, "a.txt").unwrap();
+        assert!(first.is_empty() || first.contains("首次记录"));
     }
 }

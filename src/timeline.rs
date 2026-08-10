@@ -163,7 +163,8 @@ pub fn clear_rollback(project_root: &Path) -> Result<()> {
 }
 
 /// 从 revision history 重建展示缓存（web/timeline.json）。
-/// Task 3 骨架：files/preview/时间戳暂缺，Task 5 完善。marker 保留。
+/// 时间戳 = lore revision 的 Date（RFC2822 原样存）；files = 该 revision 相对其父的改动文件。
+/// 首条 revision（无父）files 取 dump 全量。任一解析失败 files 为空数组，不中断重建。
 pub fn rebuild_cache(project_root: &Path) -> Result<()> {
     let web = project_root.join(crate::hidden::WEB_DIR);
     let timeline_path = web.join("timeline.json");
@@ -178,10 +179,10 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
         .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
         .map(|r| TimelineEntry {
             id: r.id.clone(),
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: r.date.clone(),
             author: "lore".to_string(),
             message: r.message.clone(),
-            files: Vec::new(),
+            files: entry_files(project_root, &r.id),
             file_status: Vec::new(),
             preview: String::new(),
             tag: r.metadata.get("tag").cloned(),
@@ -197,6 +198,62 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
         rollback_marker,
     };
     write_timeline(&timeline_path, &timeline)
+}
+
+/// 该 revision 相对其父的改动文件列表（`revision diff <parent> --target <sig>` 状态行解析）。
+/// 首条 revision（无父）用 `repository dump` 列全部文件。容错：失败返回空数组。
+fn entry_files(project_root: &Path, revision: &str) -> Vec<String> {
+    let parent = crate::lore_backend::revision_parent(project_root, revision).unwrap_or(None);
+    let output = match &parent {
+        Some(p) => crate::lore_backend::run_lore(
+            project_root,
+            &["revision", "diff", p, "--target", revision],
+        ),
+        None => crate::lore_backend::run_lore(
+            project_root,
+            &["repository", "dump", "--revision", revision],
+        ),
+    };
+    match (output, parent) {
+        (Ok(out), Some(_)) => parse_diff_paths(&out),
+        (Ok(out), None) => parse_dump_paths(&out),
+        _ => Vec::new(),
+    }
+}
+
+fn parse_diff_paths(out: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|l| {
+            let t = l.trim();
+            let mut chars = t.chars();
+            let status = chars.next()?;
+            if !matches!(status, 'A' | 'M' | 'D') {
+                return None;
+            }
+            let rest = t[status.len_utf8()..].trim();
+            if rest.is_empty() {
+                None
+            } else {
+                Some(rest.to_string())
+            }
+        })
+        .collect()
+}
+
+fn parse_dump_paths(out: &str) -> Vec<String> {
+    out.lines()
+        .filter_map(|l| {
+            if !l.contains(" addr ") {
+                return None;
+            }
+            let path = l.split_whitespace().next()?;
+            if path.ends_with('/') {
+                None
+            } else {
+                Some(path.to_string())
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -375,6 +432,39 @@ mod tests {
         assert_eq!(t.entries[0].id, "second");
 
         std::fs::remove_file(&path)?;
+        Ok(())
+    }
+
+    fn require_server() {
+        if !crate::lore_backend::server_available() {
+            panic!("loreserver 未运行：请先启动 loreserver.exe（demo 模式）");
+        }
+    }
+
+    fn tmp_root(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("keinestamp_tl_{}_{}", name, std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn test_rebuild_cache_from_lore_history() -> Result<()> {
+        require_server();
+        let root = tmp_root("rebuild");
+        crate::lore_backend::create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "1").unwrap();
+        std::fs::write(root.join("b.txt"), "2").unwrap();
+        crate::lore_project::record(&root, "first", None, &vec!["web/".to_string()]).unwrap();
+        std::fs::write(root.join("a.txt"), "3").unwrap();
+        crate::lore_project::record(&root, "second", None, &vec!["web/".to_string()]).unwrap();
+
+        rebuild_cache(&root)?;
+        let timeline = read_timeline(&timeline_cache_path(&root))?;
+        assert_eq!(timeline.entries.len(), 2);
+        assert_eq!(timeline.entries[0].message, "second");
+        assert!(!timeline.entries[0].files.is_empty());
+        assert!(!timeline.entries[0].timestamp.is_empty());
         Ok(())
     }
 }
