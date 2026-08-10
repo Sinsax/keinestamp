@@ -17,6 +17,8 @@ pub struct AppConfig {
     pub auto_connect: bool,
     #[serde(default)]
     pub close_to_tray: Option<bool>,
+    #[serde(default)]
+    pub hidden_paths: Option<Vec<String>>,
 }
 
 impl AppConfig {
@@ -64,6 +66,7 @@ impl Default for AppConfig {
             deploy_token: None,
             auto_connect: false,
             close_to_tray: None,
+            hidden_paths: None,
         }
     }
 }
@@ -176,7 +179,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, close_to_tray: Some(true) };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, auto_connect: false, close_to_tray: Some(true), hidden_paths: None };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);

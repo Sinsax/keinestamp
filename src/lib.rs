@@ -17,3 +17,6 @@ pub mod serve;
 pub mod timeline;
 
 pub mod lore_backend;
+
+pub mod hidden;
+pub mod lore_project;

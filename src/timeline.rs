@@ -121,6 +121,37 @@ pub fn get_entry<'a>(timeline: &'a Timeline, id: &str) -> Option<&'a TimelineEnt
         .find(|e| e.id == id || e.id.starts_with(id))
 }
 
+/// 从 revision history 重建展示缓存（web/timeline.json）。
+/// Task 3 骨架：files/preview/时间戳暂缺，Task 5 完善。
+pub fn rebuild_cache(project_root: &Path) -> Result<()> {
+    let web = project_root.join(crate::hidden::WEB_DIR);
+    let timeline_path = web.join("timeline.json");
+    let hist = crate::lore_backend::revision_history(project_root)?;
+    let entries: Vec<TimelineEntry> = hist
+        .iter()
+        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+        .map(|r| TimelineEntry {
+            id: r.id.clone(),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+            author: "lore".to_string(),
+            message: r.message.clone(),
+            files: Vec::new(),
+            file_status: Vec::new(),
+            preview: String::new(),
+            tag: r.metadata.get("tag").cloned(),
+            milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
+        })
+        .collect();
+    let timeline = Timeline {
+        project: project_root
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        entries,
+    };
+    write_timeline(&timeline_path, &timeline)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

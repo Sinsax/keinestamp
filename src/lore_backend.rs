@@ -68,6 +68,22 @@ pub fn create_repo(project_root: &Path) -> Result<()> {
 
 pub fn commit(project_root: &Path, message: &str, metadata: &[(&str, &str)]) -> Result<String> {
     run_lore(project_root, &["stage", "--scan", "."])?;
+    commit_staged(project_root, message, metadata)
+}
+
+pub fn commit_files(project_root: &Path, message: &str, metadata: &[(&str, &str)], paths: &[String]) -> Result<String> {
+    if paths.is_empty() {
+        return commit(project_root, message, metadata);
+    }
+    let mut args: Vec<&str> = vec!["stage"];
+    for p in paths {
+        args.push(p);
+    }
+    run_lore(project_root, &args)?;
+    commit_staged(project_root, message, metadata)
+}
+
+fn commit_staged(project_root: &Path, message: &str, metadata: &[(&str, &str)]) -> Result<String> {
     if !metadata.is_empty() {
         let _ = run_lore(project_root, &["revision", "metadata", "clear"]);
         for (k, v) in metadata {
