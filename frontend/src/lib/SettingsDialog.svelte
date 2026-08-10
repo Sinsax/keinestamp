@@ -30,6 +30,10 @@
   let testing = $state(false)
   let connectStatus = $state<'none' | 'ok' | 'fail'>('none')
   let savedFeedback = $state(false)
+  let hiddenPaths = $state<string[]>([])
+  let hiddenInput = $state('')
+
+  const PRESET_HIDDEN = new Set(['web/', '.keinestamp.toml'])
 
   onMount(() => {
     (async () => {
@@ -41,6 +45,8 @@
         closeAction = close === false ? 'quit' : 'tray'
       } catch { /* ignore */ }
     })()
+
+    if (path) loadHidden()
 
     ;(async () => {
       try {
@@ -144,6 +150,32 @@
     saving = false
   }
 
+  async function loadHidden() {
+    if (!path) return
+    try {
+      const info = await api.getIgnoreInfo(path)
+      hiddenPaths = info.ignored
+    } catch { /* ignore */ }
+  }
+
+  async function addHidden() {
+    const p = hiddenInput.trim()
+    if (!p || !path) return
+    try {
+      await api.addToGitignore(path, p)
+      hiddenInput = ''
+      await loadHidden()
+    } catch { /* ignore */ }
+  }
+
+  async function removeHidden(p: string) {
+    if (!path) return
+    try {
+      await api.removeIgnore(path, p)
+      await loadHidden()
+    } catch { /* ignore */ }
+  }
+
   interface BlenderProgress {
     phase: string
     message: string
@@ -238,6 +270,38 @@
     </div>
 
     <div class="section">
+      <div class="section-title">隐藏路径</div>
+      <div class="field">
+        <span class="hint">隐藏的文件不参与记录（web/ 与 .keinestamp.toml 为预设，不可移除）</span>
+        <div class="hidden-list">
+          {#each hiddenPaths as p}
+            <div class="hidden-row">
+              <span class="hidden-path" title={p}>{p}</span>
+              <button
+                class="hidden-del"
+                disabled={PRESET_HIDDEN.has(p)}
+                title={PRESET_HIDDEN.has(p) ? '预设隐藏，不可移除' : '移除隐藏'}
+                onclick={() => removeHidden(p)}
+              >×</button>
+            </div>
+          {/each}
+          {#if hiddenPaths.length === 0}
+            <span class="hidden-empty">无隐藏路径</span>
+          {/if}
+        </div>
+        <div class="input-row">
+          <input
+            type="text"
+            bind:value={hiddenInput}
+            placeholder="输入路径，如 cache/ 或 *.tmp"
+            onkeydown={(e) => { if (e.key === 'Enter') addHidden() }}
+          />
+          <button class="connect-btn" onclick={addHidden} disabled={!hiddenInput.trim()}>添加</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
       <div class="section-title">通用</div>
       <div class="field">
         <label for="sd-close-action">关闭窗口时</label>
@@ -316,5 +380,43 @@
   .conn-result { display: block; font-size: 11px; margin-top: 4px; }
   .conn-result.ok { color: var(--success); }
   .conn-result.fail { color: var(--error); }
+  .hidden-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 8px 0;
+    max-height: 180px;
+    overflow-y: auto;
+  }
+  .hidden-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 4px 10px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 12px;
+  }
+  .hidden-path {
+    font-family: var(--mono, monospace);
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .hidden-del {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 0 4px;
+    line-height: 1;
+  }
+  .hidden-del:hover:not(:disabled) { color: var(--error); }
+  .hidden-del:disabled { opacity: 0.3; cursor: default; }
+  .hidden-empty { font-size: 11px; color: var(--text-dim); }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 </style>

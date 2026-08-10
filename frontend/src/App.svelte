@@ -13,10 +13,9 @@
   import CloseBehaviorDialog from './lib/CloseBehaviorDialog.svelte'
   import InputDialog from './lib/InputDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
-  import ConflictDialog from './lib/ConflictDialog.svelte'
   import BusyOverlay from './lib/BusyOverlay.svelte'
   import Toast from './lib/Toast.svelte'
-  import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState, RollbackChoice } from './types'
+  import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState } from './types'
   import * as api from './api'
   import { openFolder } from './api'
   import { open } from '@tauri-apps/plugin-dialog'
@@ -56,8 +55,6 @@
   let commitSelection = $state<string[] | null>(null)
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false })
   let rollbackBusy = $state(false)
-  let conflictFiles = $state<string[] | null>(null)
-  let resolvingConflict = $state(false)
   let deploying = $state(false)
   let recording = $state(false)
   let busyText = $state('')
@@ -388,10 +385,7 @@
     } catch { /* ignore */ }
   }
 
-  const canRestore = $derived(rollbackState.head_matches)
-
-  async function handleRollback(entry: TimelineEntry) {
-    if (!activePath || rollbackBusy) return
+  async function handleRollback(entry: TimelineEntry) {    if (!activePath || rollbackBusy) return
     const wasRolledBack = !!rollbackState.rollback_point
     rollbackBusy = true
     busyText = '回退中...'
@@ -406,12 +400,7 @@
       await loadProject(activePath)
       await refreshRollbackState()
     } catch (e: any) {
-      const msg = String(e)
-      if (msg.startsWith('CONFLICT|')) {
-        await loadConflictFiles()
-      } else {
-        pushToast(`回退失败: ${msg}`, 'error')
-      }
+      pushToast(`回退失败: ${e}`, 'error')
     }
     busyText = ''
     rollbackBusy = false
@@ -427,40 +416,10 @@
       await loadProject(activePath)
       await refreshRollbackState()
     } catch (e: any) {
-      const msg = String(e)
-      if (msg.startsWith('CONFLICT|')) {
-        await loadConflictFiles()
-      } else {
-        pushToast(`恢复失败: ${msg}`, 'error')
-      }
+      pushToast(`恢复失败: ${e}`, 'error')
     }
     busyText = ''
     rollbackBusy = false
-  }
-
-  async function loadConflictFiles() {
-    if (!activePath) return
-    try {
-      conflictFiles = await api.getRollbackConflicts(activePath)
-    } catch (e: any) {
-      pushToast(`读取冲突失败: ${e}`, 'error')
-      conflictFiles = null
-    }
-  }
-
-  async function handleResolveConflict(choices: RollbackChoice[]) {
-    if (!activePath) return
-    resolvingConflict = true
-    try {
-      await api.resolveRollbackConflicts(activePath, choices)
-      pushToast('冲突已解决，已恢复', 'success')
-      conflictFiles = null
-      await loadProject(activePath)
-      await refreshRollbackState()
-    } catch (e: any) {
-      pushToast(`完成恢复失败: ${e}`, 'error')
-    }
-    resolvingConflict = false
   }
 
   async function handleExportEntry(entry: TimelineEntry) {
@@ -687,16 +646,7 @@
 <DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} {canRestore} busy={recording} progress={commitProgressMsg} />
-{/if}
-
-{#if conflictFiles}
-  <ConflictDialog
-    conflicts={conflictFiles}
-    busy={resolvingConflict}
-    onResolve={handleResolveConflict}
-    onCancel={() => (conflictFiles = null)}
-  />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} busy={recording} progress={commitProgressMsg} />
 {/if}
 
 {#if busyText}

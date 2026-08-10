@@ -4,40 +4,35 @@ export interface StatusFile {
   y: string
 }
 
-function unquoteC(p: string): string {
-  if (p.length < 2 || p[0] !== '"' || p[p.length - 1] !== '"') return p
-  const s = p.slice(1, -1)
-  return s.replace(/\\(?:(["\\abtnr])|(\d{3}))/g, (m, c, o) => {
-    if (o) return String.fromCharCode(parseInt(o, 8))
-    switch (c) {
-      case 'a': return '\x07'
-      case 'b': return '\b'
-      case 't': return '\t'
-      case 'n': return '\n'
-      case 'r': return '\r'
-      default: return c
-    }
-  })
-}
-
+// Tauri status 输出格式（lore 后端）：
+//   `未提交的修改：` 节头 + `  {code} {path}` 行，code ∈ A/M/D/??
 export function parseStatus(output: string): StatusFile[] {
-  return output
-    .split('\n')
-    .filter((l) => l.trim().length > 0)
-    .map((l) => {
-      const x = l[0] ?? ' '
-      const y = l[1] ?? ' '
-      let path = l.length > 3 ? l.substring(3) : ''
-      if (x === 'R' || y === 'R') {
-        const arrow = path.lastIndexOf(' -> ')
-        if (arrow >= 0) path = path.slice(arrow + 4)
+  const result: StatusFile[] = []
+  let inChanges = false
+  for (const raw of output.split('\n')) {
+    const l = raw.trimEnd()
+    if (!inChanges) {
+      if (l.includes('未提交的修改')) {
+        inChanges = true
       }
-      return { x, y, path: unquoteC(path.trim()) }
-    })
+      continue
+    }
+    if (l.trim() === '') continue
+    const m = l.match(/^  (\S+)\s+(.+)$/)
+    if (!m) continue
+    const code = m[1]
+    const path = m[2].trim()
+    if (!path || path === '') continue
+    result.push({ x: code === '??' ? '?' : code, y: ' ', path })
+  }
+  return result
 }
 
 export function statusLabel(x: string, y: string): string {
-  if (x !== ' ') return 'staged'
+  if (x === 'M') return 'modified'
+  if (x === 'A') return 'added'
+  if (x === 'D') return 'deleted'
+  if (x === '?') return 'untracked'
   if (y === 'M') return 'modified'
   if (y === 'A') return 'added'
   if (y === 'D') return 'deleted'
@@ -46,11 +41,10 @@ export function statusLabel(x: string, y: string): string {
 }
 
 export function statusColor(x: string, y: string): string {
-  if (x !== ' ') {
-    if (x === 'M') return 'var(--accent)'
-    if (x === 'A') return 'var(--success)'
-    if (x === 'D') return 'var(--error)'
-  }
+  if (x === 'M') return 'var(--warning)'
+  if (x === 'A') return 'var(--success)'
+  if (x === 'D') return 'var(--error)'
+  if (x === '?') return 'var(--text-dim)'
   if (y === 'M') return 'var(--warning)'
   if (y === 'A') return 'var(--success)'
   if (y === 'D') return 'var(--error)'
@@ -61,8 +55,8 @@ export function statusColor(x: string, y: string): string {
 export function statusIconType(x: string, y: string): string {
   if (x === 'A' || y === 'A') return 'added'
   if (x === 'D' || y === 'D') return 'deleted'
-  if (x !== ' ' || y === 'M') return 'modified'
-  if (y === '?') return 'untracked'
+  if (x === 'M' || y === 'M') return 'modified'
+  if (x === '?' || y === '?') return 'untracked'
   return 'unknown'
 }
 
