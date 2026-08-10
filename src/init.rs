@@ -8,8 +8,6 @@ pub fn init_project(project_root: &Path) -> Result<()> {
 
     match project_type {
         detect::ProjectType::Initialized(mut meta) => {
-            ensure_project_gitignore(project_root)?;
-            ensure_project_gitattributes(project_root)?;
             ensure_web_structure(&meta.web_root)?;
             if meta.project_id.is_none() {
                 meta.project_id = Some(config::generate_project_id());
@@ -30,26 +28,17 @@ fn perform_init(project_root: &Path) -> Result<()> {
     std::fs::create_dir_all(project_root)
         .with_context(|| format!("failed to create project directory {:?}", project_root))?;
 
-    let project_git = project_root.join(".git");
-    let fresh_git = !project_git.exists();
-    if fresh_git {
-        git_init(project_root, "project")?;
-    } else {
-        eprintln!("Project git repository already exists, skipping init");
+    // 创建 Lore 仓库（已存在则跳过；Lore 空提交会被拒，故不做初始提交，
+    // 时间线从首次用户 record 开始）
+    if !crate::lore_backend::repo_exists(project_root) {
+        crate::lore_backend::create_repo(project_root)
+            .with_context(|| format!("failed to create lore repository at {:?}", project_root))?;
     }
 
-    ensure_project_gitignore(project_root)?;
-    ensure_project_gitattributes(project_root)?;
-
-    if fresh_git {
-        // 创建 init 提交（与 GUI init 对齐），保证首条记录有父提交可回退到初始化状态
-        crate::git_project::ensure_git_user(project_root)?;
-        crate::git_project::stage_files_and_commit(
-            project_root,
-            &[".gitignore", ".gitattributes"],
-            "init",
-        )?;
-    }
+    // 隐藏列表初始化（web/ 与 .keinestamp.toml 预设由 save_hidden 强制保留，
+    // 不会覆盖用户已有自定义隐藏项）
+    let hidden = crate::hidden::load_hidden(project_root);
+    crate::hidden::save_hidden(project_root, &hidden)?;
 
     let meta = MetaConfig::new(project_root.to_path_buf());
     let web_root = &meta.web_root;
@@ -90,111 +79,6 @@ fn ensure_web_structure(web_root: &Path) -> Result<()> {
     Ok(())
 }
 
-const GITATTRIBUTES: &str = r#"* text=auto eol=lf
-
-# 3D 文件
-*.blend filter=lfs diff=lfs merge=lfs -text
-*.fbx filter=lfs diff=lfs merge=lfs -text
-*.obj filter=lfs diff=lfs merge=lfs -text
-*.glb filter=lfs diff=lfs merge=lfs -text
-*.gltf filter=lfs diff=lfs merge=lfs -text
-*.mtl filter=lfs diff=lfs merge=lfs -text
-*.pmx filter=lfs diff=lfs merge=lfs -text
-*.vrm filter=lfs diff=lfs merge=lfs -text
-*.warudo filter=lfs diff=lfs merge=lfs -text
-*.vroid filter=lfs diff=lfs merge=lfs -text
-
-# sp贴图工程
-*.spp filter=lfs diff=lfs merge=lfs -text
-
-# 图片文件
-*.png filter=lfs diff=lfs merge=lfs -text
-*.psd filter=lfs diff=lfs merge=lfs -text
-*.jpg filter=lfs diff=lfs merge=lfs -text
-*.jpeg filter=lfs diff=lfs merge=lfs -text
-*.tga filter=lfs diff=lfs merge=lfs -text
-*.bmp filter=lfs diff=lfs merge=lfs -text
-*.gif filter=lfs diff=lfs merge=lfs -text
-*.tiff filter=lfs diff=lfs merge=lfs -text
-*.exr filter=lfs diff=lfs merge=lfs -text
-*.dds filter=lfs diff=lfs merge=lfs -text
-*.hdr filter=lfs diff=lfs merge=lfs -text
-*.svg filter=lfs diff=lfs merge=lfs -text
-*.pdf filter=lfs diff=lfs merge=lfs -text
-*.spa filter=lfs diff=lfs merge=lfs -text
-
-# 视频文件
-*.mp4 filter=lfs diff=lfs merge=lfs -text
-*.mov filter=lfs diff=lfs merge=lfs -text
-*.avi filter=lfs diff=lfs merge=lfs -text
-*.webm filter=lfs diff=lfs merge=lfs -text
-*.mkv filter=lfs diff=lfs merge=lfs -text
-
-# 音频文件
-*.wav filter=lfs diff=lfs merge=lfs -text
-*.mp3 filter=lfs diff=lfs merge=lfs -text
-*.ogg filter=lfs diff=lfs merge=lfs -text
-*.m4a filter=lfs diff=lfs merge=lfs -text
-*.flac filter=lfs diff=lfs merge=lfs -text
-
-# 压缩包
-*.zip filter=lfs diff=lfs merge=lfs -text
-*.rar filter=lfs diff=lfs merge=lfs -text
-*.7z filter=lfs diff=lfs merge=lfs -text
-*.tar filter=lfs diff=lfs merge=lfs -text
-
-# Unity包
-*.unitypackage filter=lfs diff=lfs merge=lfs -text
-
-# 动画文件
-*.vmd filter=lfs diff=lfs merge=lfs -text
-"#;
-
-fn ensure_project_gitattributes(project_root: &Path) -> Result<()> {
-    let gitattributes_path = project_root.join(".gitattributes");
-    if !gitattributes_path.exists() {
-        std::fs::write(&gitattributes_path, GITATTRIBUTES)
-            .with_context(|| format!("failed to write {:?}", gitattributes_path))?;
-    }
-    Ok(())
-}
-
-fn ensure_project_gitignore(project_root: &Path) -> Result<()> {
-    let gitignore_path = project_root.join(".gitignore");
-    let mut content = String::new();
-    if gitignore_path.exists() {
-        content = std::fs::read_to_string(&gitignore_path)?;
-    }
-    for pattern in &["web/", ".keinestamp.toml"] {
-        if !content.contains(pattern) {
-            if !content.is_empty() && !content.ends_with('\n') {
-                content.push('\n');
-            }
-            content.push_str(pattern);
-            content.push('\n');
-        }
-    }
-    if !gitignore_path.exists() || content != std::fs::read_to_string(&gitignore_path).unwrap_or_default() {
-        std::fs::write(&gitignore_path, &content)?;
-    }
-    Ok(())
-}
-
-fn git_init(path: &Path, label: &str) -> Result<()> {
-    let output = crate::process_util::hide_console(std::process::Command::new("git"))
-        .args(["init"])
-        .current_dir(path)
-        .output()
-        .with_context(|| format!("failed to execute git init for {} at {:?}", label, path))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git init for {} failed: {}", label, stderr);
-    }
-
-    Ok(())
-}
-
 fn write_timeline_json(web_root: &Path) -> Result<()> {
     let timeline = serde_json::json!({
         "project": "",
@@ -229,8 +113,14 @@ fn write_index_html(web_root: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn require_server() {
+        if !crate::lore_backend::server_available() {
+            panic!("loreserver 未运行：请先启动 loreserver.exe（demo 模式）");
+        }
+    }
+
     fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("keinestamp_init_{}", name));
+        let dir = std::env::temp_dir().join(format!("keinestamp_init_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -238,6 +128,7 @@ mod tests {
 
     #[test]
     fn test_init_fresh() -> Result<()> {
+        require_server();
         let dir = tmp_dir("fresh");
         std::fs::remove_dir_all(&dir)?;
         std::fs::create_dir_all(&dir)?;
@@ -245,7 +136,10 @@ mod tests {
         init_project(&dir)?;
 
         assert!(config::meta_path(&dir).exists());
-        assert!(dir.join(".git").exists());
+        assert!(dir.join(".lore").exists(), "init 应创建 lore 仓库");
+        assert!(crate::lore_backend::repo_exists(&dir));
+        assert!(!dir.join(".gitattributes").exists(), "不应生成 .gitattributes（无 LFS）");
+        assert!(!dir.join(".git").exists(), "不应创建 git 仓库");
         assert!(dir.join("web").exists());
         assert!(!dir.join("web/.git").exists(), "web 产物并入主仓库，不应有独立 git 仓库");
         assert!(dir.join("web").join("timeline.json").exists());
@@ -257,37 +151,14 @@ mod tests {
 
     #[test]
     fn test_init_existing_with_blend() -> Result<()> {
+        require_server();
         let dir = tmp_dir("existing_with_blend");
         std::fs::write(dir.join("test.blend"), b"")?;
 
         init_project(&dir)?;
 
         assert!(config::meta_path(&dir).exists());
-        assert!(dir.join(".git").exists());
-        assert!(dir.join("web").exists());
-        assert!(!dir.join("web/.git").exists());
-
-        std::fs::remove_dir_all(&dir)?;
-        Ok(())
-    }
-
-    #[test]
-    fn test_init_existing_with_git() -> Result<()> {
-        let dir = tmp_dir("existing_with_git");
-        std::fs::write(dir.join("test.blend"), b"")?;
-
-        crate::process_util::hide_console(std::process::Command::new("git"))
-            .args(["init"])
-            .current_dir(&dir)
-            .output()?;
-
-        let git_dir_before = dir.join(".git");
-        assert!(git_dir_before.exists());
-
-        init_project(&dir)?;
-
-        assert!(git_dir_before.exists());
-        assert!(config::meta_path(&dir).exists());
+        assert!(dir.join(".lore").exists());
         assert!(dir.join("web").exists());
         assert!(!dir.join("web/.git").exists());
 
@@ -297,6 +168,7 @@ mod tests {
 
     #[test]
     fn test_init_repeat_is_idempotent() -> Result<()> {
+        require_server();
         let dir = tmp_dir("repeat");
 
         init_project(&dir)?;
@@ -318,6 +190,7 @@ mod tests {
 
     #[test]
     fn test_ensure_web_structure_repairs() -> Result<()> {
+        require_server();
         let dir = tmp_dir("ensure_web");
 
         init_project(&dir)?;

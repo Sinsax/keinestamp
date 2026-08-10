@@ -23,6 +23,10 @@ pub fn detect_project(path: &Path) -> Result<ProjectType> {
         return Ok(ProjectType::Initialized(meta));
     }
 
+    if crate::lore_backend::repo_exists(path) {
+        return Ok(ProjectType::Existing);
+    }
+
     let has_blend = has_blend_files(path);
     if has_blend {
         Ok(ProjectType::Existing)
@@ -89,6 +93,16 @@ mod tests {
         std::fs::write(dir.join("test.txt"), b"hello")?;
         let pt = detect_project(&dir)?;
         assert!(matches!(pt, ProjectType::Fresh));
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_detect_existing_lore_repo_without_meta() -> Result<()> {
+        let dir = tmp_dir("existing_lore");
+        std::fs::create_dir_all(dir.join(".lore"))?;
+        let pt = detect_project(&dir)?;
+        assert!(matches!(pt, ProjectType::Existing));
         std::fs::remove_dir_all(&dir)?;
         Ok(())
     }

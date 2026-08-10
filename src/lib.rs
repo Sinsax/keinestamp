@@ -3,8 +3,6 @@ pub mod blender_download;
 pub mod blender_render;
 pub mod config;
 pub mod detect;
-pub mod git_helpers;
-pub mod git_project;
 pub mod html_gen;
 pub mod init;
 pub mod main_helpers;

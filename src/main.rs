@@ -22,12 +22,6 @@ enum Commands {
 
         #[arg(short, long)]
         message: String,
-
-        #[arg(short, long)]
-        tag: Option<String>,
-
-        #[arg(long, help = "Skip 3D preview generation")]
-        no_preview: bool,
     },
 
     Push {
@@ -128,8 +122,8 @@ fn main() -> anyhow::Result<()> {
             }
             result
         }
-        Some(Commands::Record { path, message, tag, no_preview }) => {
-            let result = cmd_record(&path, &message, tag.as_deref(), no_preview);
+        Some(Commands::Record { path, message }) => {
+            let result = cmd_record(&path, &message);
             if result.is_ok() {
                 keinestamp::recent::RecentProjects::add_path(&path);
             }
@@ -175,255 +169,153 @@ fn load_meta(path: &Path) -> anyhow::Result<keinestamp::config::MetaConfig> {
     keinestamp::config::read_meta(&meta_path)
 }
 
-fn cmd_record(path: &Path, message: &str, tag: Option<&str>, no_preview: bool) -> anyhow::Result<()> {
+fn cmd_record(path: &Path, message: &str) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
+    let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
 
-    if let Ok(rs) = keinestamp::git_project::get_rollback_state(&meta.project_root) {
-        if rs.rollback_point.is_some() && rs.head_matches {
+    if let Ok(rs) = keinestamp::lore_project::rollback_state(&meta.project_root) {
+        if rs.active {
             eprintln!("⚠️ 注意：当前处于回退状态，记录后将顶替被回退的记录（原记录被新记录取代）");
         }
     }
 
-    keinestamp::git_project::ensure_git_user(&meta.project_root)?;
-    keinestamp::git_project::lfs_auto_configure(&meta.project_root)?;
+    let rev = keinestamp::lore_project::record(&meta.project_root, message, None, &hidden)?;
+    // 回退状态下记录 = 顶替，成功后清除回退标记
+    let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
 
-    // 回退状态下记录 = 顶替回退点及之后的记录（HEAD 移回回退记录的父提交再提交）
-    let rollback_point = keinestamp::git_project::get_rollback_point_hash(&meta.project_root)?;
-    if let Some(ref point) = rollback_point {
-        eprintln!("[debug] cmd_record: rollback state, reset --soft to {}^", point);
-        keinestamp::git_project::reset_soft_to(&meta.project_root, &format!("{}^", point))?;
-    }
-
-    let hash = keinestamp::git_project::add_and_commit(&meta.project_root, message)?;
-
-    if let Some(ref point) = rollback_point {
-        keinestamp::timeline::remove_entries_after(&meta.web_root.join("timeline.json"), point)?;
-    }
-
-    let short_hash = &hash[..7.min(hash.len())];
-    let timestamp = chrono::Utc::now().to_rfc3339();
-
-    let changed_files = keinestamp::git_helpers::get_changed_files(&meta.project_root, &hash)?;
-    let changed_files_status = keinestamp::git_helpers::get_changed_files_status(&meta.project_root, &hash)?;
-    let timeline_path = meta.web_root.join("timeline.json");
-
-    let blender_path_buf = if !no_preview && keinestamp::git_helpers::has_blend_files(
-        &keinestamp::git_helpers::get_changed_files(&meta.project_root, &hash)?,
-    ) {
-        match keinestamp::blender_download::ensure_blender() {
-            Ok(path) => Some(path),
-            Err(e) => {
-                eprintln!("Blender 自动下载失败: {}，尝试使用 PATH 中的 blender", e);
-                keinestamp::app_config::get_blender_path()
-            }
-        }
-    } else {
-        keinestamp::app_config::get_blender_path()
-    };
-    let blender_path: Option<&Path> = blender_path_buf.as_deref();
-
-    let preview_path = if !no_preview && keinestamp::git_helpers::has_blend_files(&changed_files) {
-        let glb_config = keinestamp::blender_render::RenderConfig {
-            output_dir: meta.web_root.join("previews_glb"),
-            ..Default::default()
-        };
-        let mut glb_names: Vec<String> = Vec::new();
-        for bf in &changed_files {
-            if bf.ends_with(".blend") {
-                let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-                let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
-                let bpath = meta.project_root.join(bf);
-                match keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
-                    Ok(_) => glb_names.push(glb_name),
-                    Err(e) => eprintln!("GLB 导出跳过: {}", e),
-                }
-            }
-        }
-        keinestamp::blender_render::clean_old_glb_previews(
-            &meta.web_root.join("previews_glb"),
-            glb_config.max_previews,
-        )?;
-        glb_names
-            .iter()
-            .map(|n| format!("previews_glb/{}.glb", n))
-            .find(|rel| meta.web_root.join(rel).exists())
-    } else {
-        None
-    };
-
-    let entry = keinestamp::timeline::TimelineEntry {
-        id: hash.clone(),
-        timestamp,
-        author: keinestamp::git_helpers::get_git_author(&meta.project_root),
-        message: message.to_string(),
-        files: changed_files.clone(),
-        file_status: changed_files_status.clone(),
-        preview: preview_path.unwrap_or_default(),
-        tag: tag.map(|s| s.to_string()),
-        milestone: false,
-    };
-
-    keinestamp::timeline::append_entry(&timeline_path, entry)?;
-
-    let project_name = meta.project_root.file_name().map(|s| s.to_string_lossy().to_string()).unwrap_or_default();
-
-    let mut timeline = keinestamp::timeline::read_timeline(&timeline_path)?;
-    timeline.project = project_name.clone();
-    keinestamp::timeline::write_timeline(&timeline_path, &timeline)?;
-
-    keinestamp::html_gen::generate_index_html(
-        &meta.web_root,
-        &meta.project_root,
-        &timeline,
-        &project_name,
-    )?;
-
-    let _ = keinestamp::lore_backend::commit_web(&meta.project_root);
-
-    let _ = keinestamp::git_project::clear_rollback(&meta.project_root);
-
-    println!("已记录 {} — {}", short_hash, message);
+    let short_hash = &rev[..7.min(rev.len())];
+    println!("已提交 {} — {}", short_hash, message);
     Ok(())
 }
 
 fn cmd_push(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    if keinestamp::git_project::has_remote(&meta.project_root) {
-        keinestamp::git_project::push(&meta.project_root)?;
-        println!("已推送到远端");
-    } else {
-        eprintln!("[debug] cmd_push: no git remote, skipping git push");
-    }
-
+    keinestamp::lore_backend::run_lore(&meta.project_root, &["push"])
+        .map_err(|e| anyhow::anyhow!("推送失败: {}", e))?;
+    println!("已推送到远端");
     Ok(())
 }
 
 fn cmd_pull(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    if keinestamp::git_project::has_remote(&meta.project_root) {
-        keinestamp::git_project::pull(&meta.project_root)?;
-        println!("已从远端拉取");
-    } else {
-        println!("没有配置 git 远端，跳过拉取");
-    }
-
+    keinestamp::lore_backend::run_lore(&meta.project_root, &["sync"])
+        .map_err(|e| anyhow::anyhow!("同步失败: {}", e))?;
+    println!("已从远端拉取");
     Ok(())
 }
 
 fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
-    let timeline_path = meta.web_root.join("timeline.json");
+    let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
+
+    let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
     let tl = keinestamp::timeline::read_timeline(&timeline_path)?;
     let full = keinestamp::timeline::get_entry(&tl, entry)
         .map(|e| e.id.clone())
         .ok_or_else(|| anyhow::anyhow!("记录不存在: {}", entry))?;
-    match keinestamp::git_project::rollback(&meta.project_root, &full) {
-        Ok(_) => {}
-        Err(e) => {
-            if let Ok(files) = keinestamp::git_project::get_rollback_conflicts(&meta.project_root) {
-                if !files.is_empty() {
-                    println!("自动恢复回退前状态时存在冲突，以下文件需要处理：");
-                    for f in &files {
-                        println!("  {}", f);
-                    }
-                    println!("请在 GUI 中完成恢复（文件二选一），再重新回退");
-                    return Ok(());
-                }
-            }
-            return Err(e);
-        }
+
+    // 回退状态下再次回退：先撤销上次回退，再回退到新目标（恢复目标始终为首次回退前）
+    if keinestamp::lore_project::rollback_state(&meta.project_root)?.active {
+        keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden)
+            .map_err(|e| anyhow::anyhow!("先撤销上次回退失败: {}", e))?;
     }
-    println!("已回退到记录 {} 之前（文件保留该记录的版本，可修改后记录；可用 restore 恢复）", &full[..7.min(full.len())]);
+
+    keinestamp::lore_project::rollback(&meta.project_root, &full, &hidden)?;
+    println!("已回退到记录 {}（可用 restore 恢复）", &full[..7.min(full.len())]);
     Ok(())
 }
 
 fn cmd_restore(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
-    let st = keinestamp::git_project::get_rollback_state(&meta.project_root)?;
-    if st.rollback_point.is_none() {
+    let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
+
+    let st = keinestamp::lore_project::rollback_state(&meta.project_root)?;
+    if !st.active {
         anyhow::bail!("没有可恢复的回退");
     }
-    if !st.head_matches {
-        anyhow::bail!("回退后已有新记录，无法恢复");
-    }
-    match keinestamp::git_project::restore_rollback(&meta.project_root) {
-        Ok(_) => {
-            println!("已恢复回退前的状态");
-            Ok(())
-        }
-        Err(e) => {
-            if let Ok(files) = keinestamp::git_project::get_rollback_conflicts(&meta.project_root) {
-                if !files.is_empty() {
-                    println!("恢复存在冲突，以下文件需要处理：");
-                    for f in &files {
-                        println!("  {}", f);
-                    }
-                    println!("请在 GUI 中完成恢复（文件二选一），或手动处理冲突后运行 `git stash drop` 并 `git update-ref -d refs/keinestamp/rollback refs/keinestamp/rollback-point` 结束回退状态（推荐在 GUI 中完成恢复）");
-                    return Ok(());
-                }
-            }
-            Err(e)
-        }
-    }
+    keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden)?;
+    println!("已恢复回退前的状态");
+    Ok(())
 }
 
 fn cmd_status(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
+    let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
 
-    let output = keinestamp::git_project::status(&meta.project_root)?;
-    if output.trim().is_empty() {
+    let files = keinestamp::lore_project::changed_files(&meta.project_root, &hidden)?;
+    if files.is_empty() {
         println!("工作区干净，没有未提交的修改");
     } else {
         println!("未提交的修改：");
-        for line in output.lines() {
-            println!("  {}", line);
+        for f in &files {
+            println!("  {} {}", state_code(&f.state), f.path);
         }
     }
 
     Ok(())
+}
+
+fn state_code(state: &keinestamp::lore_backend::LoreState) -> &'static str {
+    match state {
+        keinestamp::lore_backend::LoreState::Added => "A",
+        keinestamp::lore_backend::LoreState::Modified => "M",
+        keinestamp::lore_backend::LoreState::Deleted => "D",
+        keinestamp::lore_backend::LoreState::Untracked => "??",
+        keinestamp::lore_backend::LoreState::Unchanged => "=",
+    }
 }
 
 fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    let timeline_path = meta.web_root.join("timeline.json");
-    let timeline = match keinestamp::timeline::read_timeline(&timeline_path) {
-        Ok(t) => t,
-        Err(_) => {
-            println!("暂无提交记录");
-            return Ok(());
-        }
-    };
+    let hist = keinestamp::lore_backend::revision_history(&meta.project_root)?;
+    let entries: Vec<_> = hist
+        .iter()
+        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+        .collect();
 
-    if timeline.entries.is_empty() {
+    if entries.is_empty() {
         println!("暂无提交记录");
         return Ok(());
     }
 
-    let project = if timeline.project.is_empty() {
-        "Keinestamp".to_string()
-    } else {
-        timeline.project.clone()
-    };
+    let project = meta
+        .project_root
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "Keinestamp".to_string());
 
     println!("{} 提交历史（最近 {} 条）：", project, count);
 
-    let entries: Vec<_> = timeline.entries.iter().rev().take(count).collect();
-    for entry in &entries {
-        let short_hash = &entry.id[..7.min(entry.id.len())];
-        let date = entry.timestamp[..19.min(entry.timestamp.len())]
-            .replace('T', " ");
-        let file_count = entry.files.len();
+    // 文件数从 timeline 缓存取（展示缓存，rebuild_cache 在每次 record 时重建）；拿不到则显示 0
+    let mut file_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    if let Ok(tl) = keinestamp::timeline::read_timeline(&keinestamp::timeline::timeline_cache_path(&meta.project_root)) {
+        for e in &tl.entries {
+            file_counts.insert(e.id.clone(), e.files.len());
+        }
+    }
+
+    for r in entries.iter().take(count) {
+        let short_id = &r.id[..7.min(r.id.len())];
+        let date = format_date(&r.date);
+        let file_count = file_counts.get(&r.id).copied().unwrap_or(0);
         println!(
             "  {}  {}  {}  ({} 文件)",
-            short_hash, date, entry.author, file_count
+            short_id, date, "lore", file_count
         );
-        println!("         {}", entry.message);
+        println!("         {}", r.message);
     }
 
     Ok(())
+}
+
+fn format_date(s: &str) -> String {
+    chrono::DateTime::parse_from_rfc2822(s)
+        .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
+        .unwrap_or_else(|_| s.to_string())
 }
 
 fn cmd_export(path: &Path, entry_id: &str, output_dir: &Path) -> anyhow::Result<()> {
