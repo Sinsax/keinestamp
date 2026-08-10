@@ -24,6 +24,7 @@ export interface TimelineEntry {
 export interface Timeline {
   project: string
   entries: TimelineEntry[]
+  rollback_marker?: { rollback_point: string; head_before: string } | null
 }
 
 export interface RecentEntry {
