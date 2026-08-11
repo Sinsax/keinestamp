@@ -112,34 +112,53 @@ for name, state in saved.items():
     }
 }
 
-pub fn clean_old_glb_previews(dir: &Path, max: usize) -> Result<()> {
+/// 清理 previews_glb 目录：**只删未被 timeline.json 引用的孤儿 GLB**（保留被引用的旧预览，
+/// 否则记录后旧记录的 3D 标签因文件消失而失效）；超 max 时删最旧孤儿。
+pub fn clean_old_glb_previews(project_root: &Path, dir: &Path, max: usize) -> Result<()> {
     eprintln!("[debug] clean_old_glb_previews: dir={:?}, max={}", dir, max);
     if !dir.exists() {
-        eprintln!("[debug] clean_old_glb_previews: dir does not exist, skipping");
         return Ok(());
     }
+    // timeline.json 引用的 preview 相对路径集合（previews_glb/xxx.glb）
+    let referenced: std::collections::HashSet<String> = crate::timeline::read_timeline(
+        &crate::timeline::timeline_cache_path(project_root),
+    )
+    .map(|t| {
+        t.entries
+            .iter()
+            .filter_map(|e| {
+                let p = e.preview.trim_start_matches("./");
+                (p.starts_with("previews_glb/") && p.ends_with(".glb")).then(|| p.to_string())
+            })
+            .collect()
+    })
+    .unwrap_or_else(|e| {
+        eprintln!("[debug] clean_old_glb_previews: read timeline failed: {}", e);
+        std::collections::HashSet::new()
+    });
 
     let mut entries: Vec<_> = std::fs::read_dir(dir)?
         .flatten()
         .filter(|e| e.path().extension().map_or(false, |ext| ext == "glb"))
         .collect();
-
+    // 只保留未被引用的孤儿
+    entries.retain(|e| {
+        let rel = format!("previews_glb/{}", e.file_name().to_string_lossy());
+        !referenced.contains(&rel)
+    });
     if entries.len() <= max {
         return Ok(());
     }
-
     entries.sort_by_key(|e| {
         e.metadata()
             .and_then(|m| m.created().or_else(|_| m.modified()))
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
     });
-
     let to_remove = entries.len() - max;
-    eprintln!("[debug] clean_old_glb_previews: {} entries, removing {}", entries.len(), to_remove);
+    eprintln!("[debug] clean_old_glb_previews: {} orphans, removing {}", entries.len(), to_remove);
     for entry in entries.iter().take(to_remove) {
         std::fs::remove_file(entry.path())?;
     }
-
     Ok(())
 }
 
@@ -153,5 +172,44 @@ mod tests {
         assert_eq!(config.resolution, (1920, 1080));
         assert_eq!(config.camera_name, "ProgressCamera");
         assert_eq!(config.max_previews, 50);
+    }
+
+    #[test]
+    fn test_clean_old_glb_previews_protects_referenced() -> Result<()> {
+        let root = std::env::temp_dir().join(format!("ks_glbclean_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("previews_glb")).unwrap();
+        // 被引用 + 孤儿（2 个）：max=1 → 删最旧孤儿，引用文件保留
+        std::fs::write(root.join("previews_glb/ref_old.glb"), "x").unwrap();
+        std::fs::write(root.join("previews_glb/ref_new.glb"), "x").unwrap();
+        std::fs::write(root.join("previews_glb/orphan1.glb"), "x").unwrap();
+        std::fs::write(root.join("previews_glb/orphan2.glb"), "x").unwrap();
+        // timeline.json 引用 ref_old/ref_new
+        std::fs::create_dir_all(root.join(".keinestamp").join("web")).unwrap();
+        let tl = serde_json::json!({
+            "project": "t",
+            "entries": [
+                { "id": "a", "timestamp": "2026-08-01T00:00:00Z", "author": "lore", "message": "m1", "files": [], "preview": "previews_glb/ref_old.glb" },
+                { "id": "b", "timestamp": "2026-08-02T00:00:00Z", "author": "lore", "message": "m2", "files": [], "preview": "previews_glb/ref_new.glb" }
+            ],
+            "rollback_marker": null
+        });
+        std::fs::write(
+            crate::timeline::timeline_cache_path(&root),
+            serde_json::to_string(&tl).unwrap(),
+        )
+        .unwrap();
+        // max=1：只删最旧孤儿（引用文件即使超限也保留）
+        clean_old_glb_previews(&root, &root.join("previews_glb"), 1).unwrap();
+        assert!(root.join("previews_glb/ref_old.glb").exists(), "被引用文件应保留");
+        assert!(root.join("previews_glb/ref_new.glb").exists(), "被引用文件应保留");
+        let orphans_left: Vec<_> = std::fs::read_dir(root.join("previews_glb"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("orphan"))
+            .collect();
+        assert_eq!(orphans_left.len(), 1, "应删 1 个最旧孤儿，保留 1 个");
+        let _ = std::fs::remove_dir_all(&root);
+        Ok(())
     }
 }

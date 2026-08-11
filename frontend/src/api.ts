@@ -33,8 +33,8 @@ export async function setDeployToken(token: string): Promise<void> {
   return invoke<void>('set_deploy_token', { token })
 }
 
-export async function rollback(path: string, entryId: string): Promise<void> {
-  return invoke<void>('rollback', { path, entryId })
+export async function rollback(path: string, entryId: string, discard = false): Promise<void> {
+  return invoke<void>('rollback', { path, entryId, discard })
 }
 
 export async function getRollbackState(path: string): Promise<RollbackState> {
@@ -143,6 +143,18 @@ export async function listInstalledBlenderVersions(): Promise<string[]> {
   return invoke<string[]>('list_installed_blender_versions')
 }
 
+export async function deleteBlenderVersion(version: string): Promise<void> {
+  return invoke<void>('delete_blender_version', { version })
+}
+
+export async function getCurrentBlenderVersion(): Promise<string> {
+  return invoke<string>('get_current_blender_version')
+}
+
+export async function setCurrentBlenderVersion(version: string): Promise<void> {
+  return invoke<void>('set_current_blender_version', { version })
+}
+
 export async function openWebTimeline(path: string): Promise<void> {
   return invoke<void>('open_web_timeline', { path })
 }
@@ -157,6 +169,46 @@ export async function getDeployServerUrl(): Promise<string> {
 
 export async function setDeployServerUrl(url: string): Promise<void> {
   return invoke<void>('set_deploy_server_url', { url })
+}
+
+export async function getLoreServerUrl(): Promise<string> {
+  return invoke<string>('get_lore_server_url')
+}
+
+export async function setLoreServerUrl(url: string): Promise<void> {
+  return invoke<void>('set_lore_server_url', { url })
+}
+
+export async function getAutoRestoreProject(): Promise<boolean> {
+  return invoke<boolean>('get_auto_restore_project')
+}
+
+export async function setAutoRestoreProject(enabled: boolean): Promise<void> {
+  return invoke<void>('set_auto_restore_project', { enabled })
+}
+
+export async function listServerRepos(url: string): Promise<[string, string][]> {
+  return invoke<[string, string][]>('list_server_repos', { url })
+}
+
+export async function cloneServerRepo(url: string, name: string, destParent: string): Promise<string> {
+  return invoke<string>('clone_server_repo', { url, name, destParent })
+}
+
+export async function deleteServerRepo(url: string, name: string): Promise<void> {
+  return invoke<void>('delete_server_repo', { url, name })
+}
+
+export async function testLoreConnection(host: string): Promise<boolean> {
+  return invoke<boolean>('test_lore_connection', { host })
+}
+
+export async function migrateRepo(path: string): Promise<void> {
+  return invoke<void>('migrate_repo', { path })
+}
+
+export async function checkLoreEnv(): Promise<{ ok: boolean; bin: string; version: string }> {
+  return invoke('check_lore_env')
 }
 
 export async function getAutoConnect(): Promise<boolean> {

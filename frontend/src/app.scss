@@ -301,6 +301,20 @@ input:focus, textarea:focus, select:focus {
   background: var(--tint-soft);
   border-radius: 50%;
 }
+.empty-state .empty-new-btn {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 12px;
+  padding: 6px 18px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.15s var(--ease), color 0.15s var(--ease);
+}
+.empty-state .empty-new-btn:hover {
+  background: var(--accent-soft);
+  color: #fff;
+}
 
 /* ---- 夜间模式（白泽形态） ---- */
 [data-theme="night"] {

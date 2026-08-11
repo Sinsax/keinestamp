@@ -56,9 +56,12 @@ pub fn list_blender_versions() -> Vec<String> {
 }
 
 pub fn list_installed_blender_versions() -> Vec<String> {
-    let dir = blender_install_dir();
+    list_installed_versions_from(&blender_install_dir())
+}
+
+fn list_installed_versions_from(dir: &Path) -> Vec<String> {
     let mut installed = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.flatten() {
             let name = entry.file_name();
             let name = name.to_string_lossy();
@@ -74,6 +77,32 @@ pub fn list_installed_blender_versions() -> Vec<String> {
         }
     }
     installed
+}
+
+/// 删除已安装的 Blender 版本；**最少保留一个**（唯一版本拒绝删除）。
+/// 若 app-config 的 blender_path 指向被删版本 → 清空（下次 ensure_blender 自动回退默认）。
+pub fn delete_blender_version(version: &str) -> Result<()> {
+    delete_blender_version_at(&blender_install_dir(), version)
+}
+
+fn delete_blender_version_at(dir: &Path, version: &str) -> Result<()> {
+    let installed = list_installed_versions_from(dir);
+    if !installed.iter().any(|v| v == version) {
+        anyhow::bail!("未安装该 Blender 版本: {}", version);
+    }
+    if installed.len() <= 1 {
+        anyhow::bail!("至少保留一个 Blender 版本（当前仅 {}）", installed.join(", "));
+    }
+    let target = dir.join(format!("blender-{}-windows-x64", version));
+    std::fs::remove_dir_all(&target)
+        .map_err(|e| anyhow::anyhow!("删除 {} 失败: {}", target.display(), e))?;
+    // blender_path 指向被删版本 → 清空
+    if let Some(p) = crate::app_config::get_blender_path() {
+        if p.starts_with(&target) {
+            crate::app_config::set_blender_path("");
+        }
+    }
+    Ok(())
 }
 
 pub fn fetch_blender_versions() -> Result<Vec<String>> {
@@ -475,6 +504,47 @@ pub fn ensure_blender() -> Result<PathBuf> {
     download_blender(None)
 }
 
+/// 从 exe 路径解析版本号：`...\blender-4.2.0-windows-x64\blender.exe` → `4.2.0`；无法解析 → None
+pub fn parse_blender_version_from_path(path: &Path) -> Option<String> {
+    let name = path.file_name()?.to_string_lossy();
+    let dir = if name.starts_with("blender.exe") || name == "blender" {
+        path.parent()?.file_name()?.to_string_lossy().to_string()
+    } else {
+        path.file_name()?.to_string_lossy().to_string()
+    };
+    let rest = dir.strip_prefix("blender-")?;
+    let ver_end = rest.find('-')?;
+    let ver = &rest[..ver_end];
+    if ver.chars().next().map_or(false, |c| c.is_ascii_digit()) {
+        Some(ver.to_string())
+    } else {
+        None
+    }
+}
+
+/// 当前使用的 Blender 版本（app_config.blender_path 解析；未设置/未安装 → 空串）
+pub fn current_blender_version() -> String {
+    crate::app_config::get_blender_path()
+        .as_deref()
+        .and_then(parse_blender_version_from_path)
+        .unwrap_or_default()
+}
+
+/// 切换当前使用的 Blender 版本（构造安装目录 exe 路径，校验存在后写入 app_config.blender_path）
+pub fn set_current_blender_version(version: &str) -> Result<()> {
+    set_current_blender_version_at(&blender_install_dir(), version)
+}
+
+fn set_current_blender_version_at(dir: &Path, version: &str) -> Result<()> {
+    let exe_name = if cfg!(target_os = "windows") { "blender.exe" } else { "blender" };
+    let exe = dir.join(format!("blender-{}-windows-x64", version)).join(exe_name);
+    if !exe.exists() {
+        anyhow::bail!("未安装该 Blender 版本: {}", version);
+    }
+    crate::app_config::set_blender_path(&exe.to_string_lossy());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,6 +586,53 @@ mod tests {
         let html = "<a href=\"blender-5.1.0-windows-x64.zip\">x</a> <a href=\"blender-5.1.0-macos-arm64.dmg\">y</a> <a href=\"blender-4.2.0-windows-x64.zip\">z</a>";
         let versions = parse_installer_versions(html, "-windows-x64.zip");
         assert_eq!(versions, vec!["5.1.0".to_string(), "4.2.0".to_string()]);
+    }
+
+    #[test]
+    fn test_delete_blender_version_at() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_delblend_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join("blender-4.2.0-windows-x64")).unwrap();
+        std::fs::create_dir_all(dir.join("blender-4.3.0-windows-x64")).unwrap();
+        assert_eq!(list_installed_versions_from(&dir), vec!["4.2.0".to_string(), "4.3.0".to_string()]);
+
+        // 删 4.2 → 剩 4.3
+        delete_blender_version_at(&dir, "4.2.0").unwrap();
+        assert_eq!(list_installed_versions_from(&dir), vec!["4.3.0".to_string()]);
+        // 唯一版本拒绝删除（最少保留一个）
+        let err = delete_blender_version_at(&dir, "4.3.0").unwrap_err();
+        assert!(err.to_string().contains("至少保留一个"), "err: {err}");
+        // 未安装版本报错
+        let err = delete_blender_version_at(&dir, "9.9.9").unwrap_err();
+        assert!(err.to_string().contains("未安装"), "err: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_parse_blender_version_from_path() {
+        assert_eq!(
+            parse_blender_version_from_path(Path::new(r"C:\Users\x\AppData\Roaming\Keinestamp\blender\blender-4.2.0-windows-x64\blender.exe")),
+            Some("4.2.0".to_string())
+        );
+        assert_eq!(
+            parse_blender_version_from_path(Path::new(r"/home/x/.config/keinestamp/blender/blender-5.1.2-windows-x64/blender")),
+            Some("5.1.2".to_string())
+        );
+        assert_eq!(parse_blender_version_from_path(Path::new("C:\\tools\\blender.exe")), None);
+        assert_eq!(parse_blender_version_from_path(Path::new("")), None);
+    }
+
+    #[test]
+    fn test_set_current_blender_version_at() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_setblend_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("blender-4.2.0-windows-x64")).unwrap();
+        std::fs::write(dir.join("blender-4.2.0-windows-x64/blender.exe"), "x").unwrap();
+        // 未安装版本报错
+        let err = set_current_blender_version_at(&dir, "4.3.0").unwrap_err();
+        assert!(err.to_string().contains("未安装"), "err: {err}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

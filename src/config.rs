@@ -26,7 +26,7 @@ pub struct MetaConfig {
 
 impl MetaConfig {
     pub fn new(project_root: PathBuf) -> Self {
-        let web_root = project_root.join("web");
+        let web_root = project_root.join(".keinestamp").join("web");
         Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             init_time: chrono::Utc::now().to_rfc3339(),
@@ -107,7 +107,7 @@ pub fn resolve_site_name(meta: &MetaConfig) -> String {
 }
 
 pub fn meta_path(project_root: &Path) -> PathBuf {
-    project_root.join(".keinestamp.toml")
+    project_root.join(".keinestamp").join(".keinestamp.toml")
 }
 
 pub fn write_meta(path: &Path, config: &MetaConfig) -> Result<()> {
@@ -139,11 +139,18 @@ pub fn read_meta(path: &Path) -> Result<MetaConfig> {
     let mut config: MetaConfig = toml::from_str(&content)
         .with_context(|| format!("failed to parse config file {:?}", path))?;
     if config.project_root.as_os_str().is_empty() {
-        let parent = path.parent().context("config path has no parent")?;
-        config.project_root = parent.to_path_buf();
+        // 配置文件位于 <root>/.keinestamp/.keinestamp.toml：从父目录再上一级得项目根
+        let mut parent = path.parent().context("config path has no parent")?.to_path_buf();
+        if parent.file_name().map(|s| s == ".keinestamp").unwrap_or(false) {
+            parent = parent
+                .parent()
+                .map(|p| p.to_path_buf())
+                .unwrap_or(parent);
+        }
+        config.project_root = parent;
     }
     if config.web_root.as_os_str().is_empty() {
-        config.web_root = config.project_root.join("web");
+        config.web_root = config.project_root.join(".keinestamp").join("web");
     }
     Ok(config)
 }
@@ -190,7 +197,7 @@ mod tests {
     #[test]
     fn old_config_without_site_fields_parses() {
         let dir = std::env::temp_dir().join(format!("keinestamp_oldsite_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join(".keinestamp")).unwrap();
         let path = meta_path(&dir);
         std::fs::write(&path, "version = \"0.1.0\"\ninit_time = \"2026-01-01T00:00:00Z\"\n").unwrap();
         let meta = read_meta(&path).unwrap();
@@ -204,7 +211,7 @@ mod tests {
         let root = Path::new("/some/project");
         assert_eq!(
             meta_path(root),
-            Path::new("/some/project/.keinestamp.toml")
+            Path::new("/some/project/.keinestamp/.keinestamp.toml")
         )
     }
 
@@ -233,7 +240,7 @@ mod tests {
     #[test]
     fn test_read_meta_corrupt() {
         let dir = std::env::temp_dir().join(format!("keinestamp_test_corrupt_{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::create_dir_all(dir.join(".keinestamp")).unwrap();
 
         let path = meta_path(&dir);
         std::fs::write(&path, "this is not valid toml").unwrap();
@@ -246,7 +253,7 @@ mod tests {
 
     #[test]
     fn test_read_meta_not_found() {
-        let path = Path::new("/nonexistent/path/.keinestamp.toml");
+        let path = Path::new("/nonexistent/path/.keinestamp/.keinestamp.toml");
         let result = read_meta(path);
         assert!(result.is_err());
     }
@@ -295,7 +302,7 @@ mod tests {
     #[test]
     fn test_backward_compat_old_fields() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("keinestamp_test_compat_{}", std::process::id()));
-        std::fs::create_dir_all(&dir)?;
+        std::fs::create_dir_all(dir.join(".keinestamp"))?;
 
         let path = meta_path(&dir);
         let old_toml = r#"

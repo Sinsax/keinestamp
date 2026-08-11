@@ -1,37 +1,54 @@
 use std::path::Path;
 use anyhow::Result;
-use crate::app_config::AppConfig;
 
-pub const WEB_DIR: &str = "web/";
-/// 预设隐藏：web/（部署产物）与 .keinestamp.toml（含 access_token，防误提交）
-const PRESET_HIDDEN: [&str; 2] = [WEB_DIR, ".keinestamp.toml"];
+/// web 产物相对目录（html_gen 输出 + timeline.json；位于 .keinestamp/ 私有目录内）
+pub const WEB_DIR: &str = ".keinestamp/web/";
+/// Keinestamp 私有目录（.keinestamp.toml、web/ 等；应用层统一隐藏）
+pub const PRIVATE_DIR: &str = ".keinestamp/";
+/// Lore 原生忽略文件（项目级，被提交跟随历史；由 Lore 在 status/stage 原生过滤）
+pub const LOREIGNORE: &str = ".loreignore";
 
+/// 应用层隐藏（程序私有目录 + .loreignore 自身，UI 变更面板不显示）。
+/// loreignore 不能排除 `.keinestamp/` 整个目录（会阻断 commit_web 的 web 提交），
+/// 故 `.keinestamp/` 前缀由应用层在 changed_files 过滤；用户自定义忽略走 .loreignore（Lore 原生）。
+/// `.loreignore` 自身由 record 强制携带自动入库（"自动记录"，不显示在 UI）。
 pub fn load_hidden(_project_root: &Path) -> Vec<String> {
-    let mut list = AppConfig::load().hidden_paths.unwrap_or_default();
-    for preset in PRESET_HIDDEN {
-        if !list.iter().any(|h| h == preset) {
-            list.insert(0, preset.to_string());
-        }
-    }
-    list
+    vec![PRIVATE_DIR.to_string(), LOREIGNORE.to_string()]
 }
 
-pub fn save_hidden(_project_root: &Path, list: &[String]) -> Result<()> {
-    let mut list = list.to_vec();
-    for preset in PRESET_HIDDEN {
-        if !list.iter().any(|h| h == preset) {
-            list.insert(0, preset.to_string());
+/// .loreignore 规则读取（项目级用户忽略；Lore 原生在 status/stage 过滤，无需应用层匹配）。
+/// 防御：strip UTF-8 BOM（实测 PowerShell 写 UTF8 带 BOM 会导致 lore 首行规则失效）。
+pub fn load_ignore_rules(project_root: &Path) -> Vec<String> {
+    let path = project_root.join(LOREIGNORE);
+    let Ok(content) = std::fs::read_to_string(&path) else {
+        return Vec::new();
+    };
+    let content = content.strip_prefix('\u{feff}').unwrap_or(&content);
+    content
+        .lines()
+        .map(|l| l.trim())
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(String::from)
+        .collect()
+}
+
+/// .loreignore 规则写入（无 BOM；文件被提交，规则随仓库历史——与 gitignore 同语义）
+pub fn save_ignore_rules(project_root: &Path, rules: &[String]) -> Result<()> {
+    let mut content = String::new();
+    for r in rules {
+        let t = r.trim();
+        if !t.is_empty() {
+            content.push_str(t);
+            content.push('\n');
         }
     }
-    let mut cfg = AppConfig::load();
-    cfg.hidden_paths = Some(list);
-    cfg.save();
+    std::fs::write(project_root.join(LOREIGNORE), content)?;
     Ok(())
 }
 
 /// 前缀匹配 + glob（`*`/`?` 通配）匹配。
 /// - 含 `*` 或 `?` 的规则（如 `*.blend`）：通配匹配；规则不含 `/` 时只匹配任意层级的文件名
-/// - 其他规则（如 `web/`、`cache`）：前缀匹配
+/// - 其他规则（如 `.keinestamp/`）：前缀匹配
 pub fn is_hidden(path: &str, list: &[String]) -> bool {
     list.iter().any(|h| rule_matches(h, path))
 }
@@ -87,6 +104,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_load_hidden_presets_include_loreignore() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_hp_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let hidden = load_hidden(&dir);
+        assert!(hidden.contains(&PRIVATE_DIR.to_string()));
+        assert!(hidden.contains(&LOREIGNORE.to_string()));
+        assert!(is_hidden(".loreignore", &hidden));
+        assert!(is_hidden(".keinestamp/web/timeline.json", &hidden));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn test_is_hidden_prefix_and_web_preset() {
         let list = vec!["web/".to_string(), "cache".to_string()];
         assert!(is_hidden("web/index.html", &list));
@@ -112,12 +142,30 @@ mod tests {
     }
 
     #[test]
-    fn test_presets_always_present_and_hide_meta_config() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_hidden_preset_{}", std::process::id()));
-        let list = load_hidden(&dir);
-        assert!(list.iter().any(|h| h == "web/"));
-        assert!(list.iter().any(|h| h == ".keinestamp.toml"));
-        assert!(is_hidden(".keinestamp.toml", &list));
+    fn test_load_ignore_rules_skips_bom_and_comments() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("keinestamp_ig_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // 带 BOM 写入（模拟 PowerShell 场景）——读取时应 strip
+        let with_bom = format!("\u{feff}*.blend\n.keinestamp/.keinestamp.toml\n# 注释\n\ncache/\n");
+        std::fs::write(dir.join(LOREIGNORE), with_bom).unwrap();
+        let rules = load_ignore_rules(&dir);
+        assert_eq!(rules, vec!["*.blend", ".keinestamp/.keinestamp.toml", "cache/"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        Ok(())
+    }
+
+    #[test]
+    fn test_save_ignore_rules_roundtrip() -> Result<()> {
+        let dir = std::env::temp_dir().join(format!("keinestamp_ig_sv_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        save_ignore_rules(&dir, &["*.blend".to_string(), "cache/".to_string()])?;
+        let raw = std::fs::read_to_string(dir.join(LOREIGNORE)).unwrap();
+        // 无 BOM
+        assert!(!raw.starts_with('\u{feff}'));
+        assert_eq!(load_ignore_rules(&dir), vec!["*.blend", "cache/"]);
+        std::fs::remove_dir_all(&dir).unwrap();
+        Ok(())
     }
 }

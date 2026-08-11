@@ -19,6 +19,7 @@ export interface TimelineEntry {
   preview: string
   tag?: string | null
   milestone?: boolean
+  superseded?: boolean
 }
 
 export interface Timeline {
@@ -51,8 +52,16 @@ export interface CommitProgress {
 }
 
 export interface RollbackState {
+  /** 灰显记录（当前选中回退的 X；仅 X 灰显不可回退） */
   rollback_point: string | null
+  /** 恢复可用性：当前 HEAD == X-1（回退后 HEAD） */
   head_matches: boolean
+  /** X 删除的文件（标记"回退删除"，记录时算删除） */
+  deleted_files: string[]
+  /** X 修改/新增的文件（检出为未提交"回退改动"；内容与检出一致 = "已检出"，不符 = "已修改"） */
+  change_files: string[]
+  /** 检出文件中被"真修改"的（内容与检出 hash 不符；标签显示"已修改"，其余显示"已检出"） */
+  modified_files: string[]
 }
 
-export type RollbackChoice = [string, 'current' | 'latest']
+export type RollbackChoice = [string, 'current' | 'stashed']

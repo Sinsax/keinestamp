@@ -13,6 +13,7 @@
     restoreEnabled = false,
     restoreTitle = '没有可恢复的回退',
     busy = false,
+    loreOk = true,
   }: {
     projectType: ProjectType | null
     onRecord: () => void
@@ -25,30 +26,34 @@
     restoreEnabled?: boolean
     restoreTitle?: string
     busy?: boolean
+    /** Lore 前置依赖（编译期捆绑）检测通过后才可用 */
+    loreOk?: boolean
   } = $props()
 
   const initialized = $derived(projectType === 'initialized')
+  const loreReady = $derived(loreOk && initialized)
+  const loreTitle = '缺少 Lore v0.8.6 环境，请重新安装/构建'
 </script>
 
 <div class="action-bar">
-  <button class="record-btn" onclick={onRecord} disabled={!initialized || busy}>
+  <button class="record-btn" onclick={onRecord} disabled={!loreReady || busy} title={loreOk ? '' : loreTitle}>
     <span class="ab-label">记录</span>
     <span class="ab-hint">record</span>
   </button>
 
-  <button class="restore-btn" class:enabled={restoreEnabled} onclick={onRestore} disabled={!initialized || !restoreEnabled || busy} title={restoreTitle}>
+  <button class="restore-btn" class:enabled={restoreEnabled} onclick={onRestore} disabled={!loreReady || !restoreEnabled || busy} title={loreOk ? restoreTitle : loreTitle}>
     <span class="ab-label">恢复</span>
     <span class="ab-hint">redo</span>
   </button>
 
-  <button class="backup-btn" onclick={onBackup} disabled={!initialized || busy} title="备份到局域网 loreserver">
+  <div class="spacer"></div>
+
+  <button class="backup-btn" onclick={onBackup} disabled={!loreReady || busy} title={loreOk ? '备份到 loreserver' : loreTitle}>
     <span class="ab-label">备份</span>
     <span class="ab-hint">backup</span>
   </button>
 
-  <div class="spacer"></div>
-
-  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!initialized || !connected || busy} title={deployTip}>
+  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!loreReady || !connected || busy} title={loreOk ? deployTip : loreTitle}>
     <span class="ab-label">部署</span>
     <span class="ab-hint">deploy</span>
   </button>
@@ -121,6 +126,7 @@
     border-color: var(--tint) !important;
     color: var(--tint) !important;
     background: transparent !important;
+    margin-right: 10px; /* 与部署保持间隔（同属服务器功能） */
   }
   .backup-btn:hover:not(:disabled) {
     background: var(--tint-soft) !important;

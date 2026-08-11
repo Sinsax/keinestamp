@@ -29,14 +29,10 @@ export function parseStatus(output: string): StatusFile[] {
 }
 
 export function statusLabel(x: string, y: string): string {
-  if (x === 'M') return 'modified'
-  if (x === 'A') return 'added'
-  if (x === 'D') return 'deleted'
-  if (x === '?') return 'untracked'
-  if (y === 'M') return 'modified'
-  if (y === 'A') return 'added'
-  if (y === 'D') return 'deleted'
-  if (y === '?') return 'untracked'
+  if (x === 'M' || y === 'M') return '已修改'
+  if (x === 'A' || y === 'A') return '新增'
+  if (x === 'D' || y === 'D') return '已删除'
+  if (x === '?' || y === '?') return '未跟踪'
   return ''
 }
 
@@ -75,6 +71,14 @@ export function ruleHidden(path: string, rules: Iterable<string>): boolean {
   return false
 }
 
+/** 返回 path 命中的第一条规则（无则空串）——用于"取消忽略"时删除正确规则 */
+export function findRuleHidden(path: string, rules: Iterable<string>): string {
+  for (const rule of rules) {
+    if (ruleHiddenOne(rule, path)) return rule
+  }
+  return ''
+}
+
 function ruleHiddenOne(rule: string, path: string): boolean {
   if (rule.includes('*') || rule.includes('?')) {
     const ruleSegs = rule.split('/')
@@ -87,6 +91,10 @@ function ruleHiddenOne(rule: string, path: string): boolean {
       pathSegs.length === ruleSegs.length &&
       ruleSegs.every((r, i) => wildcardMatch(r, pathSegs[i]))
     )
+  }
+  if (rule.endsWith('/')) {
+    // 目录规则：`cache/` 匹配目录本身（`cache`）与其下所有路径
+    return path === rule.slice(0, -1) || path.startsWith(rule)
   }
   return path === rule || path.startsWith(rule)
 }

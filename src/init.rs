@@ -8,7 +8,16 @@ pub fn init_project(project_root: &Path) -> Result<()> {
 
     match project_type {
         detect::ProjectType::Initialized(mut meta) => {
+            // 补建所有初始化预设文件（re-init fills gaps）：
+            // .lore 缺失（手动删除/旧工程）→ 离线纯本地建仓（不连服务器）
+            if !crate::lore_backend::repo_exists(project_root) {
+                crate::lore_backend::create_repo(project_root)
+                    .with_context(|| format!("failed to create lore repository at {:?}", project_root))?;
+            }
+            // web/ 结构 + timeline.json + index.html 缺失补建
             ensure_web_structure(&meta.web_root)?;
+            // .loreignore 预设（.keinestamp/.keinestamp.toml 隐藏；不覆盖用户规则）
+            ensure_loreignore(project_root)?;
             if meta.project_id.is_none() {
                 meta.project_id = Some(config::generate_project_id());
                 config::write_meta(&config::meta_path(project_root), &meta)?;
@@ -35,10 +44,8 @@ fn perform_init(project_root: &Path) -> Result<()> {
             .with_context(|| format!("failed to create lore repository at {:?}", project_root))?;
     }
 
-    // 隐藏列表初始化（web/ 与 .keinestamp.toml 预设由 save_hidden 强制保留，
-    // 不会覆盖用户已有自定义隐藏项）
-    let hidden = crate::hidden::load_hidden(project_root);
-    crate::hidden::save_hidden(project_root, &hidden)?;
+    // .loreignore 预设（.keinestamp/.keinestamp.toml 隐藏；不覆盖用户规则）
+    ensure_loreignore(project_root)?;
 
     let meta = MetaConfig::new(project_root.to_path_buf());
     let web_root = &meta.web_root;
@@ -61,8 +68,26 @@ fn perform_init(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn ensure_web_structure(web_root: &Path) -> Result<()> {
-    if !web_root.exists() {
+/// .loreignore 预设：隐藏 `.keinestamp/.keinestamp.toml`（项目配置）与
+/// `.keinestamp/web/timeline.json`（可重建展示缓存，不入库——入库后每次 rebuild 产生
+/// lore 原生 dirty，会导致 branch reset 回退失败）。
+/// 不覆盖用户已有规则（只补缺失行）。文件被提交（规则随仓库历史，与 gitignore 同语义）。
+fn ensure_loreignore(project_root: &Path) -> Result<()> {
+    let mut rules = crate::hidden::load_ignore_rules(project_root);
+    const PRESETS: [&str; 2] = [
+        ".keinestamp/.keinestamp.toml",
+        ".keinestamp/web/timeline.json",
+    ];
+    for preset in PRESETS {
+        if !rules.iter().any(|r| r == preset) {
+            rules.insert(0, preset.to_string());
+        }
+    }
+    crate::hidden::save_ignore_rules(project_root, &rules)?;
+    Ok(())
+}
+
+fn ensure_web_structure(web_root: &Path) -> Result<()> {    if !web_root.exists() {
         std::fs::create_dir_all(web_root)?;
     }
 
@@ -113,12 +138,6 @@ fn write_index_html(web_root: &Path) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn require_server() {
-        if !crate::lore_backend::server_available() {
-            panic!("loreserver 未运行：请先启动 loreserver.exe（demo 模式）");
-        }
-    }
-
     fn tmp_dir(name: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("keinestamp_init_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -128,7 +147,6 @@ mod tests {
 
     #[test]
     fn test_init_fresh() -> Result<()> {
-        require_server();
         let dir = tmp_dir("fresh");
         std::fs::remove_dir_all(&dir)?;
         std::fs::create_dir_all(&dir)?;
@@ -140,10 +158,10 @@ mod tests {
         assert!(crate::lore_backend::repo_exists(&dir));
         assert!(!dir.join(".gitattributes").exists(), "不应生成 .gitattributes（无 LFS）");
         assert!(!dir.join(".git").exists(), "不应创建 git 仓库");
-        assert!(dir.join("web").exists());
+        assert!(dir.join(".keinestamp").join("web").exists());
         assert!(!dir.join("web/.git").exists(), "web 产物并入主仓库，不应有独立 git 仓库");
-        assert!(dir.join("web").join("timeline.json").exists());
-        assert!(dir.join("web").join("index.html").exists());
+        assert!(dir.join(".keinestamp").join("web").join("timeline.json").exists());
+        assert!(dir.join(".keinestamp").join("web").join("index.html").exists());
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -151,7 +169,6 @@ mod tests {
 
     #[test]
     fn test_init_existing_with_blend() -> Result<()> {
-        require_server();
         let dir = tmp_dir("existing_with_blend");
         std::fs::write(dir.join("test.blend"), b"")?;
 
@@ -159,7 +176,7 @@ mod tests {
 
         assert!(config::meta_path(&dir).exists());
         assert!(dir.join(".lore").exists());
-        assert!(dir.join("web").exists());
+        assert!(dir.join(".keinestamp").join("web").exists());
         assert!(!dir.join("web/.git").exists());
 
         std::fs::remove_dir_all(&dir)?;
@@ -168,20 +185,19 @@ mod tests {
 
     #[test]
     fn test_init_repeat_is_idempotent() -> Result<()> {
-        require_server();
         let dir = tmp_dir("repeat");
 
         init_project(&dir)?;
         let meta_after_first = config::read_meta(&config::meta_path(&dir))?;
 
-        let index_before = std::fs::read_to_string(dir.join("web").join("index.html"))?;
+        let index_before = std::fs::read_to_string(dir.join(".keinestamp").join("web").join("index.html"))?;
 
         init_project(&dir)?;
 
         let meta_after_second = config::read_meta(&config::meta_path(&dir))?;
         assert_eq!(meta_after_first.init_time, meta_after_second.init_time);
 
-        let index_after = std::fs::read_to_string(dir.join("web").join("index.html"))?;
+        let index_after = std::fs::read_to_string(dir.join(".keinestamp").join("web").join("index.html"))?;
         assert_eq!(index_before, index_after);
 
         std::fs::remove_dir_all(&dir)?;
@@ -190,12 +206,11 @@ mod tests {
 
     #[test]
     fn test_ensure_web_structure_repairs() -> Result<()> {
-        require_server();
         let dir = tmp_dir("ensure_web");
 
         init_project(&dir)?;
 
-        let index_path = dir.join("web").join("index.html");
+        let index_path = dir.join(".keinestamp").join("web").join("index.html");
         std::fs::remove_file(&index_path)?;
         assert!(!index_path.exists());
 

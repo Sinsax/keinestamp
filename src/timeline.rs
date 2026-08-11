@@ -12,10 +12,23 @@ pub struct Timeline {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RollbackMarker {
-    /// 回退点（branch reset 到的 revision sig）
+    /// 回退后 HEAD（branch reset 到的 X-1 revision sig，恢复按钮条件 = current == 此值）
     pub rollback_point: String,
+    /// 灰显起点（被选中的 X revision sig；X 及之后的时间线记录灰显）
+    pub superseded_point: String,
     /// 回退前 HEAD revision sig（撤销回退目标）
     pub head_before: String,
+    /// X 相对 X-1 删除的文件（回退时磁盘保留并标记"回退删除"；记录时算删除）
+    #[serde(default)]
+    pub deleted_files: Vec<String>,
+    /// X 相对 X-1 修改/新增的文件（检出为未提交的"回退改动"；撤销回退时默认丢弃，
+    /// 冲突弹窗选"当前版本改动"才带回）
+    #[serde(default)]
+    pub change_files: Vec<String>,
+    /// 检出文件内容 hash（rollback 检出后对 change_files 算 sha256）：工作区 hash 与检出
+    /// hash 不符 = 用户真修改（标签"已修改"）；一致 = 纯检出（标签"已检出"，不阻碍连续回退）
+    #[serde(default)]
+    pub change_hashes: std::collections::HashMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -32,20 +45,20 @@ pub struct TimelineEntry {
     pub tag: Option<String>,
     #[serde(default)]
     pub milestone: bool,
+    /// 被顶替出主线的记录（回退后显示灰显；数据保留在 store 但不在主线历史）
+    #[serde(default)]
+    pub superseded: bool,
 }
 
 pub fn read_timeline(path: &Path) -> Result<Timeline> {
-    eprintln!("[debug] read_timeline: {:?}", path);
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read timeline {:?}", path))?;
     let timeline: Timeline = serde_json::from_str(&content)
         .with_context(|| format!("failed to parse timeline {:?}", path))?;
-    eprintln!("[debug] read_timeline: {} entries", timeline.entries.len());
     Ok(timeline)
 }
 
 pub fn write_timeline(path: &Path, timeline: &Timeline) -> Result<()> {
-    eprintln!("[debug] write_timeline: {:?}, {} entries", path, timeline.entries.len());
     let content = serde_json::to_string_pretty(timeline)?;
 
     let parent = path.parent().context("timeline path has no parent")?;
@@ -67,7 +80,6 @@ pub fn write_timeline(path: &Path, timeline: &Timeline) -> Result<()> {
 }
 
 pub fn append_entry(path: &Path, entry: TimelineEntry) -> Result<()> {
-    eprintln!("[debug] append_entry: {:?}, id={}", path, &entry.id[..7.min(entry.id.len())]);
     let mut timeline = if path.exists() {
         read_timeline(path)?
     } else {
@@ -83,7 +95,6 @@ pub fn append_entry(path: &Path, entry: TimelineEntry) -> Result<()> {
 }
 
 pub fn set_entry_milestone(path: &Path, entry_id: &str, milestone: bool) -> Result<()> {
-    eprintln!("[debug] set_entry_milestone: {:?}, id={}, milestone={}", path, entry_id, milestone);
     let mut timeline = read_timeline(path)?;
     let entry = timeline
         .entries
@@ -95,7 +106,6 @@ pub fn set_entry_milestone(path: &Path, entry_id: &str, milestone: bool) -> Resu
 }
 
 pub fn remove_entry(path: &Path, entry_id: &str) -> Result<TimelineEntry> {
-    eprintln!("[debug] remove_entry: {:?}, id={}", path, entry_id);
     let mut timeline = read_timeline(path)?;
     let pos = timeline
         .entries
@@ -112,7 +122,6 @@ pub fn remove_entry(path: &Path, entry_id: &str) -> Result<TimelineEntry> {
 }
 
 pub fn remove_entries_after(path: &Path, entry_id: &str) -> Result<()> {
-    eprintln!("[debug] remove_entries_after: {:?}, id={}", path, entry_id);
     let mut timeline = read_timeline(path)?;
     let start = match timeline.entries.iter().position(|e| e.id == entry_id || e.id.starts_with(entry_id)) {
         Some(pos) => pos,
@@ -168,11 +177,23 @@ pub fn clear_rollback(project_root: &Path) -> Result<()> {
 pub fn rebuild_cache(project_root: &Path) -> Result<()> {
     let web = project_root.join(crate::hidden::WEB_DIR);
     let timeline_path = web.join("timeline.json");
-    let rollback_marker = if timeline_path.exists() {
-        read_timeline(&timeline_path).ok().and_then(|t| t.rollback_marker)
+    // 旧缓存：保留 rollback_marker + 主线 entries 的 preview（preview 是 web 产物路径，
+    // 不在 revision metadata 里——重建时从旧缓存沿用，否则每次记录后旧记录的 3D 标签丢失）
+    let old_timeline = if timeline_path.exists() {
+        read_timeline(&timeline_path).ok()
     } else {
         None
     };
+    let rollback_marker = old_timeline.as_ref().and_then(|t| t.rollback_marker.clone());
+    let old_previews: std::collections::HashMap<String, String> = old_timeline
+        .as_ref()
+        .map(|t| {
+            t.entries
+                .iter()
+                .map(|e| (e.id.clone(), e.preview.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     let hist = crate::lore_backend::revision_history(project_root)?;
     let mut entries: Vec<TimelineEntry> = hist
         .iter()
@@ -184,13 +205,32 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             message: r.message.clone(),
             files: entry_files(project_root, &r.id),
             file_status: Vec::new(),
-            preview: String::new(),
+            preview: old_previews.get(&r.id).cloned().unwrap_or_default(),
             tag: r.metadata.get("tag").cloned(),
             milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
+            superseded: false,
         })
         .collect();
     // v1 语义：entries 旧→新（最新在尾部，append 顺序）；revision_history 是最新在前
     entries.reverse();
+    // 保留被顶替出主线的旧记录（v1 行为：回退后回退点之后的记录仍显示，灰显不可回退）：
+    // 旧缓存中 id 不在新主线的条目 → 标记 superseded 并按时间戳插入正确位置（回退点与新记录之间）
+    let old_entries = old_timeline.map(|t| t.entries);
+    if let Some(old) = old_entries {
+        let new_ids: std::collections::HashSet<&str> =
+            entries.iter().map(|e| e.id.as_str()).collect();
+        let superseded: Vec<TimelineEntry> = old
+            .into_iter()
+            .filter(|e| !new_ids.contains(e.id.as_str()))
+            .map(|mut e| {
+                e.superseded = true;
+                e
+            })
+            .collect();
+        entries.extend(superseded);
+        // ISO 8601 时间戳字典序 = 时间序；被顶替记录插入其真实时间位置（如 D 与 H 之间）
+        entries.sort_by(|a, b| a.timestamp.cmp(&b.timestamp));
+    }
     let timeline = Timeline {
         project: project_root
             .file_name()
@@ -288,6 +328,7 @@ mod tests {
             preview: format!("previews/{}.png", id),
             tag: None,
             milestone: false,
+            superseded: false,
         }
     }
 
@@ -445,12 +486,6 @@ mod tests {
         Ok(())
     }
 
-    fn require_server() {
-        if !crate::lore_backend::server_available() {
-            panic!("loreserver 未运行：请先启动 loreserver.exe（demo 模式）");
-        }
-    }
-
     fn tmp_root(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("keinestamp_tl_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
@@ -459,8 +494,34 @@ mod tests {
     }
 
     #[test]
+    fn test_rebuild_cache_preserves_old_previews() -> Result<()> {
+        let root = tmp_root("rebuildprev");
+        crate::lore_backend::create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "1").unwrap();
+        crate::lore_project::record(&root, "first", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+        std::fs::write(root.join("a.txt"), "2").unwrap();
+        crate::lore_project::record(&root, "second", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+
+        rebuild_cache(&root)?;
+        // 旧缓存给第一条记录写入 preview（模拟 GLB 渲染产物）
+        let path = timeline_cache_path(&root);
+        let mut tl = read_timeline(&path)?;
+        tl.entries[0].preview = "previews_glb/abc123_prev.glb".to_string();
+        write_timeline(&path, &tl)?;
+        // 再记录一条 → rebuild → 旧 preview 应保留（不被清空）
+        std::fs::write(root.join("a.txt"), "3").unwrap();
+        crate::lore_project::record(&root, "third", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+        let tl2 = read_timeline(&path)?;
+        let first = tl2.entries.iter().find(|e| e.message == "first").unwrap();
+        assert_eq!(
+            first.preview, "previews_glb/abc123_prev.glb",
+            "重建后旧记录的 preview 应保留"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn test_rebuild_cache_from_lore_history() -> Result<()> {
-        require_server();
         let root = tmp_root("rebuild");
         crate::lore_backend::create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "1").unwrap();
@@ -479,6 +540,32 @@ mod tests {
         assert!(!timeline.entries[1].timestamp.is_empty());
         // 时间戳应为 ISO 8601（含 T，可被 split('T')/slice(0,10) 解析）
         assert!(timeline.entries[1].timestamp.contains('T'));
+        Ok(())
+    }
+
+    #[test]
+    fn test_rebuild_keeps_superseded_entries() -> Result<()> {
+        let root = tmp_root("rebuildsup");
+        crate::lore_backend::create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "1").unwrap();
+        crate::lore_project::record(&root, "A", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+        std::fs::write(root.join("a.txt"), "2").unwrap();
+        crate::lore_project::record(&root, "B", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+        std::fs::write(root.join("a.txt"), "3").unwrap();
+        crate::lore_project::record(&root, "C", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+        let hist = crate::lore_backend::revision_history(&root).unwrap();
+        let r2 = hist[1].id.clone(); // B
+        crate::lore_project::rollback(&root, &r2, &vec![".keinestamp/".to_string()], false).unwrap();
+        // 顶替：回退状态下记录 D
+        std::fs::write(root.join("a.txt"), "4").unwrap();
+        crate::lore_project::record(&root, "D", None, None, &vec![".keinestamp/".to_string()]).unwrap();
+        let timeline = read_timeline(&timeline_cache_path(&root))?;
+        // 主线 [A B D] + 被顶替的 C（superseded，v1 行为：仍显示灰显）
+        assert_eq!(timeline.entries.len(), 4);
+        let c = timeline.entries.iter().find(|e| e.message == "C").unwrap();
+        assert!(c.superseded, "被顶替记录应标记 superseded");
+        let d = timeline.entries.iter().find(|e| e.message == "D").unwrap();
+        assert!(!d.superseded, "主线记录不应 superseded");
         Ok(())
     }
 }

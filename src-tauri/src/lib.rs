@@ -147,6 +147,7 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                 }
             }
             let _ = keinestamp::blender_render::clean_old_glb_previews(
+                &meta.project_root,
                 &meta.web_root.join("previews_glb"),
                 glb_config.max_previews,
             );
@@ -375,13 +376,9 @@ async fn pull(path: String) -> Result<(), String> {
     handle.await.map_err(|e| e.to_string())?
 }
 
-/// lore 仓库 remote 判定：`.lore/config.toml` 含 remote_url 即视为有远端
-/// （本机 loreserver 恒在线，config.toml 的 remote_url 总是存在 → 正常工程返回 true）
+/// lore 仓库 remote 判定：`.lore/config.toml` 的 remote_url **值**非空（离线仓库 = 空串，不算有远端）
 fn has_remote_impl(project_root: &Path) -> bool {
-    let cfg = project_root.join(".lore").join("config.toml");
-    std::fs::read_to_string(cfg)
-        .map(|c| c.contains("remote_url"))
-        .unwrap_or(false)
+    keinestamp::lore_backend::has_remote_url(project_root)
 }
 
 #[tauri::command]
@@ -422,12 +419,12 @@ fn open_folder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn get_ignore_info(project_root: String, files: Option<Vec<String>>) -> Result<serde_json::Value, String> {
-    eprintln!("[debug] get_ignore_info({})", project_root);
     let _ = files;
-    let ignored = keinestamp::hidden::load_hidden(Path::new(&project_root));
-    // v2：tracked 概念不存在（Lore 无 git index），隐藏列表即 ignored；
-    // rule_ignored 由 .gitignore 规则判定，Lore 无忽略规则 → 恒空
-    Ok(serde_json::json!({ "tracked": [], "ignored": ignored, "rule_ignored": [] }))
+    // v2：忽略规则存项目级 .loreignore（Lore 原生过滤，status/stage 自动生效）；
+    // ignored 返回规则列表供设置界面展示；tracked 概念不存在
+    let root = PathBuf::from(&project_root);
+    let rules = keinestamp::hidden::load_ignore_rules(&root);
+    Ok(serde_json::json!({ "tracked": [], "ignored": rules, "rule_ignored": [] }))
 }
 
 #[tauri::command]
@@ -436,11 +433,11 @@ fn add_skip_worktree(project_root: String, path: String) -> Result<(), String> {
     validate_entry(&path)?;
     let root = PathBuf::from(&project_root);
     let normalized = path.trim_end_matches('/').to_string();
-    let mut list = keinestamp::hidden::load_hidden(&root);
-    if !list.iter().any(|h| *h == normalized) {
-        list.push(normalized);
+    let mut rules = keinestamp::hidden::load_ignore_rules(&root);
+    if !rules.iter().any(|r| *r == normalized) {
+        rules.push(normalized);
     }
-    map_err(keinestamp::hidden::save_hidden(&root, &list))
+    map_err(keinestamp::hidden::save_ignore_rules(&root, &rules))
 }
 
 #[tauri::command]
@@ -449,12 +446,12 @@ fn remove_ignore(project_root: String, entry: String) -> Result<(), String> {
     validate_entry(&entry)?;
     let root = PathBuf::from(&project_root);
     let needle = entry.trim_end_matches('/').to_string();
-    let list = keinestamp::hidden::load_hidden(&root);
-    let kept: Vec<String> = list
+    let rules = keinestamp::hidden::load_ignore_rules(&root);
+    let kept: Vec<String> = rules
         .into_iter()
-        .filter(|h| *h != needle)
+        .filter(|r| *r != needle)
         .collect();
-    map_err(keinestamp::hidden::save_hidden(&root, &kept))
+    map_err(keinestamp::hidden::save_ignore_rules(&root, &kept))
 }
 
 fn validate_entry(entry: &str) -> Result<(), String> {
@@ -476,43 +473,55 @@ fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
     validate_entry(&entry)?;
     let root = PathBuf::from(&project_root);
     let normalized = entry.trim_end_matches('/').to_string();
-    let mut list = keinestamp::hidden::load_hidden(&root);
-    if !list.iter().any(|h| *h == normalized) {
-        list.push(normalized);
+    let mut rules = keinestamp::hidden::load_ignore_rules(&root);
+    if !rules.iter().any(|r| *r == normalized) {
+        rules.push(normalized);
     }
-    map_err(keinestamp::hidden::save_hidden(&root, &list))
+    map_err(keinestamp::hidden::save_ignore_rules(&root, &rules))
 }
 
 #[tauri::command]
-async fn rollback(path: String, entry_id: String) -> Result<(), String> {
-    eprintln!("[debug] rollback({}, {})", path, &entry_id[..7.min(entry_id.len())]);
+async fn rollback(path: String, entry_id: String, discard: bool) -> Result<(), String> {
+    eprintln!("[debug] rollback({}, {}, discard={})", path, &entry_id[..7.min(entry_id.len())], discard);
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
         let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
         // Lore 回退 = branch reset，Lore 拒绝 dirty/staged 而非产生冲突 →
         // 错误契约保持 v1（无冲突文件时返回普通错误，CONFLICT| 分支不再触发）
-        map_err(keinestamp::lore_project::rollback(&meta.project_root, &entry_id, &hidden))
+        map_err(keinestamp::lore_project::rollback(&meta.project_root, &entry_id, &hidden, discard))
     });
     handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
-    eprintln!("[debug] get_rollback_state({})", path);
+    // 3 秒轮询高频调用：不打日志（轮询静默，错误由前端展示）
     let p = PathBuf::from(&path);
     let meta = read_meta(&p)?;
-    let st = map_err(keinestamp::lore_project::rollback_state(&meta.project_root))?;
-    let head_matches = match &st.revision {
-        Some(rp) => keinestamp::lore_backend::current_revision(&meta.project_root)
-            .map(|cur| cur == *rp)
-            .unwrap_or(false),
-        None => true,
-    };
-    Ok(serde_json::json!({
-        "rollback_point": st.revision,
-        "head_matches": head_matches,
-    }))
+    match keinestamp::timeline::read_marker(&meta.project_root) {
+        Ok(Some(m)) => {
+            let head_matches = keinestamp::lore_backend::current_revision(&meta.project_root)
+                .map(|cur| cur == m.rollback_point) // current == X-1（回退后 HEAD）
+                .unwrap_or(false);
+            Ok(serde_json::json!({
+                "rollback_point": m.superseded_point, // 灰显起点（选中的 X）
+                "head_matches": head_matches,
+                "deleted_files": m.deleted_files,
+                "change_files": m.change_files,
+                "modified_files": keinestamp::lore_project::rollback_modified_files(&meta.project_root)
+                    .unwrap_or_default(),
+            }))
+        }
+        Ok(None) => Ok(serde_json::json!({
+            "rollback_point": null,
+            "head_matches": true,
+            "deleted_files": [],
+            "change_files": [],
+            "modified_files": [],
+        })),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -529,11 +538,9 @@ async fn restore_rollback(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn get_rollback_conflicts(path: String) -> Result<Vec<String>, String> {
-    eprintln!("[debug] get_rollback_conflicts({})", path);
-    // Lore 无 git 式冲突列表概念：回退冲突由 `revision revert resolve mine/theirs` 处理
-    // （Task 9 决定 UI）；保留签名，返回空数组
-    let _ = path;
-    Ok(vec![])
+    let p = PathBuf::from(&path);
+    let meta = read_meta(&p)?;
+    map_err(keinestamp::lore_project::rollback_conflicts(&meta.project_root))
 }
 
 #[tauri::command]
@@ -546,9 +553,25 @@ fn keep_rollback_file(path: String, file: String) -> Result<(), String> {
 #[tauri::command]
 async fn resolve_rollback_conflicts(path: String, choices: Vec<Vec<String>>) -> Result<(), String> {
     eprintln!("[debug] resolve_rollback_conflicts({}, {} files)", path, choices.len());
-    let _ = choices;
-    let _ = path;
-    Ok(())
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
+        // choices 每项 = [path, "current"|"stashed"]（current=当前版本改动，stashed=回退前改动）
+        let pairs: Vec<(String, String)> = choices
+            .into_iter()
+            .filter_map(|c| match c.as_slice() {
+                [path, choice] => Some((path.clone(), choice.clone())),
+                _ => None,
+            })
+            .collect();
+        map_err(keinestamp::lore_project::resolve_rollback_conflicts(
+            &meta.project_root,
+            &hidden,
+            &pairs,
+        ))
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -869,6 +892,15 @@ fn list_installed_blender_versions() -> Vec<String> {
 }
 
 #[tauri::command]
+async fn delete_blender_version(version: String) -> Result<(), String> {
+    eprintln!("[debug] delete_blender_version({})", version);
+    let handle = tokio::task::spawn_blocking(move || {
+        keinestamp::blender_download::delete_blender_version(&version)
+    });
+    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn get_cached_blender_versions() -> Vec<String> {
     keinestamp::app_config::get_blender_versions()
 }
@@ -881,6 +913,16 @@ fn get_blender_path() -> String {
         .unwrap_or_default();
     eprintln!("[debug] get_blender_path → {:?}", result);
     result
+}
+
+#[tauri::command]
+fn get_current_blender_version() -> String {
+    keinestamp::blender_download::current_blender_version()
+}
+
+#[tauri::command]
+fn set_current_blender_version(version: String) -> Result<(), String> {
+    keinestamp::blender_download::set_current_blender_version(&version).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -947,6 +989,76 @@ fn get_deploy_server_url() -> String {
 fn set_deploy_server_url(url: String) {
     eprintln!("[debug] set_deploy_server_url()");
     keinestamp::app_config::set_deploy_server_url(&url);
+}
+
+#[tauri::command]
+fn get_lore_server_url() -> String {
+    keinestamp::app_config::get_lore_server_url()
+}
+
+#[tauri::command]
+fn set_lore_server_url(url: String) {
+    keinestamp::app_config::set_lore_server_url(&url);
+}
+
+#[tauri::command]
+fn get_auto_restore_project() -> bool {
+    keinestamp::app_config::get_auto_restore_project()
+}
+
+#[tauri::command]
+fn set_auto_restore_project(enabled: bool) {
+    keinestamp::app_config::set_auto_restore_project(enabled);
+}
+
+#[tauri::command]
+fn list_server_repos(url: String) -> Result<Vec<(String, String)>, String> {
+    keinestamp::lore_backend::list_server_repos(&url).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn check_lore_env() -> Result<serde_json::Value, String> {
+    match keinestamp::lore_backend::check_lore_env() {
+        Ok(info) => Ok(serde_json::json!({ "ok": true, "bin": info.bin, "version": info.version })),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+#[tauri::command]
+fn delete_server_repo(url: String, name: String) -> Result<(), String> {
+    keinestamp::lore_backend::delete_server_repo(&url, &name).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn test_lore_connection(host: String) -> bool {
+    keinestamp::lore_backend::lore_server_health(&host)
+}
+
+/// 离线仓库迁移为在线（服务器按 ID 预注册 + push），迁移后可备份
+#[tauri::command]
+async fn migrate_repo(path: String) -> Result<(), String> {
+    let handle = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p).map_err(|e| anyhow::anyhow!(e))?;
+        keinestamp::lore_backend::migrate_offline_to_online(&meta.project_root)
+    });
+    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn clone_server_repo(url: String, name: String, dest_parent: String) -> Result<String, String> {
+    let handle = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        let p = PathBuf::from(&dest_parent);
+        // 克隆 + init 补洞（.keinestamp 结构 + loreignore + recent）
+        let repo = keinestamp::lore_backend::clone_repo_to(&url, &name, &p)?;
+        let meta_path = keinestamp::config::meta_path(&repo);
+        if !meta_path.exists() {
+            keinestamp::init::init_project(&repo)?;
+        }
+        keinestamp::recent::RecentProjects::add_path(&repo);
+        Ok(repo.to_string_lossy().to_string())
+    });
+    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
 }
 
 static LOCAL_SERVERS: OnceLock<Mutex<HashMap<String, u16>>> = OnceLock::new();
@@ -1029,6 +1141,11 @@ pub fn run() {
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+            // 注入捆绑目录（安装包 resources/lore-bin；编译期注入的路径是构建机路径，运行时以资源目录为准）
+            if let Ok(res_dir) = app.path().resource_dir() {
+                keinestamp::lore_backend::set_bundled_lore_dir(res_dir.join("lore-bin"));
+            }
 
             let open_item = MenuItem::with_id(app, "open", "打开", true, None::<&str>)?;
             let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
@@ -1120,12 +1237,25 @@ pub fn run() {
             refresh_blender_versions,
             get_cached_blender_versions,
             list_installed_blender_versions,
+            delete_blender_version,
             get_blender_path,
             set_blender_path,
+            get_current_blender_version,
+            set_current_blender_version,
             get_deploy_token,
             set_deploy_token,
             get_deploy_server_url,
             set_deploy_server_url,
+            get_lore_server_url,
+            set_lore_server_url,
+            get_auto_restore_project,
+            set_auto_restore_project,
+            list_server_repos,
+            clone_server_repo,
+            delete_server_repo,
+            test_lore_connection,
+            migrate_repo,
+            check_lore_env,
             get_auto_connect,
             set_auto_connect,
             get_close_action,

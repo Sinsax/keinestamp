@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use std::time::{Duration, Instant, SystemTime};
 use tiny_http::{Header, Method, Response, Server};
@@ -72,6 +72,9 @@ pub struct ServeConfig {
     pub web_root: PathBuf,
     #[serde(default)]
     pub trust_proxy: bool,
+    /// 备份服务器开关：serve 启动时探测 41339 health，离线则拉起 loreserver（持久化 store，跟随 serve 生命周期）
+    #[serde(default)]
+    pub enable_loreserver: bool,
 }
 
 // 默认只监听本机：请使用 Caddy 反代对外提供服务；
@@ -1046,6 +1049,8 @@ pub fn auto_generate_config(path: &Path, port: u16, host: &str, web_root: &Path)
 port = {}
 deploy_token = "{}"
 web_root = "{}"
+# 备份服务器：true = serve 启动时拉起 loreserver（持久化 store，跟随 serve 生命周期）
+enable_loreserver = false
 "#,
         host, port, dt,
         canonical_root.to_string_lossy().replace('\\', "\\\\")
@@ -1065,66 +1070,198 @@ web_root = "{}"
 
 // --- Server start ---
 
-/// loreserver 可执行文件（同 LORE_BIN 风格，可用环境变量 KEINESTAMP_LORESERVER_BIN 覆盖）。
-const LORESERVER_BIN: &str = "C:\\Users\\para\\AppData\\Local\\lore\\bin\\loreserver.exe";
+// --- loreserver（备份服务器）拉起 ---
 
-fn loreserver_bin() -> String {
-    std::env::var("KEINESTAMP_LORESERVER_BIN").unwrap_or_else(|_| LORESERVER_BIN.to_string())
+/// loreserver 配置目录 / store 持久化目录（%APPDATA%/Keinestamp/ 下）
+pub fn loreserver_config_dir() -> std::path::PathBuf {
+    crate::app_config::default_app_config_path()
+        .parent()
+        .map(|p| p.join("lore-server-config"))
+        .unwrap_or_else(|| std::path::PathBuf::from("lore-server-config"))
 }
 
-/// 局域网备份链路：确保本机 loreserver 在线（serve 退出后子进程成为守护进程继续运行，不 kill）。
-/// - 探测 41339 端口，已有在线实例则直接复用（Ok(None)）
-/// - 否则用最小配置（immutable/mutable store 均指向 %APPDATA%/Keinestamp/lore-server-store）
-///   拉起 `loreserver.exe --config <dir>`，spawn 后轮询健康直至超时
-/// - 拉起失败/不健康仅打 warning（serve 继续，备份功能不可用）
-fn ensure_loreserver() -> Result<Option<std::process::Child>> {
-    if crate::lore_backend::server_available() {
-        return Ok(None);
+fn loreserver_store_dir() -> std::path::PathBuf {
+    crate::app_config::default_app_config_path()
+        .parent()
+        .map(|p| p.join("lore-server-store"))
+        .unwrap_or_else(|| std::path::PathBuf::from("lore-server-store"))
+}
+
+fn loreserver_bin() -> Option<std::path::PathBuf> {
+    let bin = crate::lore_backend::lore_bin();
+    let dir = std::path::Path::new(&bin).parent()?;
+    let name = if cfg!(target_os = "windows") { "loreserver.exe" } else { "loreserver" };
+    let p = dir.join(name);
+    p.exists().then_some(p)
+}
+
+/// 确保 local.toml 存在（持久化 store 路径；缺失时生成）
+fn ensure_loreserver_config() -> Result<()> {
+    let dir = loreserver_config_dir();
+    std::fs::create_dir_all(&dir)?;
+    let toml_path = dir.join("local.toml");
+    if !toml_path.exists() {
+        let store = loreserver_store_dir();
+        let cfg = format!(
+            "[immutable_store]\nmode = \"local\"\n[immutable_store.local]\npath = \"{}/immutable\"\n[mutable_store]\nmode = \"local\"\n[mutable_store.local]\npath = \"{}/mutable\"\n",
+            store.to_string_lossy().replace('\\', "/"),
+            store.to_string_lossy().replace('\\', "/")
+        );
+        std::fs::write(&toml_path, cfg)?;
     }
-    let base = std::env::var("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("."));
-    let cfg_dir = base.join("Keinestamp").join("lore-server-config");
-    let store_dir = base.join("Keinestamp").join("lore-server-store");
-    std::fs::create_dir_all(&cfg_dir).with_context(|| format!("failed to create {:?}", cfg_dir))?;
-    std::fs::create_dir_all(&store_dir).with_context(|| format!("failed to create {:?}", store_dir))?;
-    let store = store_dir.to_string_lossy().replace('\\', "\\\\");
-    let local_toml = format!(
-        r#"[immutable_store.local]
-path = "{}"
-flush_delay_seconds = 10
-[mutable_store.local]
-path = "{}"
-flush_delay_seconds = 10
-"#,
-        store, store
-    );
-    std::fs::write(cfg_dir.join("local.toml"), &local_toml)
-        .with_context(|| format!("failed to write {:?}", cfg_dir.join("local.toml")))?;
-    log_info("LORESERVER", &format!("spawning loreserver with config {:?}", cfg_dir));
-    let child = std::process::Command::new(loreserver_bin())
-        .arg("--config")
-        .arg(&cfg_dir)
-        .spawn()
-        .context("failed to spawn loreserver (备份不可用，请检查 loreserver 安装)")?;
-    for _ in 0..5 {
-        std::thread::sleep(Duration::from_secs(1));
-        if crate::lore_backend::server_available() {
-            return Ok(Some(child));
+    Ok(())
+}
+
+/// 探测 loreserver 在线（HTTP health_check，41339；复用 lore_backend 探测逻辑）
+pub fn loreserver_online() -> bool {
+    crate::lore_backend::lore_server_health("127.0.0.1")
+}
+
+/// loreserver 启动输出解析：版本 / store 路径（immutable+mutable）/ 认证状态。
+/// 输出来自 `Server version: x` 与 `Loaded config: Settings { ... }` 行。
+fn parse_loreserver_info(output: &str) -> (String, String, String) {
+    let version = output
+        .lines()
+        .find_map(|l| {
+            l.trim()
+                .strip_prefix("Server version:")
+                .map(|s| s.trim().to_string())
+        })
+        .unwrap_or_else(|| "未知".to_string());
+    // Loaded config 里 store 路径形如 `LocalImmutableStoreSettings { ..., path: "C:/...", ... }`
+    let mut stores: Vec<String> = Vec::new();
+    for anchor in ["LocalImmutableStoreSettings", "LocalMutableStoreSettings"] {
+        if let Some(start) = output.find(anchor) {
+            let rest = &output[start..];
+            if let Some(p) = rest.find("path: \"") {
+                let v = &rest[p + 7..];
+                if let Some(end) = v.find('"') {
+                    if !v[..end].is_empty() {
+                        stores.push(v[..end].to_string());
+                    }
+                }
+            }
         }
     }
-    log_warn("LORESERVER", "loreserver 已拉起但未通过健康检查 (127.0.0.1:41339)，备份功能不可用");
-    Ok(Some(child))
+    let store = if stores.is_empty() {
+        "默认（系统临时目录，重启丢失）".to_string()
+    } else {
+        stores.join(" | ")
+    };
+    let auth = if output.contains("auth: None") {
+        "无认证，仅限可信局域网".to_string()
+    } else {
+        "已配置认证".to_string()
+    };
+    (version, store, auth)
+}
+
+/// 确保 loreserver 在线：探测 → 离线则拉起（--config 持久化）→ 轮询等待健康（~10s）。
+/// 返回拉起的子进程（调用方负责退出时 kill）；已在线则 None。
+/// 拉起后解析启动输出（版本/store 路径/认证）打印结构化日志；常驻读取线程转发后续输出防管道阻塞。
+pub fn ensure_loreserver() -> Result<Option<std::process::Child>> {
+    if loreserver_online() {
+        log_info("LORESERVER", "already online");
+        return Ok(None);
+    }
+    let bin = loreserver_bin().context("loreserver 未找到（Lore 安装目录）")?;
+    ensure_loreserver_config()?;
+    let cfg_dir = loreserver_config_dir();
+    log_info("LORESERVER", &format!("starting {}", bin.display()));
+    let mut child = crate::process_util::hide_console(std::process::Command::new(&bin))
+        .arg("--config")
+        .arg(&cfg_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| anyhow::anyhow!("拉起 loreserver 失败: {}", e))?;
+    let stdout = child.stdout.take();
+    let stderr = child.stderr.take();
+    // 读取线程：就绪前收集到共享缓冲（供解析），就绪后逐行转发（防管道写满阻塞）
+    let startup_buf: Arc<Mutex<String>> = Arc::new(Mutex::new(String::new()));
+    let ready: Arc<AtomicBool> = Arc::new(AtomicBool::new(false));
+    if let Some(mut so) = stdout {
+        let buf = startup_buf.clone();
+        let ready = ready.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut b = [0u8; 4096];
+            loop {
+                match so.read(&mut b) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let s = String::from_utf8_lossy(&b[..n]).into_owned();
+                        if ready.load(Ordering::Relaxed) {
+                            for line in s.lines() {
+                                if !line.trim().is_empty() {
+                                    log_info("LORESERVER", &format!("> {}", line.trim()));
+                                }
+                            }
+                        } else if let Ok(mut g) = buf.lock() {
+                            g.push_str(&s);
+                        }
+                    }
+                }
+            }
+        });
+    }
+    if let Some(mut se) = stderr {
+        let buf = startup_buf.clone();
+        let ready = ready.clone();
+        std::thread::spawn(move || {
+            use std::io::Read;
+            let mut b = [0u8; 4096];
+            loop {
+                match se.read(&mut b) {
+                    Ok(0) | Err(_) => break,
+                    Ok(n) => {
+                        let s = String::from_utf8_lossy(&b[..n]).into_owned();
+                        if ready.load(Ordering::Relaxed) {
+                            for line in s.lines() {
+                                if !line.trim().is_empty() {
+                                    log_warn("LORESERVER", &format!("> {}", line.trim()));
+                                }
+                            }
+                        } else if let Ok(mut g) = buf.lock() {
+                            g.push_str(&s);
+                        }
+                    }
+                }
+            }
+        });
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        if loreserver_online() {
+            ready.store(true, Ordering::Relaxed);
+            // 结构化信息输出（版本/store/认证）
+            let startup_out = startup_buf.lock().map(|g| g.clone()).unwrap_or_default();
+            let (version, store, auth) = parse_loreserver_info(&startup_out);
+            log_info("LORESERVER", &format!("lore {}（{}）", version, auth));
+            log_info("LORESERVER", &format!("store: {}", store));
+            log_info("LORESERVER", "监听 41337 (gRPC/QUIC) + 41339 (HTTP)");
+            return Ok(Some(child));
+        }
+        if let Ok(Some(status)) = child.try_wait() {
+            anyhow::bail!("loreserver 启动后退出: {}", status);
+        }
+    }
+    let _ = child.kill();
+    anyhow::bail!("loreserver 启动超时（10s）")
 }
 
 pub fn start(config: ServeConfig) -> Result<()> {
+    // 前置依赖检测：Lore v0.8.6 缺失/版本不符 → 拒绝启动
+    crate::lore_backend::check_lore_env().context("Lore 前置依赖检查失败")?;
     let _ = TRUST_PROXY.set(config.trust_proxy);
-    // 拉起 loreserver（局域网备份链路）：已有实例复用，失败仅告警不阻断 serve。
-    // 注意：serve 退出后该子进程会继续在后台运行（守护语义），需停止时手动结束进程。
-    match ensure_loreserver() {
-        Ok(Some(_child)) => log_info("LORESERVER", "loreserver ready (41337/41339), 备份功能可用"),
-        Ok(None) => log_info("LORESERVER", "loreserver already running, reusing"),
-        Err(e) => log_warn("LORESERVER", &format!("loreserver 启动失败: {}（备份功能不可用）", e)),
+    // 拉起 loreserver（跟随 serve 生命周期：退出时 kill 本进程拉起的实例；外部已在线不杀）
+    let mut loreserver_child: Option<std::process::Child> = None;
+    if config.enable_loreserver {
+        match ensure_loreserver() {
+            Ok(c) => loreserver_child = c,
+            Err(e) => log_warn("LORESERVER", &format!("failed to start: {}", e)),
+        }
     }
     let addr = format!("{}:{}", config.host, config.port);
     let server = Server::http(&addr)
@@ -1180,6 +1317,13 @@ pub fn start(config: ServeConfig) -> Result<()> {
             let _guard = SlotGuard(active);
             let _ = handle_request(request, url, method, req_ip, dt, pt, pi, wv, wr, lu, rl, brl);
         });
+    }
+
+    // serve 退出：kill 拉起的 loreserver（跟随服务端生命周期）
+    if let Some(mut child) = loreserver_child {
+        log_info("LORESERVER", "stopping spawned loreserver");
+        let _ = child.kill();
+        let _ = child.wait();
     }
 
     Ok(())
@@ -1748,9 +1892,31 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parse_loreserver_info_extracts_version_store_auth() {
+        let out = r#"Server version: 0.8.6+373
+Using environment: local
+Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSettings { composite: None, local: Some(LocalImmutableStoreSettings { compaction_delay: None, eviction_delay: None, flush_delay_seconds: 10, path: "C:/Users/x/AppData/Roaming/Keinestamp/lore-server-store/immutable", max_capacity: None, max_size: None }), mode: "local", remote: None }, mutable_store: MutableStoreSettings { local: Some(LocalMutableStoreSettings { flush_delay_seconds: 10, path: "C:/Users/x/AppData/Roaming/Keinestamp/lore-server-store/mutable" }), mode: "local", remote: None }, server: ServerSettings { auth: None, grpc: Some(GrpcSettings { port: 41337 }) } }"#;
+        let (version, store, auth) = parse_loreserver_info(out);
+        assert_eq!(version, "0.8.6+373");
+        assert_eq!(
+            store,
+            "C:/Users/x/AppData/Roaming/Keinestamp/lore-server-store/immutable | C:/Users/x/AppData/Roaming/Keinestamp/lore-server-store/mutable"
+        );
+        assert!(auth.contains("无认证"));
+    }
+
+    #[test]
+    fn parse_loreserver_info_tolerates_minimal_output() {
+        let (version, store, auth) = parse_loreserver_info("nothing here");
+        assert_eq!(version, "未知");
+        assert!(store.contains("默认"));
+        assert_eq!(auth, "已配置认证");
+    }
+
+    #[test]
     fn projects_roundtrip_persists_tokens_and_ids() {
         let dir = std::env::temp_dir().join(format!("ks_proj_test_{}", std::process::id()));
-        let web_root = dir.join("web");
+        let web_root = dir.join(".keinestamp").join("web");
         std::fs::create_dir_all(&web_root).unwrap();
         let mut tokens = HashMap::new();
         tokens.insert("site-a".to_string(), "tok123".to_string());
@@ -1766,7 +1932,7 @@ mod tests {
     #[test]
     fn projects_load_tolerates_missing_and_corrupt_files() {
         let dir = std::env::temp_dir().join(format!("ks_proj_bad_{}", std::process::id()));
-        let web_root = dir.join("web");
+        let web_root = dir.join(".keinestamp").join("web");
         std::fs::create_dir_all(&web_root).unwrap();
         let (t, i) = load_projects(&web_root);
         assert!(t.is_empty() && i.is_empty());

@@ -1,5 +1,5 @@
 ﻿<script lang="ts">
-  import { parseStatus, ruleHidden, type StatusFile } from './statusParse'
+  import { parseStatus, ruleHidden, findRuleHidden, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
   import { untrack } from 'svelte'
@@ -11,7 +11,12 @@
     activePath = '',
     selection = null,
     statusError = false,
+    statusErrorMsg = '',
     rollbackActive = false,
+    trackedFiles = [],
+    rollbackChangeFiles = [],
+    rollbackDeletedFiles = [],
+    rollbackModifiedFiles = [],
     onSelectionChange = (_sel: string[] | null) => {},
   }: {
     statusOutput: string
@@ -19,11 +24,16 @@
     activePath?: string
     selection?: string[] | null
     statusError?: boolean
+    statusErrorMsg?: string
     rollbackActive?: boolean
+    trackedFiles?: string[]
+    rollbackChangeFiles?: string[]
+    rollbackDeletedFiles?: string[]
+    rollbackModifiedFiles?: string[]
     onSelectionChange?: (sel: string[] | null) => void
   } = $props()
 
-  const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp.toml', 'web']
+  const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp']
 
   function isHiddenPath(p: string): boolean {
     return HIDDEN_PREFIXES.some((h) => p === h || p.startsWith(h + '/'))
@@ -33,6 +43,10 @@
     parseStatus(statusOutput).filter((f) => !isHiddenPath(f.path))
   )
   const statusMap = $derived(Object.fromEntries(statusFiles.map((f) => [f.path, f])) as Record<string, StatusFile>)
+  // 回退版本改动标记：change_files（检出）+ deleted_files（回退删除，只读）+ modified_files（真修改）
+  const rollbackChangeSet = $derived(new Set(rollbackActive ? rollbackChangeFiles : []))
+  const rollbackDeletedSet = $derived(new Set(rollbackActive ? rollbackDeletedFiles : []))
+  const rollbackModifiedSet = $derived(new Set(rollbackActive ? rollbackModifiedFiles : []))
   const visibleFiles = $derived.by(() => {
     const seen = new Set<string>()
     const out: string[] = []
@@ -42,12 +56,21 @@
         out.push(f.path)
       }
     }
-    for (const p of ignoredSet) {
+    // 被忽略文件（规则匹配）灰显加入树：匹配真实文件而非规则文本（如 scene.blend 而非 *.blend）
+    for (const p of trackedFiles) {
       if (isHiddenPath(p)) continue
-      if (!seen.has(p)) {
+      if (seen.has(p)) continue
+      if (isIgnored(p)) {
         seen.add(p)
         out.push(p)
       }
+    }
+    // 回退删除文件：磁盘保留、只读标记（回退状态下；marker 清除后自然不在列表）
+    for (const p of rollbackDeletedFiles) {
+      if (isHiddenPath(p)) continue
+      if (seen.has(p)) continue
+      seen.add(p)
+      out.push(p)
     }
     return out
   })
@@ -220,6 +243,12 @@
   let trackedSet = $state<Set<string>>(new Set())
   let ignoredSet = $state<Set<string>>(new Set())
   let ruleIgnoredSet = $state<Set<string>>(new Set())
+  let hiddenCollapsed = $state(true)
+  let hiddenInput = $state('')
+
+  // 预设规则（.keinestamp/ 下配置与缓存）不显示在管理列表，但保留在 .loreignore 中
+  const PRESET_HIDDEN = new Set(['.keinestamp/.keinestamp.toml', '.keinestamp/web/timeline.json'])
+  const userHiddenRules = $derived([...ignoredSet].filter((r) => !PRESET_HIDDEN.has(r)))
   let menuEl = $state<HTMLElement | null>(null)
 
   function openContextMenu(path: string, isDir: boolean, x: number, y: number) {
@@ -294,6 +323,30 @@
     } catch {}
   }
 
+  async function addHiddenRule() {
+    const rule = hiddenInput.trim()
+    if (!rule || !activePath) return
+    try {
+      await addToGitignore(activePath, rule)
+      hiddenInput = ''
+      await refreshIgnoreInfo()
+      onRefresh()
+    } catch (e) {
+      console.error('add hidden rule failed', e)
+    }
+  }
+
+  async function removeHiddenRule(rule: string) {
+    if (!activePath) return
+    try {
+      await removeIgnore(activePath, rule)
+      await refreshIgnoreInfo()
+      onRefresh()
+    } catch (e) {
+      console.error('remove hidden rule failed', e)
+    }
+  }
+
   function closeContextMenu() {
     contextMenu = null
   }
@@ -364,7 +417,11 @@
     const menu = contextMenu
     closeContextMenu()
     if (!menu) return
-    const rule = menu.isDir ? `${menu.path}/` : menu.path
+    // 删除命中的规则（路径 → 规则文本：scene.blend → *.blend），而非传路径本身
+    const rule =
+      findRuleHidden(menu.path, ignoredSet) ||
+      findRuleHidden(menu.path, ruleIgnoredSet) ||
+      (menu.isDir ? `${menu.path}/` : menu.path)
     try {
       await removeIgnore(activePath, rule)
       await refreshIgnoreInfo()
@@ -379,8 +436,8 @@
 
 <div class="status-panel">
   <div class="sp-header">
-    <span class="sp-title">Changes</span>
-    <span class="sp-count">{selectedCount}/{statusFiles.length} file{statusFiles.length !== 1 ? 's' : ''}</span>
+    <span class="sp-title">变更</span>
+    <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件</span>
     <div class="sp-spacer"></div>
     {#if !allSelected}
       <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
@@ -388,7 +445,7 @@
     {#if selectedCount > 0}
       <button class="sp-select-all" onclick={selectNone} title="全部取消">全不选</button>
     {/if}
-    <button class="sp-refresh" onclick={onRefresh} title="Refresh status">
+    <button class="sp-refresh" onclick={onRefresh} title="刷新状态">
       <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 3a5 5 0 014.546 2.916.5.5 0 01-.908.417A4 4 0 108 11.5a4.002 4.002 0 003.392-1.87.5.5 0 11.854.52A5 5 0 113 8a5 5 0 015-5z"/><path d="M11.5 3.5A.5.5 0 0112 4v2.5a.5.5 0 01-.5.5H9a.5.5 0 010-1h1.802A4.003 4.003 0 004 8a.5.5 0 01-1 0 5 5 0 015-5 .5.5 0 01.5.5z"/></svg>
     </button>
   </div>
@@ -398,7 +455,7 @@
       <div class="sp-empty-icon"><svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor" opacity="0.5"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg></div>
       {#if statusError}
         <div>状态获取失败</div>
-        <div style="font-size:12px">git status 读取出错，点击刷新重试</div>
+        <div style="font-size:12px" title={statusErrorMsg}>{statusErrorMsg || 'Lore 状态读取出错，点击刷新重试'}</div>
       {:else}
         <div>无变更 — 工作区干净</div>
       {/if}
@@ -421,10 +478,54 @@
           ignored={isIgnored(node.path)}
           isIgnoredFn={isIgnored}
           dirAllIgnoredFn={dirAllIgnored}
+          rollbackChangeSet={rollbackChangeSet}
+          rollbackDeletedSet={rollbackDeletedSet}
+          rollbackModifiedSet={rollbackModifiedSet}
         />
       {/each}
     </div>
   {/if}
+
+  <!-- 忽略文件/格式管理（默认折叠；规则存项目级 .loreignore，随仓库历史；手动输入规则） -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+  <div class="sp-hidden-block">
+    <div
+      class="sp-hidden-header"
+      onclick={() => (hiddenCollapsed = !hiddenCollapsed)}
+      title="忽略文件/格式：手动输入规则（如 cache/、*.tmp），或在变更列表右键设置"
+    >
+      <span class="sp-hidden-caret">{hiddenCollapsed ? '▸' : '▾'}</span>
+      <span>忽略文件/格式</span>
+      {#if userHiddenRules.length > 0}
+        <span class="sp-hidden-count">{userHiddenRules.length}</span>
+      {/if}
+    </div>
+    {#if !hiddenCollapsed}
+      <div class="sp-hidden-body">
+        <span class="sp-hidden-hint">手动输入规则（如 cache/、*.tmp），或右键变更列表中的文件设置</span>
+        <div class="sp-hidden-list">
+          {#each userHiddenRules as rule}
+            <div class="sp-hidden-row">
+              <span class="sp-hidden-rule" title={rule}>{rule}</span>
+              <button class="sp-hidden-del" title="移除隐藏" onclick={() => removeHiddenRule(rule)}>×</button>
+            </div>
+          {/each}
+          {#if userHiddenRules.length === 0}
+            <span class="sp-hidden-empty">无用户隐藏规则</span>
+          {/if}
+        </div>
+        <div class="sp-hidden-input-row">
+          <input
+            type="text"
+            bind:value={hiddenInput}
+            placeholder="输入路径/格式，如 cache/ 或 *.tmp"
+            onkeydown={(e) => { if (e.key === 'Enter') addHiddenRule() }}
+          />
+          <button onclick={addHiddenRule} disabled={!hiddenInput.trim()}>添加</button>
+        </div>
+      </div>
+    {/if}
+  </div>
 
   {#if contextMenu}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -527,6 +628,15 @@
   }
   :global(.sp-item:hover) { background: var(--surface); }
   :global(.sp-item.sp-dir) { cursor: pointer; }
+  /* 整行状态着色：回退改动/已修改=黄、新增=绿、回退删除/已删除=红、未跟踪=灰（hover 加深覆盖默认） */
+  :global(.sp-item.sp-st-m) { background: color-mix(in srgb, var(--warning) 16%, transparent); }
+  :global(.sp-item.sp-st-m:hover) { background: color-mix(in srgb, var(--warning) 26%, transparent); }
+  :global(.sp-item.sp-st-a) { background: color-mix(in srgb, var(--success) 14%, transparent); }
+  :global(.sp-item.sp-st-a:hover) { background: color-mix(in srgb, var(--success) 24%, transparent); }
+  :global(.sp-item.sp-st-d) { background: color-mix(in srgb, var(--error) 12%, transparent); }
+  :global(.sp-item.sp-st-d:hover) { background: color-mix(in srgb, var(--error) 22%, transparent); }
+  :global(.sp-item.sp-st-u) { background: color-mix(in srgb, var(--text-dim) 10%, transparent); }
+  :global(.sp-item.sp-st-u:hover) { background: color-mix(in srgb, var(--text-dim) 18%, transparent); }
   :global(.sp-check) {
     width: 14px;
     height: 14px;
@@ -554,11 +664,27 @@
     font-family: var(--mono);
     font-size: 12px;
   }
-  :global(.sp-label) {
+  :global(.sp-badges) {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+  }
+  :global(.sp-badge) {
     font-size: 10px;
     font-weight: 500;
     text-transform: uppercase;
-    flex-shrink: 0;
+    padding: 0 5px;
+    border-radius: 4px;
+    white-space: nowrap;
+  }
+  :global(.sp-badge.sp-badge-rb) {
+    background: color-mix(in srgb, var(--warning) 22%, transparent);
+    color: var(--warning);
+  }
+  :global(.sp-badge.sp-badge-rbd) {
+    background: color-mix(in srgb, var(--error) 16%, transparent);
+    color: var(--error);
   }
   .ctx-backdrop {
     position: fixed;
@@ -604,5 +730,117 @@
     height: 1px;
     background: var(--border);
     margin: 4px 6px;
+  }
+  .sp-hidden-block {
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .sp-hidden-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    cursor: pointer;
+    user-select: none;
+  }
+  .sp-hidden-header:hover {
+    color: var(--accent);
+  }
+  .sp-hidden-caret {
+    font-size: 9px;
+  }
+  .sp-hidden-count {
+    font-size: 10px;
+    padding: 0 6px;
+    border-radius: 8px;
+    background: var(--surface2);
+    color: var(--text-dim);
+  }
+  .sp-hidden-body {
+    padding: 0 10px 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .sp-hidden-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    max-height: 140px;
+    overflow-y: auto;
+  }
+  .sp-hidden-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 3px 8px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-size: 11px;
+  }
+  .sp-hidden-rule {
+    font-family: var(--mono, monospace);
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sp-hidden-del {
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 0 3px;
+    line-height: 1;
+  }
+  .sp-hidden-del:hover {
+    color: var(--error);
+  }
+  .sp-hidden-empty {
+    font-size: 11px;
+    color: var(--text-dim);
+    padding: 2px 0;
+  }
+  .sp-hidden-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+  }
+  .sp-hidden-input-row {
+    display: flex;
+    gap: 6px;
+  }
+  .sp-hidden-input-row input {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
+    padding: 3px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .sp-hidden-input-row button {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .sp-hidden-input-row button:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .sp-hidden-input-row button:disabled {
+    opacity: 0.4;
+    cursor: default;
   }
 </style>

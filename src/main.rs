@@ -114,6 +114,11 @@ enum Commands {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
+    // 前置依赖检测：Lore v0.8.6（编译期捆绑；缺失/版本不符 → 报错退出）
+    if let Err(e) = keinestamp::lore_backend::check_lore_env() {
+        eprintln!("错误：{}", e);
+        std::process::exit(1);
+    }
     match cli.command {
         Some(Commands::Init { path }) => {
             let result = keinestamp::init::init_project(&path);
@@ -191,7 +196,7 @@ fn cmd_record(path: &Path, message: &str) -> anyhow::Result<()> {
 fn cmd_push(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    keinestamp::lore_backend::run_lore(&meta.project_root, &["push"])
+    keinestamp::lore_backend::push_to_server(&meta.project_root)
         .map_err(|e| anyhow::anyhow!("推送失败: {}", e))?;
     println!("已推送到远端");
     Ok(())
@@ -222,7 +227,7 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("先撤销上次回退失败: {}", e))?;
     }
 
-    keinestamp::lore_project::rollback(&meta.project_root, &full, &hidden)?;
+    keinestamp::lore_project::rollback(&meta.project_root, &full, &hidden, false)?;
     println!("已回退到记录 {}（可用 restore 恢复）", &full[..7.min(full.len())]);
     Ok(())
 }

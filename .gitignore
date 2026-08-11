@@ -14,3 +14,7 @@ _three/
 !frontend/src/assets/logo.png
 !src-tauri/icons/*.png
 !src-tauri/icons/icon.ico
+
+# Lore 构建产物（build.rs 自动下载生成）
+src-tauri/resources/lore-bin/
+

@@ -32,7 +32,11 @@ pub fn deploy_to_server(
     let upload_url = format!("{}/upload", server_url.trim_end_matches('/'));
     eprintln!("[debug] deploy_to_server: posting to {}", upload_url);
 
-    let project_root = web_root.parent().unwrap_or(web_root);
+    // web_root = <项目根>/.keinestamp/web → 项目根 = parent().parent()
+    let project_root = web_root
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(web_root);
     let web_count = crate::lore_project::web_revision_count(project_root).unwrap_or(0);
     let agent = ureq::AgentBuilder::new()
         .timeout(std::time::Duration::from_secs(120))

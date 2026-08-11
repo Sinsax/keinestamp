@@ -6,10 +6,36 @@
 
 ## 0. 架构事实（验证门最重要结论）
 
-- **Lore 无纯本地（无服务器）模式**：所有操作依赖 `loreserver` 在线（`lore://host:port/<name>`）。Keinestamp v2 的本地使用 = 本机 spawn loreserver 子进程（同 Task 10 serve 集成方案，GUI 启动时也要拉起）。
-- 无配置启动 loreserver = demo 模式：监听 41337（QUIC/gRPC）/ 41339（HTTP），store 在系统临时目录（`<temp>/lore-server`），auth 关闭，自签证书。
-- 健康检查：`curl.exe http://127.0.0.1:41339/health_check` → `HTTP/1.1 200 OK`。
-- 持久化服务器（生产 serve 集成）配置见 Task 10。
+- **纯本地离线模式可用**（Keinestamp v2 采用）：`lore --offline repository create <名字>` 完全本地建仓（实测）：
+  - 中文目录路径 OK（仓库名与目录解耦；Lore 路径 UTF-8 原生）
+  - 仓库名只允许 ASCII（源码 `is_valid_name`：字母数字 + `/_-.`，中文被拒）→ Keinestamp 用随机 32 hex 仓库名
+  - config.toml 的 `remote_url = ""`（空）→ push 报 `No remote configured`
+  - status/commit/history/回退/导出全链路本地可用（无服务器）
+- **服务器（loreserver）仅局域网备份/部署链路需要**（备份实测结论，2026-08-11）：
+  - 无配置启动 loreserver = demo 模式：监听 41337（QUIC/gRPC）/ 41339（HTTP），store 在系统临时目录，auth 关闭
+  - 健康检查：`curl.exe http://127.0.0.1:41339/health_check` → `HTTP/1.1 200 OK`
+  - **持久化服务器**：`loreserver --config <dir>`（dir 内 `local.toml`，键结构实测）：
+    ```toml
+    [immutable_store]
+    mode = "local"
+    [immutable_store.local]
+    path = "C:/.../lore-server-store/immutable"
+    [mutable_store]
+    mode = "local"
+    [mutable_store.local]
+    path = "C:/.../lore-server-store/mutable"
+    ```
+    启动日志打印 `Loaded config: Settings {...}` 可核对；重启后数据保留（clone 验证通过）；`--config` 空目录 = 内置默认（store 在 temp，重启丢）
+  - 服务器 store 默认不驱逐不压实（max_capacity/max_size 默认 none，只增不减；增长 = 去重后增量）
+- **备份链路（push 实测）**：
+  - `lore commit <MESSAGE>` 是**位置参数**（`-m` 不存在，报 `unexpected argument '-m'`）——速查表修正
+  - **push 必须"在线创建"的仓库**（`lore repository create lore://host:port/<name>`，remote_url 自动绑定 `lore://host:port` 无仓库名）；**离线仓库（--offline create）push 输出"Pushed"但数据不到服务器**（远端查无此仓库，clone 报 `Not found`）→ 备份不支持离线仓库
+  - 在线仓库首推自动 `Creating branch main at 0000...` + `Pushed revision N -> <sig> to branch main`；增量 push `Local branch is N revision(s) ahead of remote`；clone 往返内容一致
+  - `lore repository config set` 不存在（只有 `get`）→ remote_url 直接改 config.toml
+  - push 到远端空/无分支 → `[Error] reconciling branch history: failed to find a branch point`（此报错 = 无 revision 可推/远端无共同祖先）
+  - `lore repository create --force` 在已有仓库上会**重建本地仓库丢历史** → 不可用于离线补注册
+  - **离线仓库迁移为在线（实测可行）**：`lore repository create <url>/<名> --id <离线仓库ID>`（空目录）→ 服务器按 ID 注册 + 绑定名字 → 离线仓库（remote_url 已设）push 真正生效，**本地 store/hash/历史全保留**（无需重建重放）；ID 读取 = `.lore/id` 16 字节 → 逐字节 hex（32hex）
+  - `lore repository delete <url>/<name>` 删服务器仓库 → `Repository deleted successfully`（不存在报 `[Error] Not found`）
 
 ## 1. 通用规则
 
@@ -23,12 +49,21 @@
 
 | 命令 | 实测输出 / 说明 |
 |---|---|
-| `lore repository create lore://127.0.0.1:41337/<name>` | `Created repository <name> in <path> with ID <32hex>`；在 cwd 建 `.lore/` |
-| `lore repository list lore://host:port` | 每行 `<name> (<id>)` |
+| `lore --offline repository create <名字>` | **纯本地建仓**（不连服务器）：`Created repository <名字> in <path> with ID <32hex>`；config.toml `remote_url = ""`；名字限 ASCII（字母数字 + `/_-.`） |
+| `lore repository create lore://127.0.0.1:41337/<name>` | 在线建仓（服务器注册）：`Created repository <name> in <path> with ID <32hex>`；服务器同名仓库报错（`RepositoryAlreadyExists`） |
+| `lore repository list lore://host:port` | 每行 `<name> (<id>)`（需服务器在线） |
 | `lore repository config get <key>` | 键为 config.toml 字段（实测 `remote_url` 可用→`lore://127.0.0.1:41337`）；未知键报 `[Error] Invalid repository path`（误导性报错，实际是键不存在） |
 | config.toml 结构 | `remote_url`；`[store] max_capacity=2000000 eviction_delay=30 max_size=10737418240 compaction_delay=50`；`[file] direct_write/direct_io/flush_write` |
 
-**忽略规则：无原生支持**（config get 无 ignore 键）→ 按计划走 GUI 隐藏列表方案（`web/` 预设隐藏）。
+**忽略规则：原生支持 `.loreignore`**（Task 1 曾记"无原生忽略"——当时只测了 config 键，实测 `.loreignore` 文件生效）：
+- 位置：仓库根 `<root>/.loreignore`（固定位置，无嵌套支持；规则可指向任意路径）
+- 语法（gitignore 风格，源码 filter.rs）：空行/`#` 注释、`!` 否定、尾 `/` 目录、首 `/` 根锚定、无 `/` 规则 = 任意层级文件名、`**` 递归、**大小写不敏感**（规则与路径均小写化）
+- 生效：每次打开仓库自动加载；status --scan / stage --scan 原生过滤（被忽略文件不显示、不可 stage）
+- `.loreignore` 自身**会被提交跟踪**（无自排除；规则随仓库历史，clone 后自动生效）
+- 无 CLI 写命令，纯文件维护
+- **BOM 陷阱（实测）**：文件带 UTF-8 BOM 时**首行规则失效**（PowerShell `Set-Content -Encoding UTF8` 会写 BOM）→ 写入必须无 BOM，读取时 strip BOM
+- **点开头文件不可 stage（实测）**：`lore stage .loreignore` → `[Error] Invalid path`（stage.rs:172，所有点开头文件被拒——.loreignore 本身无法直接提交）；**`lore --force stage <点开头文件>` 可绕过**（内容变化时正常 stage/commit；无变化输出 "No changes staged" exit 0）——Keinestamp 的 .loreignore 自动记录靠它
+- **不能排除 web 目录**（Keinestamp：web 在 `.keinestamp/web/`，排除会导致 commit_web 无法 stage）→ 应用层过滤 `.keinestamp/` 前缀
 
 ## 3. status（StatusPanel 依赖）
 

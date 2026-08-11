@@ -9,7 +9,6 @@
     selectedId,
     activePath = '',
     onSelect,
-    onDblClick,
     accessToken = '',
     onTokenChange,
     siteName = '',
@@ -27,7 +26,6 @@
     selectedId: string
     activePath?: string
     onSelect: (id: string) => void
-    onDblClick: (entry: TimelineEntry) => void
     accessToken?: string
     onTokenChange?: (val: string) => void
     siteName?: string
@@ -78,12 +76,11 @@
     if (m) onRollback(m.entry)
   }
 
-  let rollbackIndex = $derived(rollbackPoint ? entries.findIndex((e) => e.id === rollbackPoint) : -1)
+  const ctxRollbackDisabled = $derived(rollbackBusy || (ctxMenu ? isEntryDimmed(ctxMenu.entry) : false))
 
-  function isDimmed(index: number): boolean {
-    if (!rollbackPoint) return false
-    if (rollbackIndex < 0) return true
-    return index <= rollbackIndex
+  // 只有当前选中回退的记录（superseded_point = X）灰显不可回退；其余记录（含 X 之后、被顶替出主线的）均可回退。
+  function isEntryDimmed(entry: TimelineEntry): boolean {
+    return !!rollbackPoint && entry.id === rollbackPoint
   }
 
   let editingToken = $state(false)
@@ -183,12 +180,6 @@
     return e.files.filter((f, i) => !f.endsWith('.blend') && e.file_status?.[i] !== 'A')
   })
 
-  let blendFiles = $derived((entryId: string) => {
-    const e = entries.find(x => x.id === entryId)
-    if (!e) return []
-    return e.files.filter(f => f.endsWith('.blend'))
-  })
-
   interface GroupedEntry {
     entry: TimelineEntry
     showGroup: boolean
@@ -200,6 +191,11 @@
     const result: GroupedEntry[] = []
     let lastTag: string | null | undefined = undefined
     for (const entry of entries) {
+      if (entry.superseded) {
+        // 被顶替记录：不参与 tag 分组，折叠组由模板按连续段渲染
+        result.push({ entry, showGroup: false, groupLabel: '', groupColor: '' })
+        continue
+      }
       const entryTag = entry.tag || null
       const showGroup = entryTag !== lastTag
       lastTag = entryTag
@@ -212,6 +208,10 @@
     }
     return result
   })
+
+  // 被顶替记录折叠组（默认折叠）
+  let supersededOpen = $state(false)
+  const supersededCount = $derived(entries.filter((e) => e.superseded).length)
 
   interface DiffLine {
     lineNum: number
@@ -298,7 +298,7 @@
       {@const entry = g.entry}
       {@const entryTag = entry.tag || null}
       {@const textF = entry.files.map((f, i) => ({ file: f, status: entry.file_status?.[i] || '', idx: i })).filter(x => !x.file.endsWith('.blend') && x.status !== 'A')}
-      {@const blendF = entry.files.filter(f => f.endsWith('.blend'))}
+      {@const prevEntry = grouped[i - 1]?.entry}
       {#if g.showGroup}
         <div class="tag-group">
           <span class="tag-group-dot" style="background:{g.groupColor}"></span>
@@ -306,16 +306,24 @@
           <span class="tag-group-line"></span>
         </div>
       {/if}
+      {#if entry.superseded && !prevEntry?.superseded}
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <div class="superseded-header" onclick={() => (supersededOpen = !supersededOpen)}>
+          <span class="arr">{supersededOpen ? '▾' : '▸'}</span>
+          <span>被顶替记录（{supersededCount}）</span>
+        </div>
+      {/if}
+      {#if !entry.superseded || supersededOpen}
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <div
         class="entry-card"
         class:active={entry.id === selectedId}
         class:tagged={!!entryTag}
         class:milestone={!!entry.milestone}
-        class:dimmed={isDimmed(i)}
+        class:dimmed={isEntryDimmed(entry)}
+        class:superseded={entry.superseded}
         style={entryTag ? `--tag-color:${tagColor(entryTag)}` : ''}
         onclick={(e) => { e.stopPropagation(); onSelect(entry.id); }}
-        ondblclick={(e) => { e.stopPropagation(); onDblClick(entry); }}
         oncontextmenu={(e) => openCtx(e, entry)}
       >
         <button
@@ -329,6 +337,9 @@
         <div class="top">
           <span class="hash">{entry.id.slice(0, 7)}</span>
           <span class="top-right">
+            {#if entry.preview}
+              <span class="preview-badge" title="该记录有 3D 预览">3D</span>
+            {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
           </span>
         </div>
@@ -389,26 +400,8 @@
             </div>
           {/if}
         {/if}
-
-        <!-- Section 3: Blend Models -->
-        {#if entry.preview && blendF.length > 0}
-          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'model'); }}>
-            <span class="arr">{hasSection(entry.id, 'model') ? '▾' : '▸'}</span>
-            <span>3D 模型预览 ({blendF.length})</span>
-          </div>
-          {#if hasSection(entry.id, 'model')}
-            <div class="section-body">
-              {#each blendF as f}
-                <div class="diff-path" style="margin-bottom:4px">{f}</div>
-              {/each}
-              <button class="open-web-btn" onclick={(e) => { e.stopPropagation(); onOpenLocalView() }}>
-                在浏览器中打开 — 3D 预览
-              </button>
-            </div>
-          {/if}
-        {/if}
       </div>
+      {/if}
     {/each}
     {/if}
   </div>
@@ -417,7 +410,7 @@
     <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
     <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
       <button class="ctx-item" onclick={ctxExport}>导出</button>
-      <button class="ctx-item" onclick={ctxRollback} disabled={rollbackBusy} title={rollbackPoint ? '将先恢复当前回退，再回退到该记录' : ''}>回退</button>
+      <button class="ctx-item" onclick={ctxRollback} disabled={ctxRollbackDisabled} title={rollbackPoint ? '该记录为当前回退点，不可回退' : ''}>回退</button>
     </div>
   {/if}
   <div class="entries-footer">
@@ -529,8 +522,7 @@
     padding: 0;
     opacity: 0;
     visibility: hidden;
-    transform: scale(0.8);
-    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
+    transform: scale(0.8);    transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s, background 0.15s, color 0.15s, border-color 0.15s;
     box-shadow: var(--shadow-sm);
     z-index: 2;
   }
@@ -555,6 +547,43 @@
     border-color: var(--accent-hover);
     color: #fff;
   }
+  .preview-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    margin-right: 6px;
+    vertical-align: 1px;
+    user-select: none;
+  }
+  .superseded-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    margin: 4px 0;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-dim);
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    user-select: none;
+  }
+  .superseded-header:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .superseded-header .arr {
+    font-size: 9px;
+  }
   .entry-card.milestone {
     background: color-mix(in srgb, var(--accent) 11%, var(--surface));
     border-color: var(--accent);
@@ -570,6 +599,20 @@
   }
   .entry-card.milestone .msg {
     font-weight: 600;
+  }
+  /* 被顶替记录（superseded）：整卡变灰（置于 milestone 之后，覆盖其底色；与 dimmed 叠加自然） */
+  .entry-card.superseded {
+    background: color-mix(in srgb, var(--text-dim) 8%, var(--surface));
+    border-color: var(--border);
+    color: var(--text-dim);
+    filter: saturate(0.3);
+  }
+  .entry-card.superseded:hover {
+    border-color: var(--text-dim);
+  }
+  .entry-card.superseded .hash,
+  .entry-card.superseded .date {
+    color: var(--text-dim);
   }
   .section-header {
     display: flex;

@@ -20,7 +20,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub close_to_tray: Option<bool>,
     #[serde(default)]
-    pub hidden_paths: Option<Vec<String>>,
+    pub auto_restore_project: bool,
 }
 
 impl AppConfig {
@@ -69,7 +69,7 @@ impl Default for AppConfig {
             lore_server_url: None,
             auto_connect: false,
             close_to_tray: None,
-            hidden_paths: None,
+            auto_restore_project: false,
         }
     }
 }
@@ -141,6 +141,22 @@ pub fn get_lore_server_url() -> String {
         .unwrap_or_else(|| crate::lore_backend::LORE_SERVER_URL.to_string())
 }
 
+pub fn set_lore_server_url(url: &str) {
+    let mut cfg = AppConfig::load();
+    cfg.lore_server_url = if url.trim().is_empty() { None } else { Some(url.trim().to_string()) };
+    cfg.save();
+}
+
+pub fn get_auto_restore_project() -> bool {
+    AppConfig::load().auto_restore_project
+}
+
+pub fn set_auto_restore_project(v: bool) {
+    let mut cfg = AppConfig::load();
+    cfg.auto_restore_project = v;
+    cfg.save();
+}
+
 pub fn set_auto_connect(v: bool) {
     let mut cfg = AppConfig::load();
     cfg.auto_connect = v;
@@ -189,7 +205,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, lore_server_url: Some("lore://127.0.0.1:41337".to_string()), auto_connect: false, close_to_tray: Some(true), hidden_paths: None };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, lore_server_url: Some("lore://127.0.0.1:41337".to_string()), auto_connect: false, close_to_tray: Some(true), auto_restore_project: false };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);

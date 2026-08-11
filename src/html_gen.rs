@@ -1128,7 +1128,7 @@ mod tests {
                 files: vec!["char.blend".to_string(), "textures/diffuse.png".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
-                tag: Some("建模".to_string()), milestone: false,
+                tag: Some("建模".to_string()), milestone: false, superseded: false,
             }],
         rollback_marker: None,
         };
@@ -1165,6 +1165,7 @@ mod tests {
                 preview: "previews/abc123.png".to_string(),
                 tag: None,
                 milestone: true,
+                superseded: false,
             }],
         rollback_marker: None,
         };
@@ -1196,7 +1197,7 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false,
+                tag: None, milestone: false, superseded: false,
             }],
         rollback_marker: None,
         };
@@ -1230,7 +1231,7 @@ mod tests {
                 files: vec!["fix.txt".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false,
+                tag: None, milestone: false, superseded: false,
             }],
         rollback_marker: None,
         };

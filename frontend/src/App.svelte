@@ -5,17 +5,26 @@
   import ProjectTabs from './lib/ProjectTabs.svelte'
   import EntryList from './lib/EntryList.svelte'
   import StatusPanel from './lib/StatusPanel.svelte'
-  import DetailPanel from './lib/DetailPanel.svelte'
+import Remote from './lib/Remote.svelte'
   import ActionBar from './lib/ActionBar.svelte'
   import StatusBar from './lib/StatusBar.svelte'
   import CommitDialog from './lib/CommitDialog.svelte'
+  import RollbackConflictDialog from './lib/RollbackConflictDialog.svelte'
   import ConfirmDialog from './lib/ConfirmDialog.svelte'
   import CloseBehaviorDialog from './lib/CloseBehaviorDialog.svelte'
   import InputDialog from './lib/InputDialog.svelte'
   import SettingsDialog from './lib/SettingsDialog.svelte'
   import BusyOverlay from './lib/BusyOverlay.svelte'
   import Toast from './lib/Toast.svelte'
-  import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState } from './types'
+  import type { RecentEntry, TimelineEntry, ProjectType, CommitProgress, RollbackState, RollbackChoice } from './types'
+
+interface BlenderDownloadProgress {
+  phase: string
+  message: string
+  percent: number
+  bytes_downloaded: number
+  bytes_total: number
+}
   import * as api from './api'
   import { openFolder } from './api'
   import { open } from '@tauri-apps/plugin-dialog'
@@ -32,12 +41,15 @@
 
   let recentProjects = $state<RecentEntry[]>([])
   let activePath = $state('')
+  let remoteView = $state(false)
+  let loreServerUrl = $state('')
+  let autoRestoreProject = $state(false)
   let projectType = $state<ProjectType | null>(null)
   let entries = $state<TimelineEntry[]>([])
   let selectedEntryId = $state('')
-  let detailEntry = $state<TimelineEntry | null>(null)
   let statusOutput = $state('')
   let statusError = $state(false)
+let statusErrorMsg = $state('')
   let trackedFiles = $state<string[]>([])
   let statusText = $state('Ready')
   let toastId = $state(0)
@@ -53,13 +65,18 @@
   let siteLocked = $state(false)
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let commitSelection = $state<string[] | null>(null)
-  let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false })
+  let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] })
+  // 回退版本改动标注：change_files（回退改动，可勾选）+ deleted_files（回退删除，只读）
+const rollbackChangeFiles = $derived(rollbackState.change_files)
+const rollbackDeletedFiles = $derived(rollbackState.deleted_files)
+const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   let rollbackBusy = $state(false)
   let deploying = $state(false)
   let backupBusy = $state(false)
   let recording = $state(false)
   let busyText = $state('')
   let commitProgressMsg = $state('')
+  let blenderDlActive = $state(false)
   let loadSeq = 0
   let theme = $state<'day' | 'night'>(localStorage.getItem('keinestamp_theme') === 'night' ? 'night' : 'day')
 
@@ -132,10 +149,12 @@
       if (path !== activePath) return
       statusOutput = s.output
       statusError = false
-    } catch {
+      statusErrorMsg = ''
+    } catch (e: any) {
       if (path === activePath) {
         statusOutput = ''
         statusError = true
+        statusErrorMsg = String(e)
       }
     }
   }
@@ -177,9 +196,14 @@
 
   async function loadProject(path: string, preserveSelection = false) {
     const seq = ++loadSeq
+    remoteView = false
     activePath = normalizePath(path)
+    // 刷新常用仓库/标签栏（clone 下载等新项目路径）
+    loadRecent()
+    // 自动恢复上次项目：记录最后一次打开的项目
+    try { localStorage.setItem('keinestamp_last_project', activePath) } catch { /* ignore */ }
     if (!preserveSelection) commitSelection = null
-    rollbackState = { rollback_point: null, head_matches: false }
+    rollbackState = { rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] }
     try {
       const pt = await api.detect(path)
       if (seq !== loadSeq) return
@@ -193,14 +217,16 @@
         siteLocked = cfg.site_locked
         if (seq !== loadSeq) return
         await Promise.all([refreshStatus(), loadTrackedFiles(path)])
+        // 服务器连接独立于部署状态：autoConn 时始终探测（未部署项目也能首次部署）
+        if (autoConn) {
+          testConnection()
+        } else {
+          connected = false
+        }
         if (siteLocked) {
           refreshDeployStatus()
-          if (autoConn) {
-            testConnection()
-          }
         } else {
           deployStatus = null
-          connected = false
         }
       } else {
         entries = []
@@ -224,7 +250,23 @@
 
   async function selectRecent(path: string) {
     if (normalizePath(path) === activePath) return
+    remoteView = false
     await loadProject(path)
+  }
+
+  function openRemote() {
+    if (remoteView) return
+    remoteView = true
+    activePath = ''
+    projectType = null
+    entries = []
+    statusOutput = ''
+    statusError = false
+    trackedFiles = []
+    selectedEntryId = ''
+    commitSelection = null
+    rollbackState = { rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] }
+    loadRecent()
   }
 
   async function handleNewProject() {
@@ -330,11 +372,36 @@
       pushToast('备份成功', 'success')
       statusText = '备份完成'
     } catch (e: any) {
-      pushToast(`备份失败: ${e}`, 'error')
+      const msg = String(e)
+      if (msg.includes('离线创建')) {
+        // 离线仓库无法备份 → 引导迁移为在线仓库
+        pendingMigrate = activePath
+      } else {
+        pushToast(`备份失败: ${msg}`, 'error')
+      }
       statusText = '备份失败'
     } finally {
       backupBusy = false
     }
+  }
+
+  async function confirmMigrateAndBackup() {
+    const path = pendingMigrate
+    pendingMigrate = null
+    if (!path) return
+    backupBusy = true
+    busyText = '迁移为在线仓库...'
+    try {
+      await api.migrateRepo(path)
+      pushToast('已迁移为在线仓库，正在备份...', 'success')
+      await api.backup(path)
+      pushToast('备份成功', 'success')
+      await loadProject(path)
+    } catch (e: any) {
+      pushToast(`迁移/备份失败: ${e}`, 'error')
+    }
+    busyText = ''
+    backupBusy = false
   }
 
   function handleTokenChange(val: string) {
@@ -393,17 +460,35 @@
   }
 
   async function handleRollback(entry: TimelineEntry) {    if (!activePath || rollbackBusy) return
-    const wasRolledBack = !!rollbackState.rollback_point
     rollbackBusy = true
     busyText = '回退中...'
     try {
       await api.rollback(activePath, entry.id)
-      pushToast(
-        wasRolledBack
-          ? `已自动恢复并回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本）`
-          : `已回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本，可修改后记录）`,
-        'success'
-      )
+      pushToast(`已回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本，可修改后记录）`, 'success')
+      await loadProject(activePath)
+      await refreshRollbackState()
+    } catch (e: any) {
+      const msg = String(e)
+      if (msg.includes('需要丢弃确认')) {
+        // 连续回退：回退期间的更改内容（上次回退检出的中间态）需丢弃确认
+        pendingDiscardRollback = entry
+      } else {
+        pushToast(`回退失败: ${msg}`, 'error')
+      }
+    }
+    busyText = ''
+    rollbackBusy = false
+  }
+
+  async function confirmDiscardRollback() {
+    const entry = pendingDiscardRollback
+    pendingDiscardRollback = null
+    if (!entry || !activePath) return
+    rollbackBusy = true
+    busyText = '回退中...（丢弃中间更改）'
+    try {
+      await api.rollback(activePath, entry.id, true)
+      pushToast(`已丢弃回退期间的更改并回退到记录 ${entry.id.slice(0, 7)} 之前`, 'success')
       await loadProject(activePath)
       await refreshRollbackState()
     } catch (e: any) {
@@ -423,10 +508,48 @@
       await loadProject(activePath)
       await refreshRollbackState()
     } catch (e: any) {
-      pushToast(`恢复失败: ${e}`, 'error')
+      const msg = String(e)
+      if (msg.includes('回退冲突')) {
+        await loadConflictFiles()
+      } else {
+        pushToast(`恢复失败: ${msg}`, 'error')
+      }
     }
     busyText = ''
     rollbackBusy = false
+  }
+
+  let conflictFiles = $state<string[] | null>(null)
+  let resolvingConflict = $state(false)
+  let pendingDiscardRollback = $state<TimelineEntry | null>(null)
+  let pendingMigrate = $state<string | null>(null)
+  let loreOk = $state(true)
+  let loreError = $state('')
+  let showLoreMissing = $state(false)
+
+  async function loadConflictFiles() {
+    if (!activePath) return
+    try {
+      conflictFiles = await api.getRollbackConflicts(activePath)
+    } catch (e: any) {
+      pushToast(`读取冲突失败: ${e}`, 'error')
+      conflictFiles = null
+    }
+  }
+
+  async function handleResolveConflict(choices: RollbackChoice[]) {
+    if (!activePath) return
+    resolvingConflict = true
+    try {
+      await api.resolveRollbackConflicts(activePath, choices.map((c) => [c[0], c[1]]))
+      pushToast('冲突已解决，已恢复回退前的状态', 'success')
+      conflictFiles = null
+      await loadProject(activePath)
+      await refreshRollbackState()
+    } catch (e: any) {
+      pushToast(`完成恢复失败: ${e}`, 'error')
+    }
+    resolvingConflict = false
   }
 
   async function handleExportEntry(entry: TimelineEntry) {
@@ -507,7 +630,58 @@
 
   onMount(() => {
     loadRecent()
+    // Lore 前置依赖检测（编译期捆绑；失败 → 弹窗 + 核心操作禁用）
+    ;(async () => {
+      try {
+        const info = await api.checkLoreEnv()
+        loreOk = info.ok
+        if (!info.ok) {
+          loreError = 'Lore 环境异常（请重新安装/构建）'
+          showLoreMissing = true
+        }
+      } catch (e: any) {
+        loreOk = false
+        loreError = String(e)
+        showLoreMissing = true
+      }
+    })()
+    ;(async () => {
+      try {
+        loreServerUrl = await api.getLoreServerUrl()
+      } catch { /* ignore */ }
+      try {
+        autoRestoreProject = await api.getAutoRestoreProject()
+      } catch { /* ignore */ }
+    })()
+    // 自动恢复上次项目（设置开启且路径存在）
+    ;(async () => {
+      try {
+        const last = localStorage.getItem('keinestamp_last_project')
+        if (last && (await api.getAutoRestoreProject())) {
+          const exists = await api.detect(last).catch(() => null)
+          if (exists) {
+            await loadProject(last)
+            return
+          }
+        }
+      } catch { /* ignore */ }
+      loadRecent()
+    })()
     const closeAskUnlisten = listen('close-requested', () => { showCloseAsk = true })
+    // 全局 Blender 下载进度反馈：设置对话框关闭后仍可见（开始/完成/失败 toast）
+    const blenderDlUnlisten = listen<BlenderDownloadProgress>('blender-download-progress', (e) => {
+      const phase = e.payload.phase
+      if (!blenderDlActive && (phase === 'downloading' || phase === 'extracting')) {
+        blenderDlActive = true
+        pushToast('正在下载 Blender...', 'info')
+      } else if (blenderDlActive && phase === 'done') {
+        blenderDlActive = false
+        pushToast('Blender 下载完成', 'success')
+      } else if (blenderDlActive && phase === 'error') {
+        blenderDlActive = false
+        pushToast('Blender 下载失败', 'error')
+      }
+    })
     const timer = setInterval(() => {
       if (activePath && projectType === 'initialized') {
         refreshStatus()
@@ -518,6 +692,7 @@
     return () => {
       clearInterval(timer)
       closeAskUnlisten.then((f) => f())
+      blenderDlUnlisten.then((f) => f())
     }
   })
 </script>
@@ -525,15 +700,17 @@
 <div class="app-layout">
   <TitleBar />
 
-  <ProjectTabs
-    entries={recentProjects}
-    activePath={activePath}
-    onSelect={selectRecent}
-    onNewProject={handleNewProject}
-    onSettings={() => showSettings = true}
-    theme={theme}
-    onToggleTheme={() => theme = theme === 'day' ? 'night' : 'day'}
-    onRemoveRecent={handleRemoveRecent}
+<ProjectTabs
+  entries={recentProjects}
+  activePath={activePath}
+  onSelect={selectRecent}
+  onNewProject={handleNewProject}
+  onSettings={() => showSettings = true}
+  theme={theme}
+  onToggleTheme={() => theme = theme === 'day' ? 'night' : 'day'}
+  onRemoveRecent={handleRemoveRecent}
+  remoteView={remoteView}
+  onRemote={openRemote}
     onReorder={handleReorder}
   />
 
@@ -575,11 +752,18 @@
 
       <div class="content-body">
         <div class="content-area">
-          {#if !activePath}
+          {#if !activePath && remoteView}
+            <Remote
+              {loreServerUrl}
+              recentPaths={recentProjects.map((r) => r.path)}
+              onOpenProject={selectRecent}
+              onGoSettings={() => showSettings = true}
+            />
+          {:else if !activePath}
             <div class="empty-state">
               <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M2 6a2 2 0 012-2h5.757a2 2 0 011.414.586l1.12 1.12A2 2 0 0013.757 6H20a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg></div>
-              <div>从上方标签页选择一个项目</div>
-              <div style="font-size:12px">或点击 + 创建新项目</div>
+              <div>从上方标签页选择项目，或点击 + 新建项目</div>
+              <button class="empty-new-btn" onclick={handleNewProject}>新建项目</button>
             </div>
           {:else if projectType !== 'initialized'}
             <div class="empty-state">
@@ -588,7 +772,7 @@
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} {statusError} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} />
+            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} />
           {/if}
         </div>
 
@@ -607,7 +791,6 @@
               selectedId={selectedEntryId}
               activePath={activePath}
               onSelect={(id) => selectedEntryId = id}
-              onDblClick={(e) => detailEntry = e}
               accessToken={accessToken}
               onTokenChange={handleTokenChange}
               siteName={siteName}
@@ -625,15 +808,16 @@
         {/if}
       </div>
 
-      <ActionBar
-        {projectType}
-        onRecord={() => showCommit = true}
-        onRestore={handleRestore}
-        onDeploy={handleDeploy}
-        onBackup={handleBackup}
-        {connected}
-        {deployAhead}
-        {deployTip}
+<ActionBar
+  {projectType}
+  onRecord={() => showCommit = true}
+  onRestore={handleRestore}
+  onDeploy={handleDeploy}
+  onBackup={handleBackup}
+  {connected}
+  {deployAhead}
+  {deployTip}
+  loreOk={loreOk}
         restoreEnabled={!!rollbackState.rollback_point && rollbackState.head_matches}
         restoreTitle={!rollbackState.rollback_point
           ? '没有可恢复的回退'
@@ -651,10 +835,50 @@
   </div>
 </div>
 
-<DetailPanel entry={detailEntry} activePath={activePath} onClose={() => detailEntry = null} />
-
 {#if showCommit}
   <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} busy={recording} progress={commitProgressMsg} />
+{/if}
+
+{#if conflictFiles}
+  <RollbackConflictDialog
+    conflicts={conflictFiles}
+    busy={resolvingConflict}
+    onResolve={handleResolveConflict}
+    onCancel={() => (conflictFiles = null)}
+  />
+{/if}
+
+{#if pendingDiscardRollback}
+  <ConfirmDialog
+    title="丢弃并继续回退"
+    message={`检测到回退期间的更改内容（上次回退检出的文件），继续回退将丢弃这些更改，且恢复时不会找回。\n确定丢弃并回退到记录 ${pendingDiscardRollback.id.slice(0, 7)} 之前吗？`}
+    okLabel="丢弃并跳转"
+    cancelLabel="留下"
+    onConfirm={confirmDiscardRollback}
+    onCancel={() => (pendingDiscardRollback = null)}
+  />
+{/if}
+
+{#if pendingMigrate}
+  <ConfirmDialog
+    title="迁移为在线仓库"
+    message={'该项目为离线创建，无法备份到服务器。\n是否迁移为在线仓库（保留全部历史，迁移后自动备份）？'}
+    okLabel="迁移并备份"
+    cancelLabel="取消"
+    onConfirm={confirmMigrateAndBackup}
+    onCancel={() => (pendingMigrate = null)}
+  />
+{/if}
+
+{#if showLoreMissing}
+  <ConfirmDialog
+    title="缺少 Lore 环境"
+    message={`${loreError || '未找到 Lore v0.8.6'}\n记录/回退/备份等操作不可用。请重新安装或构建 Keinestamp（编译期自动捆绑 Lore）。`}
+    okLabel="知道了"
+    cancelLabel=""
+    onConfirm={() => (showLoreMissing = false)}
+    onCancel={() => (showLoreMissing = false)}
+  />
 {/if}
 
 {#if busyText}

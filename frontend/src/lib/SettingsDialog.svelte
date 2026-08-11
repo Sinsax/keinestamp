@@ -11,42 +11,52 @@
     onClose: () => void
   } = $props()
 
-  let webRemote = $state('')
+  let serverIp = $state('')
+  let deployPort = $state('7799')
+  let lorePort = $state('41337')
   let deployToken = $state('')
+  let autoRestoreProject = $state(false)
   let autoConnect = $state(false)
   let closeAction = $state<'tray' | 'quit'>('tray')
   let selectedVersion = $state('')
   let versions = $state<string[]>([])
   let installedVersions = $state<string[]>([])
+  let currentBlenderVersion = $state('')
+  let switchNotice = $state('')
   let versionsLoading = $state(false)
   let cooldownLeft = $state(0)
   let cooldownUntil = 0
   let cooldownTimer: ReturnType<typeof setTimeout> | undefined
   let saving = $state(false)
   let downloading = $state(false)
+  let deleting = $state(false)
+  let confirmDelete = $state(false)
+  let confirmDeleteTimer: ReturnType<typeof setTimeout> | undefined
   let dlPhase = $state('')
   let dlMessage = $state('')
   let dlPercent = $state(0)
   let testing = $state(false)
   let connectStatus = $state<'none' | 'ok' | 'fail'>('none')
+  let loreStatus = $state<'none' | 'ok' | 'fail'>('none')
   let savedFeedback = $state(false)
-  let hiddenPaths = $state<string[]>([])
-  let hiddenInput = $state('')
-
-  const PRESET_HIDDEN = new Set(['web/', '.keinestamp.toml'])
 
   onMount(() => {
     (async () => {
       try {
         deployToken = await api.getDeployToken()
-        webRemote = await api.getDeployServerUrl()
+        const [deployUrl, loreUrl] = await Promise.all([api.getDeployServerUrl(), api.getLoreServerUrl()])
+        // 从 URL 反向解析 IP/端口（免协议前缀输入）
+        const host = (u: string, fb: string): string => u.match(/^[a-z]+:\/\/([^:/]+)/)?.[1] || fb
+        const port = (u: string, fb: string): string => u.match(/:(\d+)(?:\/|$)/)?.[1] || fb
+        serverIp = host(deployUrl || '', host(loreUrl, ''))
+        deployPort = port(deployUrl || '', '7799')
+        lorePort = port(loreUrl || '', '41337')
+        autoRestoreProject = await api.getAutoRestoreProject()
         autoConnect = await api.getAutoConnect()
         const close = await api.getCloseAction()
         closeAction = close === false ? 'quit' : 'tray'
       } catch { /* ignore */ }
     })()
-
-    if (path) loadHidden()
 
     ;(async () => {
       try {
@@ -98,6 +108,9 @@
     try {
       installedVersions = await api.listInstalledBlenderVersions()
     } catch { /* ignore */ }
+    try {
+      currentBlenderVersion = await api.getCurrentBlenderVersion()
+    } catch { /* ignore */ }
   }
 
   function isInstalled(v: string): boolean {
@@ -121,59 +134,96 @@
     downloading = false
   }
 
-  async function testConnection() {
-    if (!webRemote) {
-      connectStatus = 'fail'
+  // 删除 Blender 版本：二次点击确认（唯一版本后端拒绝 + 前端不显示删除按钮）
+  function armDelete() {
+    if (confirmDelete) {
+      performDelete()
       return
     }
+    confirmDelete = true
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer)
+    confirmDeleteTimer = setTimeout(() => { confirmDelete = false }, 3000)
+  }
+
+  async function performDelete() {
+    if (!selectedVersion) return
+    deleting = true
+    confirmDelete = false
+    if (confirmDeleteTimer) clearTimeout(confirmDeleteTimer)
+    try {
+      await api.deleteBlenderVersion(selectedVersion)
+      dlPhase = 'done'
+      dlMessage = `已删除 Blender ${selectedVersion}`
+      await loadInstalled()
+    } catch (e) {
+      dlPhase = 'error'
+      dlMessage = `删除失败: ${e}`
+    }
+    deleting = false
+  }
+
+  const canDelete = $derived(installedVersions.length > 1 && !!selectedVersion && isInstalled(selectedVersion))
+
+  function deployUrl(): string {
+    const ip = serverIp.trim()
+    return ip ? `http://${ip}:${deployPort.trim() || '7799'}` : ''
+  }
+
+  function loreUrl(): string {
+    const ip = serverIp.trim()
+    return ip ? `lore://${ip}:${lorePort.trim() || '41337'}` : ''
+  }
+
+  async function testConnection() {
+    const url = deployUrl()
+    const ip = serverIp.trim()
     testing = true
     connectStatus = 'none'
-    try {
-      const ok = await api.testConnection(webRemote, deployToken || null)
-      connectStatus = ok ? 'ok' : 'fail'
-    } catch {
+    loreStatus = 'none'
+    // 部署服务器 + loreserver 双状态探测
+    if (url) {
+      try {
+        const ok = await api.testConnection(url, deployToken || null)
+        connectStatus = ok ? 'ok' : 'fail'
+      } catch {
+        connectStatus = 'fail'
+      }
+    } else {
       connectStatus = 'fail'
+    }
+    if (ip) {
+      try {
+        loreStatus = (await api.testLoreConnection(ip)) ? 'ok' : 'fail'
+      } catch {
+        loreStatus = 'fail'
+      }
+    } else {
+      loreStatus = 'fail'
     }
     testing = false
   }
 
   async function save() {
     saving = true
+    let switched = false
     try {
+      // 选中已安装版本且与当前使用版本不同 → 保存时切换当前 Blender 版本
+      if (selectedVersion && isInstalled(selectedVersion) && selectedVersion !== currentBlenderVersion) {
+        await api.setCurrentBlenderVersion(selectedVersion)
+        currentBlenderVersion = selectedVersion
+        switched = true
+      }
       await api.setDeployToken(deployToken)
-      await api.setDeployServerUrl(webRemote)
+      await api.setDeployServerUrl(deployUrl())
+      await api.setLoreServerUrl(loreUrl())
+      await api.setAutoRestoreProject(autoRestoreProject)
       await api.setAutoConnect(autoConnect)
       await api.setCloseAction(closeAction === 'tray')
       savedFeedback = true
-      setTimeout(() => savedFeedback = false, 2000)
+      switchNotice = switched ? `当前版本已切换（Blender ${selectedVersion}）` : ''
+      setTimeout(() => { savedFeedback = false; switchNotice = '' }, 2500)
     } catch { /* ignore */ }
     saving = false
-  }
-
-  async function loadHidden() {
-    if (!path) return
-    try {
-      const info = await api.getIgnoreInfo(path)
-      hiddenPaths = info.ignored
-    } catch { /* ignore */ }
-  }
-
-  async function addHidden() {
-    const p = hiddenInput.trim()
-    if (!p || !path) return
-    try {
-      await api.addToGitignore(path, p)
-      hiddenInput = ''
-      await loadHidden()
-    } catch { /* ignore */ }
-  }
-
-  async function removeHidden(p: string) {
-    if (!path) return
-    try {
-      await api.removeIgnore(path, p)
-      await loadHidden()
-    } catch { /* ignore */ }
   }
 
   interface BlenderProgress {
@@ -212,9 +262,15 @@
           <button onclick={checkVersions} disabled={versionsLoading || cooldownLeft > 0}>
             {versionsLoading ? '检测中...' : cooldownLeft > 0 ? `冷却 ${cooldownLeft}s` : '检测新版本'}
           </button>
-          <button class="accent" onclick={downloadBlender} disabled={downloading || !selectedVersion || isInstalled(selectedVersion)}>
-            {downloading ? '下载中...' : isInstalled(selectedVersion) ? '已安装' : '下载 Blender'}
-          </button>
+          {#if canDelete}
+            <button class="del" class:confirm={confirmDelete} onclick={armDelete} disabled={deleting || downloading} title="至少保留一个 Blender 版本">
+              {deleting ? '删除中...' : confirmDelete ? '确认删除？' : '删除'}
+            </button>
+          {:else}
+            <button class="accent" onclick={downloadBlender} disabled={downloading || !selectedVersion || isInstalled(selectedVersion)}>
+              {downloading ? '下载中...' : isInstalled(selectedVersion) ? '已安装' : '下载 Blender'}
+            </button>
+          {/if}
         </div>
         {#if dlPhase === 'downloading'}
           <div class="progress-bar-container">
@@ -240,69 +296,50 @@
     </div>
 
     <div class="section">
-      <div class="section-title">服务器连接</div>
+      <div class="section-title">服务器</div>
       <div class="field">
-        <label for="sd-server-url">服务器地址</label>
+        <label for="sd-server-ip">服务器 IP</label>
+        <input id="sd-server-ip" type="text" bind:value={serverIp} placeholder="192.168.0.100" />
+      </div>
+      <div class="field">
+        <span class="port-head">端口</span>
         <div class="input-row">
-          <input id="sd-server-url" type="text" bind:value={webRemote} placeholder="http://192.168.0.100:7799" />
-          <button class="connect-btn" onclick={testConnection} disabled={testing || !webRemote}>
+          <span class="port-label">部署</span>
+          <input class="port-input" type="text" bind:value={deployPort} placeholder="7799" aria-label="部署端口" />
+          <span class="port-label">loreserver</span>
+          <input class="port-input" type="text" bind:value={lorePort} placeholder="41337" aria-label="loreserver 端口" />
+          <button class="connect-btn" onclick={testConnection} disabled={testing || !serverIp.trim()}>
             {testing ? '测试中...' : '测试连接'}
           </button>
         </div>
-        <span class="hint">Keinestamp Server 监听地址（全局设置，跟随软件）</span>
-        {#if connectStatus === 'ok'}
-          <span class="conn-result ok">✅ 连接成功</span>
-        {:else if connectStatus === 'fail'}
-          <span class="conn-result fail">❌ 连接失败</span>
+        {#if connectStatus !== 'none' || loreStatus !== 'none'}
+          <span class="conn-result">
+            部署 {connectStatus === 'ok' ? '✅' : connectStatus === 'fail' ? '❌' : '—'}
+            · lore {loreStatus === 'ok' ? '✅' : loreStatus === 'fail' ? '❌' : '—'}
+          </span>
         {/if}
       </div>
       <div class="field">
-        <label for="sd-deploy-token">部署令牌（Deploy Token）</label>
-        <input id="sd-deploy-token" type="password" bind:value={deployToken} placeholder="可选" />
-        <span class="hint">用于 App 上传认证（Bearer Token），保存在本机</span>
+        <label for="sd-deploy-token">部署令牌（可选）</label>
+        <input id="sd-deploy-token" type="password" bind:value={deployToken} placeholder="Bearer Token" />
+        <span class="hint">上传认证用；loreserver 无认证，仅限可信局域网</span>
       </div>
       <div class="field toggle-field">
         <label>
           <input type="checkbox" bind:checked={autoConnect} />
-          打开项目时自动测试连接（软件级设置）
+          打开项目时自动测试连接
         </label>
       </div>
     </div>
 
     <div class="section">
-      <div class="section-title">隐藏路径</div>
-      <div class="field">
-        <span class="hint">隐藏的文件不参与记录（web/ 与 .keinestamp.toml 为预设，不可移除）</span>
-        <div class="hidden-list">
-          {#each hiddenPaths as p}
-            <div class="hidden-row">
-              <span class="hidden-path" title={p}>{p}</span>
-              <button
-                class="hidden-del"
-                disabled={PRESET_HIDDEN.has(p)}
-                title={PRESET_HIDDEN.has(p) ? '预设隐藏，不可移除' : '移除隐藏'}
-                onclick={() => removeHidden(p)}
-              >×</button>
-            </div>
-          {/each}
-          {#if hiddenPaths.length === 0}
-            <span class="hidden-empty">无隐藏路径</span>
-          {/if}
-        </div>
-        <div class="input-row">
-          <input
-            type="text"
-            bind:value={hiddenInput}
-            placeholder="输入路径，如 cache/ 或 *.tmp"
-            onkeydown={(e) => { if (e.key === 'Enter') addHidden() }}
-          />
-          <button class="connect-btn" onclick={addHidden} disabled={!hiddenInput.trim()}>添加</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="section">
       <div class="section-title">通用</div>
+      <div class="field toggle-field">
+        <label>
+          <input type="checkbox" bind:checked={autoRestoreProject} />
+          启动时自动打开上次的项目
+        </label>
+      </div>
       <div class="field">
         <label for="sd-close-action">关闭窗口时</label>
         <select id="sd-close-action" class="sd-select" bind:value={closeAction}>
@@ -315,7 +352,7 @@
 
     <div class="actions">
       <button onclick={onClose}>取消</button>
-      <button class="accent" onclick={save} disabled={saving}>{saving ? '保存中…' : savedFeedback ? '已保存 ✓' : '保存'}</button>
+      <button class="accent" onclick={save} disabled={saving} title={switchNotice || ''}>{saving ? '保存中…' : switchNotice ? '已切换 ✓' : savedFeedback ? '已保存 ✓' : '保存'}</button>
     </div>
   </div>
 </div>
@@ -337,6 +374,18 @@
   .hint { display: block; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
   .dl-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
   .dl-row button { font-size: 12px; padding: 5px 14px; }
+  .dl-row .del {
+    background: color-mix(in srgb, var(--error) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+    color: var(--error);
+  }
+  .dl-row .del.confirm {
+    background: var(--error);
+    border-color: var(--error);
+    color: #fff;
+    font-weight: 600;
+  }
+  .dl-row .del:disabled { opacity: 0.5; }
   .dl-row select, .sd-select { width: 200px; font-size: 12px; padding: 5px 8px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 6px; }
   .versions-loading { font-size: 11px; color: var(--text-dim); }
 
@@ -372,51 +421,14 @@
   .dl-status.error { color: var(--error); }
   .toggle-field label { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
   .toggle-field input[type="checkbox"] { width: auto; }
-  .input-row { display: flex; align-items: center; gap: 8px; }
-  .input-row input { flex: 1; }
-  .connect-btn { font-size: 11px; padding: 5px 12px; border-radius: 6px; cursor: pointer; background: var(--surface); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
+.input-row { display: flex; align-items: center; gap: 8px; }
+.input-row input { flex: 1; }
+.port-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+.port-head { font-size: 12px; color: var(--text); display: block; margin-bottom: 4px; }
+.port-input { flex: 0 0 70px !important; width: 70px; }
+.connect-btn { font-size: 11px; padding: 5px 12px; border-radius: 6px; cursor: pointer; background: var(--surface); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
   .connect-btn:hover:not(:disabled) { background: var(--surface2); }
   .connect-btn:disabled { opacity: 0.4; cursor: default; }
-  .conn-result { display: block; font-size: 11px; margin-top: 4px; }
-  .conn-result.ok { color: var(--success); }
-  .conn-result.fail { color: var(--error); }
-  .hidden-list {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    margin: 8px 0;
-    max-height: 180px;
-    overflow-y: auto;
-  }
-  .hidden-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 4px 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    font-size: 12px;
-  }
-  .hidden-path {
-    font-family: var(--mono, monospace);
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .hidden-del {
-    border: none;
-    background: none;
-    color: var(--text-dim);
-    font-size: 14px;
-    cursor: pointer;
-    padding: 0 4px;
-    line-height: 1;
-  }
-  .hidden-del:hover:not(:disabled) { color: var(--error); }
-  .hidden-del:disabled { opacity: 0.3; cursor: default; }
-  .hidden-empty { font-size: 11px; color: var(--text-dim); }
+.conn-result { display: block; font-size: 11px; margin-top: 4px; color: var(--text-dim); }
   .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
 </style>

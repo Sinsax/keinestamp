@@ -14,8 +14,12 @@ Blender 项目进度看板 — 单二进制 CLI + Tauri GUI，后端基于 Epic 
 
 ## 前置
 
-- Lore CLI + 服务器（锁版本 v0.8.6）：`C:\Users\para\AppData\Local\lore\bin\`（lore.exe + loreserver.exe）
-- loreserver 需在线（无纯本地模式）；`KEINESTAMP_LORE_BIN` / `KEINESTAMP_LORESERVER_BIN` 可覆盖路径
+- **Lore v0.8.6（前置依赖，编译期自动捆绑）**：构建时 `build.rs` 按平台自动下载
+  `lore` + `loreserver` 二进制（GitHub releases v0.8.6，sha256 校验，缺失/校验失败 → 构建失败），
+  捆绑于 `src-tauri/resources/lore-bin/`（Tauri 安装包自带；CLI 分发为 exe 同目录 `lore-bin/`）
+- 运行时查找顺序：`KEINESTAMP_LORE_BIN` 环境变量 → 捆绑目录 → 平台默认路径（Windows 原安装路径 / Linux PATH）
+- 启动检测：CLI/serve/GUI 均校验 `lore --version` 精确 == 0.8.6，不符报错（GUI 弹窗 + 核心操作禁用）
+- Lore 为 MIT 许可（© Epic Games, Inc.），捆绑分发附带 LICENSE 声明
 - 命令形态速查表：`docs/lore-commands.md`（实测记录）
 
 ## CLI 命令

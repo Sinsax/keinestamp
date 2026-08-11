@@ -1,6 +1,8 @@
 ﻿<script lang="ts">
   import type { RecentEntry } from '../types'
 
+  const REMOTE_KEY = '__keinestamp_remote__'
+
   let {
     entries,
     activePath,
@@ -11,6 +13,8 @@
     onToggleTheme = () => {},
     onRemoveRecent = (_p: string) => {},
     onReorder = (_paths: string[]) => {},
+    remoteView = false,
+    onRemote = () => {},
   }: {
     entries: RecentEntry[]
     activePath: string
@@ -21,7 +25,19 @@
     onToggleTheme?: () => void
     onRemoveRecent?: (path: string) => void
     onReorder?: (paths: string[]) => void
+    remoteView?: boolean
+    onRemote?: () => void
   } = $props()
+
+  // 远端虚拟标签位置（参与拖拽，索引存 localStorage）
+  let remotePos = $state(Number(localStorage.getItem('keinestamp_remote_pos') ?? '0') || 0)
+
+  const REMOTE_ENTRY: RecentEntry = { path: REMOTE_KEY, last_access: '' }
+
+  function insertRemote(paths: string[]): string[] {
+    const pos = Math.min(remotePos, paths.length)
+    return [...paths.slice(0, pos), REMOTE_KEY, ...paths.slice(pos)]
+  }
 
   let dragOrder = $state<string[] | null>(null)
   let draggedPath = $state<string | null>(null)
@@ -32,16 +48,16 @@
   let dragStartY = 0
 
   const displayEntries = $derived.by(() => {
-    if (!dragOrder) return entries
     const byPath = new Map(entries.map((e) => [e.path, e]))
-    return dragOrder
-      .map((p) => byPath.get(p))
+    const order = dragOrder ?? insertRemote(entries.map((x) => x.path))
+    return order
+      .map((p) => (p === REMOTE_KEY ? REMOTE_ENTRY : byPath.get(p)))
       .filter((e): e is RecentEntry => e !== undefined)
   })
 
   function handlePointerDown(e: PointerEvent, path: string) {
     if (e.button !== 0) return
-    dragOrder = entries.map((x) => x.path)
+    dragOrder = insertRemote(entries.map((x) => x.path))
     draggedPath = path
     dragStartX = e.clientX
     dragStartY = e.clientY
@@ -78,10 +94,18 @@
     window.removeEventListener('pointermove', handlePointerMove)
     window.removeEventListener('pointerup', handlePointerUp)
     if (dragOrder && dragging) {
+      // 远端位置持久化
+      const pos = dragOrder.indexOf(REMOTE_KEY)
+      if (pos !== -1) {
+        remotePos = pos
+        try { localStorage.setItem('keinestamp_remote_pos', String(pos)) } catch { /* ignore */ }
+      }
+      // 真实路径排序（剔除虚拟远端项）
+      const real = dragOrder.filter((p) => p !== REMOTE_KEY)
       const changed =
-        dragOrder.length === entries.length &&
-        dragOrder.some((p, i) => entries[i]?.path !== p)
-      if (changed) onReorder(dragOrder)
+        real.length === entries.length &&
+        real.some((p, i) => entries[i]?.path !== p)
+      if (changed) onReorder(real)
     }
     if (dragging) suppressClick = true
     dragOrder = null
@@ -93,6 +117,10 @@
   function handleTabClick(e: MouseEvent, path: string) {
     if (suppressClick) {
       suppressClick = false
+      return
+    }
+    if (path === REMOTE_KEY) {
+      onRemote()
       return
     }
     if (path === activePath) return
@@ -157,22 +185,38 @@
 <div class="project-tabs">
   <div class="tabs-scroll" class:scrollable={isScrollable} use:wheelScroll bind:this={scrollEl}>
     {#each displayEntries as e, i (e.path)}
-      <button
-        class="project-tab"
-        class:active={e.path === activePath}
-        class:dragging={dragging && draggedPath === e.path}
-        data-idx={i}
-        onclick={(ev) => handleTabClick(ev, e.path)}
-        onauxclick={(ev) => { if (ev.button === 1) handleTabClose(ev, e.path) }}
-        onpointerdown={(ev) => handlePointerDown(ev, e.path)}
-        title={cleanPath(e.path)}
-      >
-        <span class="tab-name">{projectName(e.path)}</span>
+      {#if e.path === REMOTE_KEY}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <span class="tab-close" onclick={(ev) => handleTabClose(ev, e.path)} title="移除仓库">
-          <svg viewBox="0 0 12 12" width="9" height="9" fill="currentColor"><path d="M2.646 2.646a.5.5 0 0 1 .708 0L6 5.293l2.646-2.647a.5.5 0 0 1 .708.708L6.707 6l2.647 2.646a.5.5 0 0 1-.708.708L6 6.707l-2.646 2.647a.5.5 0 0 1-.708-.708L5.293 6 2.646 3.354a.5.5 0 0 1 0-.708z"/></svg>
-        </span>
-      </button>
+        <button
+          class="project-tab remote-tab"
+          class:active={remoteView}
+          class:dragging={dragging && draggedPath === REMOTE_KEY}
+          data-idx={i}
+          onclick={(ev) => handleTabClick(ev, REMOTE_KEY)}
+          onpointerdown={(ev) => handlePointerDown(ev, REMOTE_KEY)}
+          title="远端（loreserver 仓库）"
+        >
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 0a8 8 0 1 0 0 16A8 8 0 0 0 8 0zm0 1.5c.7 0 1.9.8 2.4 2.3.3.9.5 2 .5 3.2 0 1.2-.2 2.3-.5 3.2-.5 1.5-1.7 2.3-2.4 2.3S6.1 11.7 5.6 10.2C5.3 9.3 5.1 8.2 5.1 7c0-1.2.2-2.3.5-3.2C6.1 2.3 7.3 1.5 8 1.5zm-5.7 5h2.3c-.1-1.1 0-2.2.3-3.2.2-.6.4-1.1.7-1.6A6.5 6.5 0 0 0 2.3 6.5zm0 3A6.5 6.5 0 0 0 5.6 14.3c-.3-.5-.5-1-.7-1.6-.3-1-.4-2.1-.3-3.2H2.3zm11.4 0h-2.3c.1 1.1 0 2.2-.3 3.2-.2.6-.4 1.1-.7 1.6a6.5 6.5 0 0 0 3.3-4.8zm0-3A6.5 6.5 0 0 0 10.4 1.7c.3.5.5 1 .7 1.6.3 1 .4 2.1.3 3.2h2.3z"/></svg>
+          <span class="tab-name">远端</span>
+        </button>
+      {:else}
+        <button
+          class="project-tab"
+          class:active={e.path === activePath}
+          class:dragging={dragging && draggedPath === e.path}
+          data-idx={i}
+          onclick={(ev) => handleTabClick(ev, e.path)}
+          onauxclick={(ev) => { if (ev.button === 1) handleTabClose(ev, e.path) }}
+          onpointerdown={(ev) => handlePointerDown(ev, e.path)}
+          title={cleanPath(e.path)}
+        >
+          <span class="tab-name">{projectName(e.path)}</span>
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <span class="tab-close" onclick={(ev) => handleTabClose(ev, e.path)} title="移除仓库">
+            <svg viewBox="0 0 12 12" width="9" height="9" fill="currentColor"><path d="M2.646 2.646a.5.5 0 0 1 .708 0L6 5.293l2.646-2.647a.5.5 0 0 1 .708.708L6.707 6l2.647 2.646a.5.5 0 0 1-.708.708L6 6.707l-2.646 2.647a.5.5 0 0 1-.708-.708L5.293 6 2.646 3.354a.5.5 0 0 1 0-.708z"/></svg>
+          </span>
+        </button>
+      {/if}
     {/each}
     <button class="project-tab add-tab" onclick={onNewProject} title="New project">
       <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
@@ -198,7 +242,7 @@
 </div>
 
 {#if ghostPos && draggedPath}
-  <div class="drag-ghost" style="left: {ghostPos.x}px; top: {ghostPos.y}px">{projectName(draggedPath)}</div>
+  <div class="drag-ghost" style="left: {ghostPos.x}px; top: {ghostPos.y}px">{draggedPath === REMOTE_KEY ? '远端' : projectName(draggedPath)}</div>
 {/if}
 
 <style>
@@ -348,7 +392,7 @@
     background: var(--surface2);
     color: var(--accent);
   }
-  .settings-tab, .theme-tab {
+  .settings-tab, .theme-tab, .remote-tab {
     width: auto;
     padding: 5px 8px;
     background: transparent;
@@ -357,7 +401,7 @@
     align-self: center;
     border-radius: 8px;
   }
-  .settings-tab:hover, .theme-tab:hover {
+  .settings-tab:hover, .theme-tab:hover, .remote-tab:hover {
     background: var(--surface2);
     color: var(--accent);
   }

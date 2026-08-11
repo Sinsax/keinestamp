@@ -18,6 +18,9 @@
     ignored = false,
     isIgnoredFn = (_path: string) => false,
     dirAllIgnoredFn = (_path: string) => false,
+    rollbackChangeSet = new Set<string>(),
+    rollbackDeletedSet = new Set<string>(),
+    rollbackModifiedSet = new Set<string>(),
   }: {
     node: FileTreeNode
     depth?: number
@@ -32,6 +35,9 @@
     ignored?: boolean
     isIgnoredFn?: (path: string) => boolean
     dirAllIgnoredFn?: (path: string) => boolean
+    rollbackChangeSet?: Set<string>
+    rollbackDeletedSet?: Set<string>
+    rollbackModifiedSet?: Set<string>
   } = $props()
 
   let indet = $state(false)
@@ -39,6 +45,19 @@
 
   const isDir = $derived(node.children.length > 0)
   const status = $derived(isDir ? undefined : statusOf(node.path))
+  const rollbackMark = $derived(rollbackChangeSet.has(node.path))
+  const rollbackDeleted = $derived(rollbackDeletedSet.has(node.path))
+  const rollbackModified = $derived(rollbackModifiedSet.has(node.path))
+  // 整行着色：回退改动恒黄、回退删除恒红；普通状态 M/A/D/??
+  const stClass = $derived(
+    rollbackMark ? 'sp-st-m'
+    : rollbackDeleted ? 'sp-st-d'
+    : status?.x === 'M' ? 'sp-st-m'
+    : status?.x === 'A' ? 'sp-st-a'
+    : status?.x === 'D' ? 'sp-st-d'
+    : status?.x === '?' ? 'sp-st-u'
+    : ''
+  )
 </script>
 
 {#if isDir}
@@ -83,20 +102,23 @@
         ignored={ignored || isIgnoredFn(child.path)}
         {isIgnoredFn}
         {dirAllIgnoredFn}
+        {rollbackChangeSet}
+        {rollbackDeletedSet}
+        {rollbackModifiedSet}
       />
     {/each}
   {/if}
 {:else}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="sp-item" class:sp-ignored={ignored} onclick={() => { if (!ignored) onToggleFile(node.path) }} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
+  <div class="sp-item {stClass}" class:sp-ignored={ignored} onclick={() => { if (!ignored && !rollbackDeleted) onToggleFile(node.path) }} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, false, e.clientX, e.clientY) }}>
     <input
       type="checkbox"
       class="sp-check"
       checked={isChecked(node.path)}
-      disabled={ignored}
+      disabled={ignored || rollbackDeleted}
       onclick={(e) => e.stopPropagation()}
       onchange={() => onToggleFile(node.path)}
-      title={ignored ? '已忽略，不参与提交' : '取消勾选可单独提交其余文件'}
+      title={rollbackDeleted ? '回退删除（该版本已删除此文件，记录时算删除）' : ignored ? '已忽略，不参与提交' : '取消勾选可单独提交其余文件'}
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
       <span class="sp-icon" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
@@ -115,8 +137,14 @@
       {#if ignored}
         <span class="sp-ignored-badge">已忽略</span>
       {/if}
-      <span class="sp-label" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
-        {statusLabel(status?.x || ' ', status?.y || ' ')}
+      <span class="sp-badges">
+        {#if rollbackDeleted}
+          <span class="sp-badge sp-badge-rbd">回退删除</span>
+        {:else if rollbackMark}
+          <span class="sp-badge sp-badge-rb">{rollbackModified ? '已修改' : '已检出'}</span>
+        {:else if status?.x && status.x !== ' '}
+          <span class="sp-badge" style="color: {statusColor(status.x, status.y)}">{statusLabel(status.x, status.y)}</span>
+        {/if}
       </span>
     </span>
   </div>
