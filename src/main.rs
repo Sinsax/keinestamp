@@ -221,9 +221,10 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
         .map(|e| e.id.clone())
         .ok_or_else(|| anyhow::anyhow!("记录不存在: {}", entry))?;
 
-    // 回退状态下再次回退：先撤销上次回退，再回退到新目标（恢复目标始终为首次回退前）
+    // 回退状态下再次回退：先撤销上次回退，再回退到新目标（恢复目标始终为首次回退前）；
+    // 自动恢复路径直接丢弃回退期间更改（CLI 非交互）
     if keinestamp::lore_project::rollback_state(&meta.project_root)?.active {
-        keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden)
+        keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden, Some(true))
             .map_err(|e| anyhow::anyhow!("先撤销上次回退失败: {}", e))?;
     }
 
@@ -240,7 +241,7 @@ fn cmd_restore(path: &Path) -> anyhow::Result<()> {
     if !st.active {
         anyhow::bail!("没有可恢复的回退");
     }
-    keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden)?;
+    keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden, None)?;
     println!("已恢复回退前的状态");
     Ok(())
 }
@@ -279,6 +280,7 @@ fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
     let entries: Vec<_> = hist
         .iter()
         .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
         .collect();
 
     if entries.is_empty() {
@@ -415,6 +417,8 @@ fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
         println!("  访问令牌:       (未设置)");
     }
 
+    println!("  提交身份:       {}", keinestamp::app_config::get_lore_identity());
+
     Ok(())
 }
 
@@ -438,9 +442,13 @@ fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
             let v = value.unwrap_or("false");
             keinestamp::app_config::set_auto_connect(v == "true" || v == "1" || v == "yes");
         }
+        "identity" => {
+            // 程序级提交身份（AppConfig 全局，设置内可改）
+            keinestamp::app_config::set_lore_identity(value.unwrap_or(""));
+        }
         _ => {
             anyhow::bail!(
-                "未知配置项: {}。可用项: access_token, auto_connect（软件级）",
+                "未知配置项: {}。可用项: access_token, auto_connect（软件级）, identity（提交身份）",
                 key
             );
         }

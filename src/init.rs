@@ -5,6 +5,9 @@ use std::path::Path;
 
 pub fn init_project(project_root: &Path) -> Result<()> {
     let project_type = detect::detect_project(project_root)?;
+    // 清理 lore 原子写中断残留的临时文件（`*.~loretemp`——lore 写文件先写临时再 rename，
+    // 进程被杀/中断会残留；lore 原生忽略它们但占磁盘）
+    clean_loretemp_orphans(project_root);
 
     match project_type {
         detect::ProjectType::Initialized(mut meta) => {
@@ -33,6 +36,28 @@ pub fn init_project(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
+/// 清理 lore 原子写中断残留的临时文件（`*.~loretemp`——lore 写文件先写临时再 rename，
+/// 进程被杀/中断会残留；lore 原生忽略它们但占磁盘）。递归 walk，只删 ~loretemp 后缀。
+fn clean_loretemp_orphans(project_root: &Path) {
+    fn walk(dir: &Path) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path);
+            } else if path
+                .file_name()
+                .map(|n| n.to_string_lossy().ends_with("~loretemp"))
+                .unwrap_or(false)
+            {
+                let _ = std::fs::remove_file(&path);
+                eprintln!("[debug] 清理 lore 临时文件残留: {:?}", path);
+            }
+        }
+    }
+    walk(project_root);
+}
+
 fn perform_init(project_root: &Path) -> Result<()> {
     std::fs::create_dir_all(project_root)
         .with_context(|| format!("failed to create project directory {:?}", project_root))?;
@@ -44,8 +69,13 @@ fn perform_init(project_root: &Path) -> Result<()> {
             .with_context(|| format!("failed to create lore repository at {:?}", project_root))?;
     }
 
-    // .loreignore 预设（.keinestamp/.keinestamp.toml 隐藏；不覆盖用户规则）
+    // .loreignore 预设（.keinestamp/ 隐藏；不覆盖用户规则）
     ensure_loreignore(project_root)?;
+
+    // init 提交（.loreignore only，kind=init，GUI 不显示）：让首条用户记录有父——
+    // 回退首条用户记录 = 回到 init 提交（工作区只剩 .loreignore，用户文件变 untracked，
+    // changes 区可重新勾选/修改），而非"reset 自身无差异"（初次提交回退无意义）
+    crate::lore_backend::init_commit(project_root)?;
 
     let meta = MetaConfig::new(project_root.to_path_buf());
     let web_root = &meta.web_root;
@@ -68,16 +98,12 @@ fn perform_init(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-/// .loreignore 预设：隐藏 `.keinestamp/.keinestamp.toml`（项目配置）与
-/// `.keinestamp/web/timeline.json`（可重建展示缓存，不入库——入库后每次 rebuild 产生
-/// lore 原生 dirty，会导致 branch reset 回退失败）。
+/// .loreignore 预设：`keinestamp/` 程序私有目录整体忽略（lore 原生过滤，不参与 status/stage/
+/// branch reset 校验——程序只追踪项目内容；web 产物由磁盘生成、部署 zip 上传，不入库）。
 /// 不覆盖用户已有规则（只补缺失行）。文件被提交（规则随仓库历史，与 gitignore 同语义）。
 fn ensure_loreignore(project_root: &Path) -> Result<()> {
     let mut rules = crate::hidden::load_ignore_rules(project_root);
-    const PRESETS: [&str; 2] = [
-        ".keinestamp/.keinestamp.toml",
-        ".keinestamp/web/timeline.json",
-    ];
+    const PRESETS: [&str; 1] = [crate::hidden::PRIVATE_DIR];
     for preset in PRESETS {
         if !rules.iter().any(|r| r == preset) {
             rules.insert(0, preset.to_string());
@@ -143,6 +169,25 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn test_init_cleans_loretemp_orphans() -> Result<()> {
+        // lore 原子写中断残留的 ~loretemp 临时文件在 init 时清理（正常文件保留）
+        let dir = tmp_dir("loretemp");
+        std::fs::create_dir_all(dir.join(".keinestamp")).unwrap();
+        std::fs::write(dir.join("model.blend.~loretemp"), "junk").unwrap();
+        std::fs::write(dir.join(".keinestamp").join("x.~loretemp"), "junk2").unwrap();
+        std::fs::write(dir.join("keep.txt"), "keep").unwrap();
+
+        init_project(&dir)?;
+
+        assert!(!dir.join("model.blend.~loretemp").exists(), "顶层临时文件清理");
+        assert!(!dir.join(".keinestamp").join("x.~loretemp").exists(), "子目录临时文件清理");
+        assert!(dir.join("keep.txt").exists(), "正常文件保留");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
     }
 
     #[test]

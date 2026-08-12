@@ -5,17 +5,32 @@
 
   let {
     path = '',
+    recentPaths = [],
+    onOpenProject = (_path: string) => {},
     onClose,
   }: {
     path?: string
+    recentPaths?: string[]
+    onOpenProject?: (path: string) => void
     onClose: () => void
   } = $props()
 
+  import Remote from './Remote.svelte'
+
   let serverIp = $state('')
+  let loreServerIp = $state('')
+  // 两个端口走一个 IP（勾选时 loreserver IP 灰显，共用部署 IP）
+  let sameIp = $state(true)
+  let activeTab = $state<'main' | 'server'>('main')
+  let savedLoreUrl = $state('')
+  // 服务开关（网页部署 / loreserver；false=关闭，测试与远端列表按此启用）
+  let deployEnabled = $state(false)
+  let loreEnabled = $state(false)
   let deployPort = $state('7799')
   let lorePort = $state('41337')
   let deployToken = $state('')
   let autoRestoreProject = $state(false)
+  let loreIdentity = $state('keinestamp@local')
   let autoConnect = $state(false)
   let closeAction = $state<'tray' | 'quit'>('tray')
   let selectedVersion = $state('')
@@ -45,14 +60,24 @@
       try {
         deployToken = await api.getDeployToken()
         const [deployUrl, loreUrl] = await Promise.all([api.getDeployServerUrl(), api.getLoreServerUrl()])
+        savedLoreUrl = loreUrl || ''
         // 从 URL 反向解析 IP/端口（免协议前缀输入）
         const host = (u: string, fb: string): string => u.match(/^[a-z]+:\/\/([^:/]+)/)?.[1] || fb
         const port = (u: string, fb: string): string => u.match(/:(\d+)(?:\/|$)/)?.[1] || fb
-        serverIp = host(deployUrl || '', host(loreUrl, ''))
+        const deployHost = host(deployUrl || '', '')
+        const loreHost = host(loreUrl || '', '')
+        serverIp = deployHost || loreHost
+        loreServerIp = loreHost
+        // 两 IP 相同或未配置 loreserver IP → 勾选"两个端口走一个 IP"
+        sameIp = !loreHost || loreHost === serverIp
         deployPort = port(deployUrl || '', '7799')
         lorePort = port(loreUrl || '', '41337')
         autoRestoreProject = await api.getAutoRestoreProject()
+        loreIdentity = await api.getLoreIdentity()
         autoConnect = await api.getAutoConnect()
+        const [deployOn, loreOn] = await api.getServerToggles()
+        deployEnabled = deployOn
+        loreEnabled = loreOn
         const close = await api.getCloseAction()
         closeAction = close === false ? 'quit' : 'tray'
       } catch { /* ignore */ }
@@ -130,6 +155,7 @@
     } catch (e) {
       dlPhase = 'error'
       dlMessage = `下载失败: ${e}`
+      console.error('blender download failed', e)
     }
     downloading = false
   }
@@ -170,7 +196,7 @@
   }
 
   function loreUrl(): string {
-    const ip = serverIp.trim()
+    const ip = (sameIp ? serverIp : loreServerIp).trim()
     return ip ? `lore://${ip}:${lorePort.trim() || '41337'}` : ''
   }
 
@@ -180,8 +206,8 @@
     testing = true
     connectStatus = 'none'
     loreStatus = 'none'
-    // 部署服务器 + loreserver 双状态探测
-    if (url) {
+    // 部署服务器 + loreserver 双状态探测（按服务开关：关闭的服务不测试 → 状态 —）
+    if (deployEnabled && url) {
       try {
         const ok = await api.testConnection(url, deployToken || null)
         connectStatus = ok ? 'ok' : 'fail'
@@ -189,16 +215,17 @@
         connectStatus = 'fail'
       }
     } else {
-      connectStatus = 'fail'
+      connectStatus = 'none'
     }
-    if (ip) {
+    if (loreEnabled && ip) {
       try {
-        loreStatus = (await api.testLoreConnection(ip)) ? 'ok' : 'fail'
+        const loreHost = (sameIp ? serverIp : loreServerIp).trim()
+        loreStatus = (await api.testLoreConnection(loreHost)) ? 'ok' : 'fail'
       } catch {
         loreStatus = 'fail'
       }
     } else {
-      loreStatus = 'fail'
+      loreStatus = 'none'
     }
     testing = false
   }
@@ -217,8 +244,10 @@
       await api.setDeployServerUrl(deployUrl())
       await api.setLoreServerUrl(loreUrl())
       await api.setAutoRestoreProject(autoRestoreProject)
+      await api.setLoreIdentity(loreIdentity)
       await api.setAutoConnect(autoConnect)
       await api.setCloseAction(closeAction === 'tray')
+      await api.setServerToggles(deployEnabled, loreEnabled)
       savedFeedback = true
       switchNotice = switched ? `当前版本已切换（Blender ${selectedVersion}）` : ''
       setTimeout(() => { savedFeedback = false; switchNotice = '' }, 2500)
@@ -240,6 +269,12 @@
   <div class="dialog settings-panel" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
     <h3>设置</h3>
 
+    <div class="sd-tabs">
+      <button class="sd-tab" class:active={activeTab === 'main'} onclick={() => (activeTab = 'main')}>Blender / 通用</button>
+      <button class="sd-tab" class:active={activeTab === 'server'} onclick={() => (activeTab = 'server')}>服务器 / 远端仓库</button>
+    </div>
+
+    {#if activeTab === 'main'}
     <div class="section">
       <div class="section-title">Blender</div>
       <div class="field">
@@ -294,30 +329,57 @@
         {/if}
       </div>
     </div>
+    {/if}
 
+    {#if activeTab === 'server'}
     <div class="section">
       <div class="section-title">服务器</div>
-      <div class="field">
-        <label for="sd-server-ip">服务器 IP</label>
-        <input id="sd-server-ip" type="text" bind:value={serverIp} placeholder="192.168.0.100" />
+      <div class="svc-toggle-row">
+        <button class="svc-toggle" class:on={deployEnabled} onclick={() => (deployEnabled = !deployEnabled)} title="开启/关闭网页部署服务">
+          {deployEnabled ? '●' : '○'} 网页部署
+        </button>
+        <button class="svc-toggle" class:on={loreEnabled} onclick={() => (loreEnabled = !loreEnabled)} title="开启/关闭 loreserver 服务">
+          {loreEnabled ? '●' : '○'} loreserver
+        </button>
+      </div>
+      <div class="conn-grid">
+        <div class="conn-row">
+          <span class="port-head">网页部署</span>
+          <div class="input-row">
+            <span class="port-label">IP</span>
+            <input class="port-input ip-input" type="text" bind:value={serverIp} placeholder="192.168.0.100" aria-label="网页部署服务器 IP" />
+            <span class="port-label">端口</span>
+            <input class="port-input port-num" type="text" bind:value={deployPort} placeholder="7799" aria-label="部署端口" />
+          </div>
+        </div>
+        <div class="conn-row">
+          <span class="port-head">loreserver</span>
+          <div class="input-row">
+            <span class="port-label">IP</span>
+            <input class="port-input ip-input" type="text" bind:value={loreServerIp} disabled={sameIp} placeholder="192.168.0.100" aria-label="loreserver IP" class:sd-disabled={sameIp} />
+            <span class="port-label">端口</span>
+            <input class="port-input port-num" type="text" bind:value={lorePort} placeholder="41337" aria-label="loreserver 端口" />
+          </div>
+        </div>
+      </div>
+      <div class="field toggle-field">
+        <label>
+          <input type="checkbox" bind:checked={sameIp} />
+          统一 IP（loreserver 共用网页部署 IP）
+        </label>
       </div>
       <div class="field">
-        <span class="port-head">端口</span>
-        <div class="input-row">
-          <span class="port-label">部署</span>
-          <input class="port-input" type="text" bind:value={deployPort} placeholder="7799" aria-label="部署端口" />
-          <span class="port-label">loreserver</span>
-          <input class="port-input" type="text" bind:value={lorePort} placeholder="41337" aria-label="loreserver 端口" />
-          <button class="connect-btn" onclick={testConnection} disabled={testing || !serverIp.trim()}>
+        <div class="input-row test-row">
+          <button class="connect-btn" onclick={testConnection} disabled={testing || (!deployEnabled && !loreEnabled)}>
             {testing ? '测试中...' : '测试连接'}
           </button>
+          {#if connectStatus !== 'none' || loreStatus !== 'none'}
+            <span class="conn-result">
+              网页部署 {connectStatus === 'ok' ? '✅' : connectStatus === 'fail' ? '❌' : '—'}
+              · lore {loreStatus === 'ok' ? '✅' : loreStatus === 'fail' ? '❌' : '—'}
+            </span>
+          {/if}
         </div>
-        {#if connectStatus !== 'none' || loreStatus !== 'none'}
-          <span class="conn-result">
-            部署 {connectStatus === 'ok' ? '✅' : connectStatus === 'fail' ? '❌' : '—'}
-            · lore {loreStatus === 'ok' ? '✅' : loreStatus === 'fail' ? '❌' : '—'}
-          </span>
-        {/if}
       </div>
       <div class="field">
         <label for="sd-deploy-token">部署令牌（可选）</label>
@@ -330,8 +392,19 @@
           打开项目时自动测试连接
         </label>
       </div>
+      <div class="section-title">远端仓库</div>
+      <Remote
+        loreServerUrl={savedLoreUrl}
+        recentPaths={recentPaths}
+        enabled={loreEnabled}
+        embedded
+        onOpenProject={onOpenProject}
+        onGoSettings={() => (activeTab = 'server')}
+      />
     </div>
+    {/if}
 
+    {#if activeTab === 'main'}
     <div class="section">
       <div class="section-title">通用</div>
       <div class="field toggle-field">
@@ -339,6 +412,11 @@
           <input type="checkbox" bind:checked={autoRestoreProject} />
           启动时自动打开上次的项目
         </label>
+      </div>
+      <div class="field">
+        <label for="sd-lore-identity">提交身份</label>
+        <input id="sd-lore-identity" type="text" bind:value={loreIdentity} placeholder="keinestamp@local" />
+        <span class="hint">记录提交的作者标识（程序级全局设置）</span>
       </div>
       <div class="field">
         <label for="sd-close-action">关闭窗口时</label>
@@ -349,6 +427,7 @@
         <span class="hint">首次关闭会询问一次，之后按此习惯执行；通知区域图标左键打开、右键可随时退出</span>
       </div>
     </div>
+    {/if}
 
     <div class="actions">
       <button onclick={onClose}>取消</button>
@@ -358,6 +437,38 @@
 </div>
 
 <style>
+  .sd-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 8px;
+  }
+  .sd-tab {
+    padding: 5px 14px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .sd-tab:hover {
+    color: var(--text);
+    border-color: var(--tint);
+  }
+  .sd-tab.active {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+  }
+  input.sd-disabled,
+  input:disabled {
+    opacity: 0.45;
+    background: var(--bg-dim, transparent);
+    cursor: not-allowed;
+  }
   .settings-panel {
     width: 520px;
     max-height: 80vh;
@@ -424,8 +535,33 @@
 .input-row { display: flex; align-items: center; gap: 8px; }
 .input-row input { flex: 1; }
 .port-label { font-size: 11px; color: var(--text-dim); white-space: nowrap; }
-.port-head { font-size: 12px; color: var(--text); display: block; margin-bottom: 4px; }
 .port-input { flex: 0 0 70px !important; width: 70px; }
+.ip-input { flex: 1 1 auto !important; width: auto; }
+.port-num { flex: 0 0 60px !important; width: 60px; }
+.conn-grid { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.conn-row { display: flex; align-items: center; gap: 10px; }
+.conn-row .port-head { width: 74px; flex-shrink: 0; margin: 0; }
+.conn-row .input-row { flex: 1; }
+.test-row { margin-top: 2px; }
+.test-row .connect-btn { flex-shrink: 0; }
+.svc-toggle-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.svc-toggle {
+  padding: 5px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 0.15s;
+}
+.svc-toggle:hover { border-color: var(--tint); color: var(--text); }
+.svc-toggle.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
 .connect-btn { font-size: 11px; padding: 5px 12px; border-radius: 6px; cursor: pointer; background: var(--surface); border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
   .connect-btn:hover:not(:disabled) { background: var(--surface2); }
   .connect-btn:disabled { opacity: 0.4; cursor: default; }

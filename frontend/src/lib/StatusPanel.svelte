@@ -72,6 +72,13 @@
       seen.add(p)
       out.push(p)
     }
+    // 回退检出文件：全部显示（含两版共有的——status 无变化不显示；含被忽略文件——灰色已检出）
+    for (const p of rollbackChangeFiles) {
+      if (isHiddenPath(p)) continue
+      if (seen.has(p)) continue
+      seen.add(p)
+      out.push(p)
+    }
     return out
   })
   const tree = $derived(buildFileTree(visibleFiles))
@@ -212,8 +219,9 @@
     const baseSet = new Set(base)
     const allIn = fs.every((p) => baseSet.has(p))
     const next = allIn
-      ? base.filter((p) => !fs.includes(p))
-      : Array.from(new Set([...base, ...fs]))
+      // 取消：移除目录下文件 + 目录本身（目录路径残留会导致记录时 stage 目录 = 全提）
+      ? base.filter((p) => p !== node.path && !fs.includes(p))
+      : Array.from(new Set([...base, ...fs, node.path]))
     const allSel =
       statusFiles.length === next.length &&
       statusFiles.every((f) => next.includes(f.path))

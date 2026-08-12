@@ -1,4 +1,4 @@
-﻿{
+{
   "productName": "Keinestamp",
   "version": "0.3.0",
   "identifier": "com.keinestamp.desktop",
@@ -30,7 +30,7 @@
     "active": true,
     "targets": "all",
     "resources": [
-      "resources/lore-bin/**"
+      "resources/lore-bin/*"
     ],
     "icon": [
       "icons/32x32.png",

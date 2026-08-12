@@ -186,8 +186,8 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             &timeline,
             &project_name,
         ))?;
-        // web 产物（index.html/timeline.json/previews_glb）并入主仓库（kind=web）
-        let _ = keinestamp::lore_backend::commit_web(&meta.project_root);
+        // web 产物版本自增（.keinestamp/ 整体隔离，web 不入库；部署 zip 上传磁盘产物）
+        let _ = keinestamp::lore_project::bump_web_version(&meta.project_root);
 
         keinestamp::recent::RecentProjects::add_path(&p);
         eprintln!("[debug] record → {}", short_hash);
@@ -495,43 +495,59 @@ async fn rollback(path: String, entry_id: String, discard: bool) -> Result<(), S
 }
 
 #[tauri::command]
-fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
+async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
     // 3 秒轮询高频调用：不打日志（轮询静默，错误由前端展示）
-    let p = PathBuf::from(&path);
-    let meta = read_meta(&p)?;
-    match keinestamp::timeline::read_marker(&meta.project_root) {
-        Ok(Some(m)) => {
-            let head_matches = keinestamp::lore_backend::current_revision(&meta.project_root)
-                .map(|cur| cur == m.rollback_point) // current == X-1（回退后 HEAD）
-                .unwrap_or(false);
-            Ok(serde_json::json!({
-                "rollback_point": m.superseded_point, // 灰显起点（选中的 X）
-                "head_matches": head_matches,
-                "deleted_files": m.deleted_files,
-                "change_files": m.change_files,
-                "modified_files": keinestamp::lore_project::rollback_modified_files(&meta.project_root)
-                    .unwrap_or_default(),
-            }))
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        match keinestamp::timeline::read_marker(&meta.project_root) {
+            Ok(Some(m)) => {
+                let head_matches = keinestamp::lore_backend::current_revision(&meta.project_root)
+                    .map(|cur| cur == m.rollback_point) // current == X-1（回退后 HEAD）
+                    .unwrap_or(false);
+                if !head_matches {
+                    // 半状态残留（HEAD 已前进但 marker 未清——异常退出/恢复失败等）：
+                    // 自动清理（marker + 备份），避免"恢复按钮 disabled + 回退态残留"卡死
+                    eprintln!("[debug] rollback marker 不一致（HEAD 已前进），自动清理回退态");
+                    let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
+                    return Ok(serde_json::json!({
+                        "rollback_point": null,
+                        "head_matches": true,
+                        "deleted_files": [],
+                        "change_files": [],
+                        "modified_files": [],
+                    }));
+                }
+                Ok(serde_json::json!({
+                    "rollback_point": m.superseded_point, // 灰显起点（选中的 X）
+                    "head_matches": head_matches,
+                    "deleted_files": m.deleted_files,
+                    "change_files": m.change_files,
+                    "modified_files": keinestamp::lore_project::rollback_modified_files(&meta.project_root)
+                        .unwrap_or_default(),
+                }))
+            }
+            Ok(None) => Ok(serde_json::json!({
+                "rollback_point": null,
+                "head_matches": true,
+                "deleted_files": [],
+                "change_files": [],
+                "modified_files": [],
+            })),
+            Err(e) => Err(e.to_string()),
         }
-        Ok(None) => Ok(serde_json::json!({
-            "rollback_point": null,
-            "head_matches": true,
-            "deleted_files": [],
-            "change_files": [],
-            "modified_files": [],
-        })),
-        Err(e) => Err(e.to_string()),
-    }
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-async fn restore_rollback(path: String) -> Result<(), String> {
-    eprintln!("[debug] restore_rollback({})", path);
+async fn restore_rollback(path: String, discard_modified: Option<bool>) -> Result<(), String> {
+    eprintln!("[debug] restore_rollback({}, discard_modified={:?})", path, discard_modified);
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
         let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
-        map_err(keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden))
+        map_err(keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden, discard_modified))
     });
     handle.await.map_err(|e| e.to_string())?
 }
@@ -575,23 +591,27 @@ async fn resolve_rollback_conflicts(path: String, choices: Vec<Vec<String>>) -> 
 }
 
 #[tauri::command]
-fn status(path: String) -> Result<StatusResult, String> {
-    let p = PathBuf::from(&path);
-    let meta = read_meta(&p)?;
-    let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
-    let files = map_err(keinestamp::lore_project::changed_files(&meta.project_root, &hidden))?;
-    let clean = files.is_empty();
-    // 输出格式与 CLI status 一致（中文标签，state 码 + 路径）
-    let output = if clean {
-        String::new()
-    } else {
-        let mut s = String::from("未提交的修改：\n");
-        for f in &files {
-            s.push_str(&format!("  {} {}\n", state_code(&f.state), f.path));
-        }
-        s
-    };
-    Ok(StatusResult { clean, output })
+async fn status(path: String) -> Result<StatusResult, String> {
+    // async + spawn_blocking：lore status 可达数秒，同步命令会阻塞主线程导致 UI 冻结
+    let handle = tokio::task::spawn_blocking(move || -> Result<StatusResult, String> {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
+        let files = map_err(keinestamp::lore_project::changed_files(&meta.project_root, &hidden))?;
+        let clean = files.is_empty();
+        // 输出格式与 CLI status 一致（中文标签，state 码 + 路径）
+        let output = if clean {
+            String::new()
+        } else {
+            let mut s = String::from("未提交的修改：\n");
+            for f in &files {
+                s.push_str(&format!("  {} {}\n", state_code(&f.state), f.path));
+            }
+            s
+        };
+        Ok(StatusResult { clean, output })
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -604,6 +624,7 @@ fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String> {
     let entries: Vec<LogEntry> = hist
         .iter()
         .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
         .take(c)
         .map(|r| LogEntry {
             hash: r.id[..7.min(r.id.len())].to_string(),
@@ -690,6 +711,7 @@ fn get_timeline(path: String) -> Result<keinestamp::timeline::Timeline, String> 
             project: String::new(),
             entries: vec![],
             rollback_marker: None,
+            removed_entries: vec![],
         }),
     }
 }
@@ -771,8 +793,8 @@ async fn set_entry_milestone(path: String, entry_id: String, milestone: bool) ->
             &project_name,
         ))?;
 
-        // v1 行为保留：web 产物重新提交（kind=web）
-        let _ = keinestamp::lore_backend::commit_web(&meta.project_root);
+        // web 产物版本自增（.keinestamp/ 整体隔离，web 不入库）
+        let _ = keinestamp::lore_project::bump_web_version(&meta.project_root);
 
         Ok(())
     });
@@ -803,7 +825,8 @@ async fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
             &project_name,
         ))?;
 
-        let _ = keinestamp::lore_backend::commit_web(&meta.project_root);
+        // web 产物版本自增（.keinestamp/ 整体隔离，web 不入库）
+        let _ = keinestamp::lore_project::bump_web_version(&meta.project_root);
 
         Ok(())
     });
@@ -811,26 +834,23 @@ async fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn get_project_log(path: String, count: Option<usize>) -> Result<Vec<String>, String> {
-    eprintln!("[debug] get_project_log({}, count={:?})", path, count);
-    let p = PathBuf::from(&path);
-    let c = count.unwrap_or(20);
-    let meta = read_meta(&p)?;
-    let hist = map_err(keinestamp::lore_backend::revision_history(&meta.project_root))?;
-    Ok(hist
-        .iter()
-        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
-        .take(c)
-        .map(|r| format!("{}  {}", &r.id[..7.min(r.id.len())], r.message))
-        .collect())
-}
-
-#[tauri::command]
-fn get_file_diff(path: String, entry_id: String, file_path: String) -> Result<String, String> {
-    eprintln!("[debug] get_file_diff({}, entry={}, file={})", path, &entry_id[..7.min(entry_id.len())], file_path);
-    let p = PathBuf::from(&path);
-    let meta = read_meta(&p)?;
-    map_err(keinestamp::lore_project::get_file_diff(&meta.project_root, &entry_id, &file_path))
+async fn get_project_log(path: String, count: Option<usize>) -> Result<Vec<String>, String> {
+    // spawn lore 可能耗时 → async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        eprintln!("[debug] get_project_log({}, count={:?})", path, count);
+        let p = PathBuf::from(&path);
+        let c = count.unwrap_or(20);
+        let meta = read_meta(&p)?;
+        let hist = map_err(keinestamp::lore_backend::revision_history(&meta.project_root))?;
+        Ok(hist
+            .iter()
+            .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+            .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
+            .take(c)
+            .map(|r| format!("{}  {}", &r.id[..7.min(r.id.len())], r.message))
+            .collect())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -956,6 +976,17 @@ fn set_auto_connect(enabled: bool) {
 }
 
 #[tauri::command]
+fn get_server_toggles() -> (bool, bool) {
+    keinestamp::app_config::get_server_toggles()
+}
+
+#[tauri::command]
+fn set_server_toggles(deploy_enabled: bool, lore_enabled: bool) {
+    eprintln!("[debug] set_server_toggles(deploy={}, lore={})", deploy_enabled, lore_enabled);
+    keinestamp::app_config::set_server_toggles(deploy_enabled, lore_enabled);
+}
+
+#[tauri::command]
 fn get_close_action() -> Option<bool> {
     keinestamp::app_config::get_close_to_tray()
 }
@@ -1017,11 +1048,22 @@ fn list_server_repos(url: String) -> Result<Vec<(String, String)>, String> {
 }
 
 #[tauri::command]
-fn check_lore_env() -> Result<serde_json::Value, String> {
-    match keinestamp::lore_backend::check_lore_env() {
+fn get_lore_identity() -> String {
+    keinestamp::app_config::get_lore_identity()
+}
+
+#[tauri::command]
+fn set_lore_identity(identity: String) {
+    keinestamp::app_config::set_lore_identity(&identity);
+}
+
+#[tauri::command]
+async fn check_lore_env() -> Result<serde_json::Value, String> {
+    let handle = tokio::task::spawn_blocking(|| match keinestamp::lore_backend::check_lore_env() {
         Ok(info) => Ok(serde_json::json!({ "ok": true, "bin": info.bin, "version": info.version })),
         Err(e) => Err(e.to_string()),
-    }
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1232,7 +1274,6 @@ pub fn run() {
             set_entry_milestone,
             get_project_log,
             get_tracked_files,
-            get_file_diff,
             download_blender,
             refresh_blender_versions,
             get_cached_blender_versions,
@@ -1256,8 +1297,12 @@ pub fn run() {
             test_lore_connection,
             migrate_repo,
             check_lore_env,
+            get_lore_identity,
+            set_lore_identity,
             get_auto_connect,
             set_auto_connect,
+            get_server_toggles,
+            set_server_toggles,
             get_close_action,
             set_close_action,
             resolve_close_action,

@@ -41,8 +41,8 @@ export async function getRollbackState(path: string): Promise<RollbackState> {
   return invoke<RollbackState>('get_rollback_state', { path })
 }
 
-export async function restoreRollback(path: string): Promise<void> {
-  return invoke<void>('restore_rollback', { path })
+export async function restoreRollback(path: string, discardModified: boolean | null = null): Promise<void> {
+  return invoke<void>('restore_rollback', { path, discardModified })
 }
 
 export async function getRollbackConflicts(path: string): Promise<string[]> {
@@ -117,10 +117,6 @@ export async function removeIgnore(projectRoot: string, entry: string): Promise<
 
 export async function getTrackedFiles(path: string): Promise<string[]> {
   return invoke<string[]>('get_tracked_files', { path })
-}
-
-export async function getFileDiff(path: string, entryId: string, filePath: string): Promise<string> {
-  return invoke<string>('get_file_diff', { path, entryId, filePath })
 }
 
 export async function setEntryMilestone(path: string, entryId: string, milestone: boolean): Promise<void> {
@@ -211,12 +207,28 @@ export async function checkLoreEnv(): Promise<{ ok: boolean; bin: string; versio
   return invoke('check_lore_env')
 }
 
+export async function getLoreIdentity(): Promise<string> {
+  return invoke<string>('get_lore_identity')
+}
+
+export async function setLoreIdentity(identity: string): Promise<void> {
+  return invoke<void>('set_lore_identity', { identity })
+}
+
 export async function getAutoConnect(): Promise<boolean> {
   return invoke<boolean>('get_auto_connect')
 }
 
 export async function setAutoConnect(enabled: boolean): Promise<void> {
   return invoke<void>('set_auto_connect', { enabled })
+}
+
+export async function getServerToggles(): Promise<[boolean, boolean]> {
+  return invoke<[boolean, boolean]>('get_server_toggles')
+}
+
+export async function setServerToggles(deployEnabled: boolean, loreEnabled: boolean): Promise<void> {
+  return invoke<void>('set_server_toggles', { deployEnabled, loreEnabled })
 }
 
 export async function getCloseAction(): Promise<boolean | null> {

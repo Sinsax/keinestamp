@@ -1,7 +1,7 @@
-﻿<script lang="ts">
+<script lang="ts">
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
-  import { getFileDiff, setEntryMilestone, updateConfig } from '../api'
+  import { setEntryMilestone, updateConfig } from '../api'
   import { tagColor } from './tags'
 
   let {
@@ -142,8 +142,6 @@
   }
 
   let expandedSections = $state<Record<string, Record<string, boolean>>>({})
-  let diffs = $state<Record<string, Record<string, string>>>({})
-  let diffLoading = $state<Record<string, boolean>>({})
 
   function hasSection(entryId: string, section: string): boolean {
     const e = entries.find(x => x.id === entryId)
@@ -156,9 +154,6 @@
     if (!next[entryId]) next[entryId] = {}
     next[entryId] = { ...next[entryId], [section]: !next[entryId][section] }
     expandedSections = next
-    if (next[entryId][section]) {
-      if (section === 'diff') loadDiffs(entryId)
-    }
   }
 
   function statusIcon(s: string): string {
@@ -173,12 +168,6 @@
     if (s === 'M') return 'st-mod'
     return ''
   }
-
-  let textFiles = $derived((entryId: string) => {
-    const e = entries.find(x => x.id === entryId)
-    if (!e) return []
-    return e.files.filter((f, i) => !f.endsWith('.blend') && e.file_status?.[i] !== 'A')
-  })
 
   interface GroupedEntry {
     entry: TimelineEntry
@@ -212,77 +201,6 @@
   // 被顶替记录折叠组（默认折叠）
   let supersededOpen = $state(false)
   const supersededCount = $derived(entries.filter((e) => e.superseded).length)
-
-  interface DiffLine {
-    lineNum: number
-    type: 'add' | 'del' | 'mod'
-    text: string
-  }
-
-  function parseDiff(diffText: string, fileStatus: string): DiffLine[] {
-    if (fileStatus === 'A') return []
-    const result: DiffLine[] = []
-    let newLineNum = 0
-    let oldLineNum = 0
-    let hunkHasDel = false
-    const hunkBuf: { prefix: string; text: string }[] = []
-
-    function flushHunk() {
-      for (const h of hunkBuf) {
-        if (h.prefix === '+') {
-          result.push({ lineNum: newLineNum, type: hunkHasDel ? 'mod' : 'add', text: h.text })
-          newLineNum++
-        } else if (h.prefix === '-') {
-          result.push({ lineNum: oldLineNum, type: 'del', text: h.text })
-          oldLineNum++
-        }
-        if (h.prefix === ' ') { newLineNum++; oldLineNum++ }
-      }
-      hunkBuf.length = 0
-      hunkHasDel = false
-    }
-
-    for (const rawLine of diffText.split('\n')) {
-      const m = rawLine.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-      if (m) {
-        flushHunk()
-        oldLineNum = parseInt(m[1])
-        newLineNum = parseInt(m[2])
-        continue
-      }
-      if (rawLine.startsWith('diff --git') || rawLine.startsWith('index ') || rawLine.startsWith('---') || rawLine.startsWith('+++')) continue
-      if (rawLine.startsWith('+') || rawLine.startsWith('-') || rawLine.startsWith(' ')) {
-        const prefix = rawLine[0]
-        if (prefix === '-') hunkHasDel = true
-        if (prefix !== ' ') hunkBuf.push({ prefix, text: rawLine.slice(1) })
-        else { newLineNum++; oldLineNum++ }
-      }
-    }
-    flushHunk()
-    return result
-  }
-
-  function diffLines(entryId: string, file: string, status: string): DiffLine[] {
-    const raw = diffs[entryId]?.[file]
-    if (!raw) return []
-    return parseDiff(raw, status)
-  }
-
-  async function loadDiffs(entryId: string) {
-    if (diffLoading[entryId]) return
-    diffLoading = { ...diffLoading, [entryId]: true }
-    const e = entries.find(x => x.id === entryId)
-    if (!e || !activePath) { diffLoading = { ...diffLoading, [entryId]: false }; return }
-    const files = e.files.filter((f, i) => !f.endsWith('.blend') && e.file_status?.[i] !== 'A')
-    const results: Record<string, string> = {}
-    for (const f of files) {
-      try {
-        results[f] = await getFileDiff(activePath, entryId, f)
-      } catch { /* ignore */ }
-    }
-    diffs = { ...diffs, [entryId]: results }
-    diffLoading = { ...diffLoading, [entryId]: false }
-  }
 </script>
 
 <div class="entries">
@@ -297,7 +215,6 @@
       {#each grouped as g, i (g.entry.id)}
       {@const entry = g.entry}
       {@const entryTag = entry.tag || null}
-      {@const textF = entry.files.map((f, i) => ({ file: f, status: entry.file_status?.[i] || '', idx: i })).filter(x => !x.file.endsWith('.blend') && x.status !== 'A')}
       {@const prevEntry = grouped[i - 1]?.entry}
       {#if g.showGroup}
         <div class="tag-group">
@@ -366,39 +283,6 @@
               </div>
             {/each}
           </div>
-        {/if}
-
-        <!-- Section 2: Text Diffs -->
-        {#if textF.length > 0}
-          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'diff'); }}>
-            <span class="arr">{hasSection(entry.id, 'diff') ? '▾' : '▸'}</span>
-            <span>文本改动 ({textF.length})</span>
-          </div>
-          {#if hasSection(entry.id, 'diff')}
-            <div class="section-body">
-              {#if diffLoading[entry.id]}
-                <div class="section-loading">加载中...</div>
-              {:else}
-                {#each textF as tf}
-                  {@const lines = diffLines(entry.id, tf.file, tf.status)}
-                  <div class="diff-entry">
-                    <div class="diff-path">{tf.file}</div>
-                    {#if lines.length > 0}
-                      {#each lines as ln}
-                        <div class="dl {ln.type}">
-                          <span class="dl-num">{ln.lineNum}</span>
-                          <span class="dl-text">{ln.text}</span>
-                        </div>
-                      {/each}
-                    {:else}
-                      <div class="diff-empty">无差异</div>
-                    {/if}
-                  </div>
-                {/each}
-              {/if}
-            </div>
-          {/if}
         {/if}
       </div>
       {/if}
@@ -631,7 +515,6 @@
   .section-header:hover { color: var(--accent); }
   .section-header .arr { font-size: 9px; width: 10px; flex-shrink: 0; }
   .section-body { padding: 4px 0 2px 15px; font-size: 12px; }
-  .section-loading { color: var(--text-dim); font-size: 11px; padding: 4px 0; }
   .file-status-line { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-family: var(--mono); font-size: 12px; }
   .status-badge {
     width: 18px; height: 18px;
@@ -645,38 +528,7 @@
   .st-del { color: var(--error); background: var(--accent-soft); }
   .st-mod { color: var(--warning); background: var(--warning-soft); }
 
-  .diff-entry, .model-entry { margin-bottom: 6px; }
-  .diff-path {
-    font-size: 11px; font-family: var(--mono);
-    color: var(--tint); padding: 2px 6px;
-    background: var(--tint-soft); border-radius: 4px; margin-bottom: 3px;
-  }
-  .diff-empty { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
-
-  .dl {
-    display: flex;
-    gap: 8px;
-    font-family: var(--mono);
-    font-size: 11px;
-    line-height: 1.6;
-    padding: 0 4px;
-    border-radius: 3px;
-  }
-  .dl-num {
-    width: 32px;
-    text-align: right;
-    flex-shrink: 0;
-    color: var(--text-dim);
-    font-size: 10px;
-    user-select: none;
-  }
-  .dl-text { white-space: pre; flex: 1; }
-  .dl.add { background: var(--success-soft); color: var(--success); }
-  .dl.add .dl-num { color: var(--success); }
-  .dl.del { background: var(--accent-soft); color: var(--error); }
-  .dl.del .dl-num { color: var(--error); }
-  .dl.mod { background: var(--tint-soft); color: var(--tint); }
-  .dl.mod .dl-num { color: var(--tint); }
+  .model-entry { margin-bottom: 6px; }
 
   .model-err { font-size: 11px; color: var(--text-dim); padding: 8px; text-align: center; background: var(--surface2); border-radius: 6px; }
   .open-web-btn {

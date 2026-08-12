@@ -7,11 +7,15 @@
   let {
     loreServerUrl,
     recentPaths = [],
+    enabled = true,
+    embedded = false,
     onOpenProject = (_path: string) => {},
     onGoSettings = () => {},
   }: {
     loreServerUrl: string
     recentPaths?: string[]
+    enabled?: boolean
+    embedded?: boolean
     onOpenProject?: (path: string) => void
     onGoSettings?: () => void
   } = $props()
@@ -26,12 +30,20 @@
   let deleting = $state(false)
   let deleteTarget = $state<[string, string] | null>(null)
 
-  // 已下载标记：recent 项目目录名 == 仓库名
-  const localNames = $derived(new Set(recentPaths.map((p) => p.replace(/[/\\]+$/, '').split(/[/\\]/).pop() ?? p)))
+  // 已下载映射：recent 项目目录名 == 仓库名 → 完整本地路径（跳转按钮用）
+  const localPaths = $derived(
+    new Map(
+      recentPaths.map((p) => {
+        const clean = p.replace(/[/\\]+$/, '')
+        const name = clean.split(/[/\\]/).pop() ?? p
+        return [name, clean]
+      })
+    )
+  )
 
-  // 进入页面自动刷新
+  // 进入页面自动刷新（服务开关关闭时不拉取）
   onMount(() => {
-    refreshServerRepos()
+    if (enabled) refreshServerRepos()
   })
 
   async function refreshServerRepos() {
@@ -53,6 +65,7 @@
       serverConn = 'fail'
       serverMsg = String(e)
       serverRepos = []
+      console.error('list server repos failed', e)
     }
     serverLoading = false
   }
@@ -80,6 +93,7 @@
         if (!firstCloned) firstCloned = repoPath
       } catch (e: any) {
         downloadResults = [...downloadResults, { name, ok: false, msg: String(e) }]
+        console.error(`clone server repo failed: ${name}`, e)
       }
     }
     downloading = false
@@ -98,13 +112,17 @@
       serverMsg = `已删除仓库 ${name}`
     } catch (e: any) {
       serverMsg = `删除失败: ${e}`
+      console.error('delete server repo failed', e)
     }
     deleting = false
     deleteTarget = null
   }
 </script>
 
-<div class="remote">
+<div class="remote" class:embedded>
+  {#if !enabled}
+    <div class="remote-empty">loreserver 服务未开启 — 在「服务器」区点击 loreserver 按钮开启</div>
+  {:else}
   <div class="remote-head">
     <div>
       <div class="remote-title">远端仓库（loreserver）</div>
@@ -158,8 +176,14 @@
         >
           <span class="repo-check">{selectedRepos.has(name) ? '☑' : '☐'}</span>
           <span class="repo-name">{name}</span>
-          {#if localNames.has(name)}
-            <span class="dl-badge" title="本地常用仓库中已有同名项目">已下载</span>
+          {#if localPaths.has(name)}
+            <button
+              class="open-btn"
+              title="本地已有该项目，点击打开"
+              onclick={(e) => { e.stopPropagation(); const p = localPaths.get(name); if (p) onOpenProject(p) }}
+            >
+              跳转
+            </button>
           {/if}
           <span class="repo-id">{id.slice(0, 8)}</span>
           <button
@@ -186,6 +210,7 @@
       {/each}
     </div>
   {/if}
+  {/if}
 </div>
 
 {#if deleteTarget}
@@ -211,6 +236,25 @@
     margin: 0 auto;
     overflow-y: auto;
     height: 100%;
+  }
+  .remote.embedded {
+    padding: 0;
+    max-width: none;
+    height: auto;
+    overflow: visible;
+  }
+  .open-btn {
+    background: var(--accent-soft);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    font-size: 11px;
+    padding: 2px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .open-btn:hover {
+    background: var(--accent);
+    color: #fff;
   }
   .remote-head {
     display: flex;
@@ -335,14 +379,6 @@
     font-size: 10px;
     color: var(--text-dim);
     font-family: var(--mono);
-  }
-  .dl-badge {
-    font-size: 10px;
-    color: var(--success);
-    background: color-mix(in srgb, var(--success) 12%, transparent);
-    border-radius: 4px;
-    padding: 1px 6px;
-    flex-shrink: 0;
   }
   .del-btn {
     background: none;

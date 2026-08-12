@@ -1,4 +1,4 @@
-﻿use anyhow::{Context, Result};
+use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -8,6 +8,10 @@ pub struct Timeline {
     pub entries: Vec<TimelineEntry>,
     #[serde(default)]
     pub rollback_marker: Option<RollbackMarker>,
+    /// 用户删除的条目 id（delete_entry 记录；rebuild_cache 从历史重建时过滤——
+    /// 否则每次记录后重建会把被删条目拉回来）
+    #[serde(default)]
+    pub removed_entries: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -48,6 +52,9 @@ pub struct TimelineEntry {
     /// 被顶替出主线的记录（回退后显示灰显；数据保留在 store 但不在主线历史）
     #[serde(default)]
     pub superseded: bool,
+    /// 父记录签名（主线按顺序推导；回退时读缓存免 lore 调用；旧缓存空 → fallback lore revision info）
+    #[serde(default)]
+    pub parent: String,
 }
 
 pub fn read_timeline(path: &Path) -> Result<Timeline> {
@@ -87,6 +94,7 @@ pub fn append_entry(path: &Path, entry: TimelineEntry) -> Result<()> {
             project: String::new(),
             entries: Vec::new(),
         rollback_marker: None,
+        removed_entries: Vec::new(),
         }
     };
 
@@ -114,6 +122,10 @@ pub fn remove_entry(path: &Path, entry_id: &str) -> Result<TimelineEntry> {
     match pos {
         Some(idx) => {
             let entry = timeline.entries.remove(idx);
+            // tombstone：记录被删条目（rebuild_cache 重建时过滤，否则条目会被拉回）
+            if !timeline.removed_entries.contains(&entry.id) {
+                timeline.removed_entries.push(entry.id.clone());
+            }
             write_timeline(path, &timeline)?;
             Ok(entry)
         }
@@ -158,7 +170,7 @@ pub fn write_marker(project_root: &Path, marker: &RollbackMarker) -> Result<()> 
     let mut timeline = if path.exists() {
         read_timeline(&path)?
     } else {
-        Timeline { project: String::new(), entries: Vec::new(), rollback_marker: None }
+        Timeline { project: String::new(), entries: Vec::new(), rollback_marker: None, removed_entries: Vec::new() }
     };
     timeline.rollback_marker = Some(marker.clone());
     write_timeline(&path, &timeline)
@@ -185,6 +197,11 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
         None
     };
     let rollback_marker = old_timeline.as_ref().and_then(|t| t.rollback_marker.clone());
+    // 用户删除的条目 tombstone：重建时过滤（防止被删条目从历史拉回）
+    let removed: std::collections::HashSet<String> = old_timeline
+        .as_ref()
+        .map(|t| t.removed_entries.iter().cloned().collect())
+        .unwrap_or_default();
     let old_previews: std::collections::HashMap<String, String> = old_timeline
         .as_ref()
         .map(|t| {
@@ -198,6 +215,8 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
     let mut entries: Vec<TimelineEntry> = hist
         .iter()
         .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
+        .filter(|r| !removed.contains(&r.id))
         .map(|r| TimelineEntry {
             id: r.id.clone(),
             timestamp: lore_date_to_iso(&r.date),
@@ -209,10 +228,15 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             tag: r.metadata.get("tag").cloned(),
             milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
             superseded: false,
+            parent: String::new(),
         })
         .collect();
     // v1 语义：entries 旧→新（最新在尾部，append 顺序）；revision_history 是最新在前
     entries.reverse();
+    // 主线即父链：旧→新顺序下 entries[i].parent = entries[i-1].id（回退时读缓存免 lore 调用）
+    for i in 1..entries.len() {
+        entries[i].parent = entries[i - 1].id.clone();
+    }
     // 保留被顶替出主线的旧记录（v1 行为：回退后回退点之后的记录仍显示，灰显不可回退）：
     // 旧缓存中 id 不在新主线的条目 → 标记 superseded 并按时间戳插入正确位置（回退点与新记录之间）
     let old_entries = old_timeline.map(|t| t.entries);
@@ -238,6 +262,7 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             .unwrap_or_default(),
         entries,
         rollback_marker,
+        removed_entries: removed.into_iter().collect(),
     };
     write_timeline(&timeline_path, &timeline)
 }
@@ -329,6 +354,7 @@ mod tests {
             tag: None,
             milestone: false,
             superseded: false,
+            parent: String::new(),
         }
     }
 
@@ -339,6 +365,7 @@ mod tests {
             project: "P".to_string(),
             entries: vec![make_entry("abc123def456")],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
         write_timeline(&path, &timeline)?;
 
@@ -373,6 +400,7 @@ mod tests {
             project: "Test".to_string(),
             entries: vec![],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
         timeline.entries.push(make_entry("abc123"));
 

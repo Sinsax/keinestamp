@@ -1,4 +1,4 @@
-﻿use crate::timeline::Timeline;
+use crate::timeline::Timeline;
 use crate::three_assets;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -379,13 +379,15 @@ function parseDiff(diffText, fileStatus) {
 
 function render() {
   document.getElementById('project-title').textContent = data.project || 'Keinestamp';
-  var total = (data.entries || []).length;
-  var msCount = (data.entries || []).filter(function(e) { return e.milestone; }).length;
+  // web 只显示主线：被顶替（superseded）记录不展示（GUI 时间线保留折叠区，部署页不显示）
+  var mainline = (data.entries || []).filter(function(e) { return !e.superseded; });
+  var total = mainline.length;
+  var msCount = mainline.filter(function(e) { return e.milestone; }).length;
   document.getElementById('meta-count').textContent = '共 ' + total + ' 条记录';
   document.getElementById('meta-ms').textContent = '★ ' + msCount + ' 里程碑';
   var h = '';
-  if (data.entries && data.entries.length > 0) {
-    var entries = data.entries.slice().reverse();
+  if (mainline.length > 0) {
+    var entries = mainline.slice().reverse();
     var currentTag = null;
     entries.forEach(function(e) {
       var tag = e.tag || null;
@@ -1099,6 +1101,7 @@ mod tests {
             project: "Test".to_string(),
             entries: vec![],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "Test Project")?;
@@ -1128,9 +1131,10 @@ mod tests {
                 files: vec!["char.blend".to_string(), "textures/diffuse.png".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
-                tag: Some("建模".to_string()), milestone: false, superseded: false,
+                tag: Some("建模".to_string()), milestone: false, superseded: false, parent: String::new(),
             }],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "My Project")?;
@@ -1143,6 +1147,65 @@ mod tests {
         assert!(html.contains("tag-badge"));
         assert!(html.contains("var diffsData ="));
         assert!(!html.contains("\"milestone\": true"), "non-milestone entry has milestone false");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_filters_superseded() -> Result<()> {
+        // web 只显示主线：被顶替（superseded）记录不渲染
+        let dir = std::env::temp_dir().join("keinestamp_html_sup");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+
+        let timeline = Timeline {
+            project: "Sup".to_string(),
+            entries: vec![
+                TimelineEntry {
+                    id: "aaa111aaa111".to_string(),
+                    timestamp: "2026-06-13T12:00:00Z".to_string(),
+                    author: "a".to_string(),
+                    message: "主线1".to_string(),
+                    files: vec!["a.blend".to_string()],
+                    file_status: vec![],
+                    preview: String::new(),
+                    tag: None, milestone: false, superseded: false, parent: String::new(),
+                },
+                TimelineEntry {
+                    id: "bbb222bbb222".to_string(),
+                    timestamp: "2026-06-13T13:00:00Z".to_string(),
+                    author: "b".to_string(),
+                    message: "被顶替记录".to_string(),
+                    files: vec!["b.blend".to_string()],
+                    file_status: vec![],
+                    preview: String::new(),
+                    tag: None, milestone: false, superseded: true, parent: String::new(),
+                },
+                TimelineEntry {
+                    id: "ccc333ccc333".to_string(),
+                    timestamp: "2026-06-13T14:00:00Z".to_string(),
+                    author: "c".to_string(),
+                    message: "主线2".to_string(),
+                    files: vec!["c.blend".to_string()],
+                    file_status: vec![],
+                    preview: String::new(),
+                    tag: None, milestone: false, superseded: false, parent: String::new(),
+                },
+            ],
+            rollback_marker: None,
+        removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "Sup")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(html.contains("主线1"), "主线记录应显示");
+        assert!(html.contains("主线2"), "主线记录应显示");
+        // 数据 JSON 保留 superseded（GUI 时间线/回退需要）；渲染 JS 过滤（只显示主线）
+        assert!(html.contains("!e.superseded"), "渲染 JS 应过滤被顶替记录");
+        assert!(html.contains("\"superseded\": true"), "数据 JSON 保留 superseded 标记");
+        // 渲染入口只遍历主线（mainline）
+        assert!(html.contains("var mainline"), "渲染使用主线过滤结果");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1165,9 +1228,10 @@ mod tests {
                 preview: "previews/abc123.png".to_string(),
                 tag: None,
                 milestone: true,
-                superseded: false,
+                superseded: false, parent: String::new(),
             }],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "Ms")?;
@@ -1197,9 +1261,10 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false,
+                tag: None, milestone: false, superseded: false, parent: String::new(),
             }],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "GlbTest")?;
@@ -1231,9 +1296,10 @@ mod tests {
                 files: vec!["fix.txt".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false,
+                tag: None, milestone: false, superseded: false, parent: String::new(),
             }],
         rollback_marker: None,
+        removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "NoTag Project")?;

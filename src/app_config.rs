@@ -21,6 +21,13 @@ pub struct AppConfig {
     pub close_to_tray: Option<bool>,
     #[serde(default)]
     pub auto_restore_project: bool,
+    #[serde(default)]
+    pub lore_identity: Option<String>,
+    /// 服务开关：网页部署 / loreserver（false = 关闭，测试与远端列表按此启用）
+    #[serde(default)]
+    pub deploy_enabled: bool,
+    #[serde(default)]
+    pub lore_enabled: bool,
 }
 
 impl AppConfig {
@@ -70,8 +77,23 @@ impl Default for AppConfig {
             auto_connect: false,
             close_to_tray: None,
             auto_restore_project: false,
+            lore_identity: None,
+            deploy_enabled: false,
+            lore_enabled: false,
         }
     }
+}
+
+pub fn get_server_toggles() -> (bool, bool) {
+    let cfg = AppConfig::load();
+    (cfg.deploy_enabled, cfg.lore_enabled)
+}
+
+pub fn set_server_toggles(deploy_enabled: bool, lore_enabled: bool) {
+    let mut cfg = AppConfig::load();
+    cfg.deploy_enabled = deploy_enabled;
+    cfg.lore_enabled = lore_enabled;
+    cfg.save();
 }
 
 pub fn get_blender_path() -> Option<PathBuf> {
@@ -157,6 +179,24 @@ pub fn set_auto_restore_project(v: bool) {
     cfg.save();
 }
 
+/// 提交身份（程序级全局；未配置 → 默认 keinestamp@local）
+pub fn get_lore_identity() -> String {
+    AppConfig::load()
+        .lore_identity
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "keinestamp@local".to_string())
+}
+
+pub fn set_lore_identity(identity: &str) {
+    let mut cfg = AppConfig::load();
+    cfg.lore_identity = if identity.trim().is_empty() {
+        None
+    } else {
+        Some(identity.trim().to_string())
+    };
+    cfg.save();
+}
+
 pub fn set_auto_connect(v: bool) {
     let mut cfg = AppConfig::load();
     cfg.auto_connect = v;
@@ -205,7 +245,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, lore_server_url: Some("lore://127.0.0.1:41337".to_string()), auto_connect: false, close_to_tray: Some(true), auto_restore_project: false };
+        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, lore_server_url: Some("lore://127.0.0.1:41337".to_string()), auto_connect: false, close_to_tray: Some(true), auto_restore_project: false, lore_identity: None, deploy_enabled: false, lore_enabled: false };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);
@@ -240,6 +280,30 @@ assert_eq!(loaded.blender_path, None);
 
         let loaded = AppConfig::load_from(&path);
         assert_eq!(loaded.blender_path, Some("/usr/bin/blender".to_string()));
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn test_lore_identity_roundtrip() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_app_id_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("app-config.toml");
+
+        // 默认 → keinestamp@local
+        let mut cfg = AppConfig::default();
+        cfg.save_to(&path);
+        let loaded = AppConfig::load_from(&path);
+        assert_eq!(
+            loaded.lore_identity.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "keinestamp@local".to_string()),
+            "keinestamp@local"
+        );
+        // 设置后持久化
+        let mut cfg2 = AppConfig::load_from(&path);
+        cfg2.lore_identity = Some("para@local".to_string());
+        cfg2.save_to(&path);
+        let loaded2 = AppConfig::load_from(&path);
+        assert_eq!(loaded2.lore_identity, Some("para@local".to_string()));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

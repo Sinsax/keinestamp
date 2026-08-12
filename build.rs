@@ -58,6 +58,7 @@ fn main() {
     {
         println!("cargo:warning=Lore 捆绑已就绪（{}）", out_dir.display());
         emit_env(&out_dir);
+        copy_to_profile_dir(&out_dir);
         println!("cargo:rerun-if-changed={}", out_dir.display());
         return;
     }
@@ -96,7 +97,48 @@ fn main() {
     let _ = std::fs::remove_dir_all(&tmp);
     println!("cargo:warning=Lore 捆绑完成（{}）", out_dir.display());
     emit_env(&out_dir);
+    copy_to_profile_dir(&out_dir);
     println!("cargo:rerun-if-changed={}", out_dir.display());
+}
+
+/// 拷贝捆绑目录到构建产物目录（`target/<profile>/lore-bin`，与 exe 同目录）——
+/// 分发时 exe + lore-bin 两件套直接可用（CLI 与 GUI 构建均自动执行）。
+fn copy_to_profile_dir(out_dir: &Path) {
+    // OUT_DIR = target/<profile>/build/keinestamp-<hash>/out → 上 3 级 = target/<profile>
+    let Some(out_path) = std::env::var_os("OUT_DIR").map(PathBuf::from) else {
+        println!("cargo:warning=无法读取 OUT_DIR，跳过拷贝 lore-bin 到 exe 同目录");
+        return;
+    };
+    let Some(profile) = out_path
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+    else {
+        println!("cargo:warning=无法推导 profile 目录（{}），跳过拷贝", out_path.display());
+        return;
+    };
+    let dest = profile.join("lore-bin");
+    let _ = std::fs::remove_dir_all(&dest);
+    if let Err(e) = copy_dir(out_dir, &dest) {
+        println!("cargo:warning=拷贝 lore-bin 到 {} 失败: {}", dest.display(), e);
+        return;
+    }
+    println!("cargo:warning=Lore 捆绑已拷贝到 exe 同目录: {}", dest.display());
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)?;
+        }
+    }
+    Ok(())
 }
 
 fn emit_env(out_dir: &Path) {

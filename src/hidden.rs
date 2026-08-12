@@ -9,8 +9,8 @@ pub const PRIVATE_DIR: &str = ".keinestamp/";
 pub const LOREIGNORE: &str = ".loreignore";
 
 /// 应用层隐藏（程序私有目录 + .loreignore 自身，UI 变更面板不显示）。
-/// loreignore 不能排除 `.keinestamp/` 整个目录（会阻断 commit_web 的 web 提交），
-/// 故 `.keinestamp/` 前缀由应用层在 changed_files 过滤；用户自定义忽略走 .loreignore（Lore 原生）。
+/// `.keinestamp/` 已由 loreignore 预设整体忽略（init 时 ensure_loreignore 写入，lore 原生过滤）——
+/// 应用层 hidden 过滤保留作为双保险（用户删除 loreignore 行时仍隐藏程序产物）。
 /// `.loreignore` 自身由 record 强制携带自动入库（"自动记录"，不显示在 UI）。
 pub fn load_hidden(_project_root: &Path) -> Vec<String> {
     vec![PRIVATE_DIR.to_string(), LOREIGNORE.to_string()]

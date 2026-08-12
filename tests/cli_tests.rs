@@ -306,6 +306,48 @@ fn test_cli_rollback_while_in_rollback_auto_restores() {
 }
 
 #[test]
+fn test_cli_rollback_with_untracked() {
+    let dir = tmp_dir("cli_rollback_untracked");
+    let (out, ok) = run(&["init", &dir.to_string_lossy()]);
+    assert!(ok, "init failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v1").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "A"]);
+    assert!(ok, "record A failed: {}", out);
+
+    std::fs::write(dir.join("test.blend"), b"v2").unwrap();
+    let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "B"]);
+    assert!(ok, "record B failed: {}", out);
+
+    // 工作区 untracked 文件（lore branch reset 会因它有本地内容拒绝同步）
+    std::fs::write(dir.join("untracked.txt"), b"user file").unwrap();
+
+    let tl_path = dir.join(".keinestamp").join("web").join("timeline.json");
+    let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
+    let b_id = timeline.entries.get(1).unwrap().id.clone();
+
+    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
+    assert!(ok, "回退应成功（untracked 备份移出工作区）: {}", out);
+    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 B：B 改动检出（工作区 = v2）");
+    assert!(!dir.join("untracked.txt").exists(), "untracked 应移出工作区");
+    assert_eq!(
+        std::fs::read(dir.join(".keinestamp").join("rollback-backup").join("untracked.txt")).unwrap(),
+        b"user file",
+        "untracked 应备份在 rollback-backup"
+    );
+
+    let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
+    assert!(ok, "restore failed: {}", out);
+    assert_eq!(
+        std::fs::read(dir.join("untracked.txt")).unwrap(),
+        b"user file",
+        "恢复应带回回退前 untracked 文件"
+    );
+
+    std::fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
 fn test_export_with_real_hash() {
     let dir = tmp_dir("export_real");
     let (out, ok) = run(&["init", &dir.to_string_lossy()]);
@@ -358,8 +400,10 @@ fn html_gen_contains_daynight_theme() {
             tag: Some("建模".to_string()),
             milestone: false,
             superseded: false,
+            parent: String::new(),
         }],
         rollback_marker: None,
+        removed_entries: Vec::new(),
     };
 
     keinestamp::html_gen::generate_index_html(&dir, &dir, &timeline, "ThemeTest").unwrap();

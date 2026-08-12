@@ -118,7 +118,7 @@
       disabled={ignored || rollbackDeleted}
       onclick={(e) => e.stopPropagation()}
       onchange={() => onToggleFile(node.path)}
-      title={rollbackDeleted ? '回退删除（该版本已删除此文件，记录时算删除）' : ignored ? '已忽略，不参与提交' : '取消勾选可单独提交其余文件'}
+      title={rollbackDeleted ? '已检出删除（该版本已删除此文件，记录时算删除）' : ignored ? '已忽略，不参与提交' : '取消勾选可单独提交其余文件'}
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
       <span class="sp-icon" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
@@ -139,7 +139,7 @@
       {/if}
       <span class="sp-badges">
         {#if rollbackDeleted}
-          <span class="sp-badge sp-badge-rbd">回退删除</span>
+          <span class="sp-badge sp-badge-rbd">已检出删除</span>
         {:else if rollbackMark}
           <span class="sp-badge sp-badge-rb">{rollbackModified ? '已修改' : '已检出'}</span>
         {:else if status?.x && status.x !== ' '}
