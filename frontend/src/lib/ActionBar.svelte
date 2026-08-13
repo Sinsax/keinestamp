@@ -115,7 +115,7 @@
   .record-btn:hover:not(:disabled) {
     background: var(--accent-hover) !important;
     border-color: var(--accent-hover) !important;
-    box-shadow: 0 2px 8px rgba(217, 71, 71, 0.35);
+    box-shadow: var(--accent-shadow);
   }
   .deploy-btn {
     border-color: var(--success) !important;

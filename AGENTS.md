@@ -13,7 +13,7 @@ cd src-tauri; cargo build           # Tauri backend only
 cd frontend; npm run check          # svelte-check + tsc (no other lint/format)
 ```
 
-**Lore 依赖**：**构建时自动捆绑**（build.rs 按平台下载 v0.8.6 的 `lore`+`loreserver` 到 `src-tauri/resources/lore-bin/`，sha256 校验，缺失/失败 → 构建失败；**自动拷贝到构建产物目录 `target/<profile>/lore-bin`（exe 同目录）**；Tauri resources 打包、CLI 分发 = exe + 同目录 lore-bin 两件套）。运行时查找：`KEINESTAMP_LORE_BIN` env → exe 同目录 `lore-bin/` → Tauri resource_dir 注入 → 平台默认（Windows `C:\Users\para\AppData\Local\lore\bin\lore.exe` / Linux `lore` PATH）。**启动检测**（`check_lore_env`：`--version` 精确 == 0.8.6）：CLI 命令前、serve 启动（拒绝启动）、GUI 启动（弹窗 + ActionBar 操作禁用）。Lore 为 MIT 许可（© Epic Games, Inc.），捆绑附带 LICENSE。**tauri.conf.json 的 resources glob 用 `*`（`**` 不被 tauri 接受）；文件勿用 PowerShell Set-Content 写（会加 BOM 破坏 JSON）**。
+**Lore 依赖**：**构建时自动捆绑**（build.rs 按平台下载 v0.8.6 的 `lore`+`loreserver` 到 `src-tauri/resources/lore-bin/`，sha256 校验，缺失/失败 → 构建失败；**自动拷贝到构建产物目录 `target/<profile>/lore-bin`（exe 同目录）**；Tauri resources 打包、CLI 分发 = exe + 同目录 lore-bin 两件套）。**国内网络/离线构建**（build.rs 支持，按优先级）：① `KEINESTAMP_LORE_ARCHIVE_DIR` = 本地目录放两份官方资产压缩包（离线构建，仍 sha256 校验）；② `KEINESTAMP_LORE_RELEASE_BASE` = 自定义镜像 base（布局同 GitHub Releases）；③ 默认官方 GitHub → 公共加速代理（gh-proxy.com 等）回退，每源重试 3 次；④ 从其他机器拷贝整份 `lore-bin` 到 `src-tauri/resources/lore-bin/` 直接跳过下载。运行时查找：`KEINESTAMP_LORE_BIN` env → exe 同目录 `lore-bin/` → Tauri resource_dir 注入 → 平台默认（Windows `C:\Users\para\AppData\Local\lore\bin\lore.exe` / Linux `lore` PATH）。**启动检测**（`check_lore_env`：`--version` 精确 == 0.8.6）：CLI 命令前、serve 启动（拒绝启动）、GUI 启动（弹窗 + ActionBar 操作禁用）。Lore 为 MIT 许可（© Epic Games, Inc.），捆绑附带 LICENSE。**tauri.conf.json 的 resources glob 用 `*`（`**` 不被 tauri 接受）；文件勿用 PowerShell Set-Content 写（会加 BOM 破坏 JSON）**。
 
 ## Architecture
 

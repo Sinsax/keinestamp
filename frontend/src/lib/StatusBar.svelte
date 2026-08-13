@@ -32,6 +32,6 @@
   .status-left { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .conn-indicator { display: inline-flex; align-items: center; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); transition: background 0.3s; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); transition: background 0.2s var(--ease); }
   .connected .dot { background: var(--success); }
 </style>

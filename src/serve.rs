@@ -474,7 +474,7 @@ h1 {
   margin: 0 0 10px;
   line-height: 1;
 }
-.hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; }
+.hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; max-width: 36ch; }
 .hero-code {
   display: inline-block;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -490,6 +490,26 @@ h1 {
 .hero-code .cursor {
   display: inline-block; width: 6px; height: 13px; margin-left: 6px;
   background: var(--accent); vertical-align: -2px; border-radius: 1px;
+}
+
+/* Hero 文字入场：eyebrow → h1 → sub → code 依次上浮 */
+.hero-text > * { animation: hero-up 0.5s ease both; }
+.hero-text .eyebrow { animation-delay: 0.05s; }
+.hero-text h1 { animation-delay: 0.15s; }
+.hero-text .hero-sub { animation-delay: 0.25s; }
+.hero-text .hero-code { animation-delay: 0.35s; }
+@keyframes hero-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+/* 月相呼吸光晕 */
+.ha-moon { animation: moon-breathe 5s ease-in-out infinite; }
+@keyframes moon-breathe {
+  0%, 100% { filter: brightness(1); }
+  50% { filter: brightness(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .hero-text > *, .ha-moon { animation: none; }
 }
 
 /* Hero 装饰画：月相 + 圆环层叠 */
@@ -610,6 +630,20 @@ footer::before { content: ""; width: 14px; height: 2px; border-radius: 1px; back
   .topbar { padding: 20px 28px; }
 }
 
+/* 小屏（手机）细化 */
+@media (max-width: 480px) {
+  .topbar { padding: 16px 18px; }
+  .hero { padding: 12px 18px 6px; gap: 22px; }
+  .hero h1 { font-size: clamp(40px, 13vw, 56px); letter-spacing: -1.5px; }
+  .hero-sub { font-size: 13px; margin-bottom: 20px; }
+  .hero-code { font-size: 10.5px; padding: 6px 10px; }
+  .eyebrow { font-size: 9px; letter-spacing: 3px; }
+  .stage { padding: 34px 18px 54px; gap: 26px; }
+  .stats-strip span { font-size: 9.5px; padding: 2px 10px; }
+  footer { padding: 6px 18px 24px; flex-wrap: wrap; gap: 6px; }
+  .wave { height: 90px; opacity: 0.05; }
+}
+
 /* ---- 满月形态（月圆时红→绿、冰蓝→淡青、夜间青黑） ---- */
 html[data-moon="full"] {
   --accent: #2f9e63;
@@ -723,7 +757,7 @@ html[data-moon="full"] .bm-logo {
   </div>
 </div>
 
-<footer>Keinestamp © 2026</footer>
+<footer>Keinestamp · Blender Lore Progress Board · Lore v0.8.6 · © 2026</footer>
 
 <script>
   (function () {

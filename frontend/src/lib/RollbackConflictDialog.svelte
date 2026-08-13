@@ -53,21 +53,24 @@
   .dialog-overlay {
     position: fixed;
     inset: 0;
-    background: color-mix(in srgb, #000 45%, transparent);
+    background: var(--dialog-overlay);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    animation: fade-in 0.15s var(--ease);
   }
   .conflict-dialog {
     width: 480px;
     max-height: 80vh;
     overflow-y: auto;
-    background: var(--bg);
+    background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     padding: 18px;
-    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-lg);
   }
   .conflict-hint {
     font-size: 12px;

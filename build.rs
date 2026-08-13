@@ -2,12 +2,28 @@
 //! 捆绑缺失/下载失败/校验失败 → panic（构建失败，无宽松模式——Lore 是前置依赖）。
 //! 产物：`src-tauri/resources/lore-bin/`（lore(.exe) + loreserver(.exe) + version.txt + LICENSE）
 //! 输出编译期环境变量 `KEINESTAMP_BUNDLED_LORE_DIR` 供运行时查找。
+//!
+//! 国内网络 / 离线构建支持（按优先级）：
+//! 1. `KEINESTAMP_LORE_ARCHIVE_DIR`：本地目录放两份官方资产压缩包（lore-…zip / loreserver-…zip），
+//!    完全离线构建（仍做 sha256 校验，防篡改）；
+//! 2. `KEINESTAMP_LORE_RELEASE_BASE`：自定义下载 base URL（自建镜像/内网源，布局同 GitHub Releases）；
+//! 3. 默认：官方 GitHub Releases → 公共加速代理（gh-proxy.com 等）按序回退，每源重试 3 次；
+//! 4. 或者直接把整份 `lore-bin`（lore(.exe)+loreserver(.exe)+version.txt+LICENSE）从其他机器
+//!    拷贝到 `src-tauri/resources/lore-bin/`——构建检测到版本匹配后完全跳过下载。
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
 const LORE_VERSION: &str = "0.8.6";
 const RELEASE_BASE: &str = "https://github.com/EpicGames/lore/releases/download/v0.8.6";
+
+/// GitHub Release 加速代理前缀（官方源失败时按序回退；公共代理可能变动，sha256 校验保证完整性）
+const RELEASE_PROXIES: [&str; 4] = [
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://ghproxy.net/",
+    "https://gh.llkk.cc/",
+];
 
 /// asset 名 + 官方 sha256 digest（2026-07-31 发布 v0.8.6，GitHub API 查证）
 struct Asset {
@@ -46,11 +62,18 @@ fn main() {
                 .join("lore-bin")
         });
     let lore_name = if cfg!(target_os = "windows") { "lore.exe" } else { "lore" };
+    let loreserver_name = if cfg!(target_os = "windows") { "loreserver.exe" } else { "loreserver" };
     let lore_path = out_dir.join(lore_name);
+    let loreserver_path = out_dir.join(loreserver_name);
     let version_file = out_dir.join("version.txt");
 
-    // 已捆绑且版本匹配 → 跳过（rerun-if-changed 控制何时重跑）
+    println!("cargo:rerun-if-env-changed=KEINESTAMP_LORE_ARCHIVE_DIR");
+    println!("cargo:rerun-if-env-changed=KEINESTAMP_LORE_RELEASE_BASE");
+    println!("cargo:rerun-if-env-changed=KEINESTAMP_LORE_BUNDLE_DIR");
+
+    // 已捆绑、版本匹配且两个二进制齐全 → 跳过（rerun-if-changed 控制何时重跑）
     if lore_path.exists()
+        && loreserver_path.exists()
         && version_file.exists()
         && std::fs::read_to_string(&version_file)
             .map(|v| v.trim() == LORE_VERSION)
@@ -71,9 +94,8 @@ fn main() {
     std::fs::create_dir_all(&tmp).expect("创建临时目录失败");
 
     for asset in platform_assets() {
-        let url = format!("{}/{}", RELEASE_BASE, asset.name);
         let dest = tmp.join(asset.name);
-        download(&url, &dest);
+        fetch_asset(&asset, &dest, &out_dir);
         verify_sha256(&dest, asset.sha256, asset.name);
         extract(&dest, &tmp, asset.name);
     }
@@ -145,17 +167,91 @@ fn emit_env(out_dir: &Path) {
     println!("cargo:rustc-env=KEINESTAMP_BUNDLED_LORE_DIR={}", out_dir.display());
 }
 
-fn download(url: &str, dest: &Path) {
+/// 获取资产压缩包：本地归档目录（离线）→ 自定义 base → 官方 GitHub → 加速代理（回退+重试）。
+/// 所有来源最终都过 sha256 校验（verify_sha256），代理/镜像无法篡改内容。
+fn fetch_asset(asset: &Asset, dest: &Path, out_dir: &Path) {
+    // 1) 本地归档目录：完全离线构建（仍校验 sha256）
+    if let Ok(dir) = std::env::var("KEINESTAMP_LORE_ARCHIVE_DIR") {
+        let src = PathBuf::from(&dir).join(asset.name);
+        if !src.is_file() {
+            panic!(
+                "KEINESTAMP_LORE_ARCHIVE_DIR 中未找到 {}（期望: {}）。请把两份官方资产压缩包放到该目录。",
+                asset.name,
+                src.display()
+            );
+        }
+        std::fs::copy(&src, dest)
+            .unwrap_or_else(|e| panic!("复制本地归档失败 {}: {}", src.display(), e));
+        println!("cargo:warning=使用本地归档: {}", src.display());
+        return;
+    }
+    // 2) 下载源列表：自定义 base（仅用它）→ 官方 GitHub → 加速代理前缀
+    let mut bases: Vec<String> = Vec::new();
+    match std::env::var("KEINESTAMP_LORE_RELEASE_BASE") {
+        Ok(base) => bases.push(base),
+        Err(_) => {
+            bases.push(RELEASE_BASE.to_string());
+            for proxy in RELEASE_PROXIES {
+                bases.push(format!("{}{}/{}", proxy, RELEASE_BASE, asset.name));
+            }
+        }
+    }
+    let mut last_err = String::new();
+    for (i, base) in bases.iter().enumerate() {
+        let url = format!("{}/{}", base.trim_end_matches('/'), asset.name);
+        println!("cargo:warning=下载 Lore 资产 [源 {}] {}", i + 1, url);
+        match download_retry(&url, dest) {
+            Ok(()) => return,
+            Err(e) => last_err = format!("{} → {}", url, e),
+        }
+    }
+    panic!(
+        "下载 Lore 资产失败：{}。
+         可尝试以下方式之一：
+         1) 设置 KEINESTAMP_LORE_ARCHIVE_DIR 指向包含 {} 的本地目录（离线构建，需 sha256 一致）；
+         2) 设置 KEINESTAMP_LORE_RELEASE_BASE 指向可用镜像（布局同 GitHub Releases）；
+         3) 从其他机器拷贝整份 lore-bin（lore+loreserver+version.txt+LICENSE）到 {}。
+         最近错误：{}",
+        asset.name,
+        asset.name,
+        out_dir.display(),
+        last_err
+    );
+}
+
+/// 单 URL 下载：重试 3 次（指数退避），返回 Ok 或错误信息
+fn download_retry(url: &str, dest: &Path) -> Result<(), String> {
+    let mut last_err = String::new();
+    for attempt in 1..=3 {
+        match download_once(url, dest) {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                last_err = e;
+                println!("cargo:warning=下载失败（第 {}/3 次）{}: {}", attempt, url, last_err);
+                if attempt < 3 {
+                    std::thread::sleep(std::time::Duration::from_secs(2 * attempt));
+                }
+            }
+        }
+    }
+    Err(last_err)
+}
+
+fn download_once(url: &str, dest: &Path) -> Result<(), String> {
     let resp = ureq::get(url)
         .timeout(std::time::Duration::from_secs(300))
         .call()
-        .unwrap_or_else(|e| panic!("下载失败 {}: {}", url, e));
+        .map_err(|e| format!("连接失败: {}", e))?;
+    if resp.status() != 200 {
+        return Err(format!("HTTP {}", resp.status()));
+    }
     let mut reader = resp.into_reader();
     let mut body = Vec::new();
     reader
         .read_to_end(&mut body)
-        .unwrap_or_else(|e| panic!("读取下载内容失败 {}: {}", url, e));
-    std::fs::write(dest, &body).unwrap_or_else(|e| panic!("写入下载文件失败 {}: {}", dest.display(), e));
+        .map_err(|e| format!("读取下载内容失败: {}", e))?;
+    std::fs::write(dest, &body).map_err(|e| format!("写入下载文件失败: {}", e))?;
+    Ok(())
 }
 
 fn verify_sha256(path: &Path, expected: &str, name: &str) {

@@ -137,22 +137,17 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       emptyDirs = []
       return
     }
-    // 两个命令独立容错：get_empty_dirs 失败只清空 emptyDirs——
+    // 并行获取文件 + 空目录、一次性更新：避免分次到达导致文件树折叠状态竞态
+    // （先到的一批触发全折叠后，晚到的空目录链会保持展开）。
+    // 两个命令仍独立容错：get_empty_dirs 失败只清空 emptyDirs——
     // trackedFiles 是变更面板灰显忽略文件的数据源，不能连坐清空
-    try {
-      const files = await api.getTrackedFiles(path)
-      if (path !== activePath) return
-      trackedFiles = files
-    } catch {
-      if (path === activePath) trackedFiles = []
-    }
-    try {
-      const dirs = await api.getEmptyDirs(path)
-      if (path !== activePath) return
-      emptyDirs = dirs
-    } catch {
-      if (path === activePath) emptyDirs = []
-    }
+    const [filesRes, dirsRes] = await Promise.all([
+      api.getTrackedFiles(path).then((files) => ({ ok: true as const, files })).catch(() => ({ ok: false as const, files: [] as string[] })),
+      api.getEmptyDirs(path).then((dirs) => ({ ok: true as const, dirs })).catch(() => ({ ok: false as const, dirs: [] as string[] })),
+    ])
+    if (path !== activePath) return
+    trackedFiles = filesRes.ok ? filesRes.files : []
+    emptyDirs = dirsRes.ok ? dirsRes.dirs : []
   }
 
   async function refreshStatus() {
@@ -215,7 +210,14 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function loadProject(path: string, preserveSelection = false) {
     const t0 = performance.now()
     const seq = ++loadSeq
-    activePath = normalizePath(path)
+    const norm = normalizePath(path)
+    if (norm !== activePath) {
+      // 项目切换：立即清空文件列表（旧项目的树不在新项目下残留），
+      // 文件树随新数据到达重建并默认全折叠（DirTree 以 activePath 变化重置）
+      trackedFiles = []
+      emptyDirs = []
+    }
+    activePath = norm
     // 刷新常用仓库/标签栏（clone 下载等新项目路径）
     loadRecent()
     // 自动恢复上次项目：记录最后一次打开的项目

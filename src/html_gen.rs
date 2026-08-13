@@ -125,7 +125,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-
 .wave svg { width: 100%; height: 100%; }
 .page { display: flex; min-height: 100vh; position: relative; z-index: 1; padding: 40px 60px 60px; gap: 24px; align-items: flex-start; max-width: 1440px; margin: 0 auto; }
 .left-col { width: 240px; flex-shrink: 0; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; display: flex; flex-direction: column; padding: 20px; position: sticky; top: 20px; box-shadow: var(--shadow-sm); }
-.right-col { flex: 1; min-width: 0; max-width: 780px; }
+.right-col { flex: 1; min-width: 0; max-width: 860px; }
 .right-head { background: var(--surface); border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 16px; padding: 22px 24px 18px; box-shadow: var(--shadow-sm); margin-bottom: 26px; }
 .head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .eyebrow { font-size: 10px; font-weight: 600; letter-spacing: 4px; color: var(--text-dim); text-transform: uppercase; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
@@ -135,7 +135,14 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .head-meta { display: flex; gap: 16px; padding-bottom: 6px; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--text-dim); letter-spacing: 0.5px; }
 .meta-ms { color: var(--accent); }
 .cal-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 12px; margin-bottom: 14px; border-bottom: 1px solid var(--border); }
-.entry { background: var(--surface); border-radius: 16px; padding: 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s var(--ease), box-shadow .15s var(--ease), transform .15s var(--ease); }
+.entry { background: var(--surface); border-radius: 16px; padding: 18px 20px; margin-bottom: 16px; border: 1px solid var(--border); border-left: 3px solid var(--border); box-shadow: var(--shadow-sm); transition: border-color .15s var(--ease), box-shadow .15s var(--ease), transform .15s var(--ease); animation: entry-in 0.35s var(--ease) both; animation-delay: var(--entry-delay, 0ms); }
+@keyframes entry-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry { animation: none; }
+}
 .entry:hover { border-color: var(--accent); box-shadow: var(--shadow-hover); transform: translateY(-1px); }
 .entry.tagged { border-left-color: var(--tag-color, var(--accent)); }
 .entry.milestone {
@@ -171,7 +178,7 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .tag-group { display: flex; align-items: center; gap: 8px; margin: 20px 0 8px; }
 .tag-group-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
 .tag-group-label { font-size: 13px; font-weight: 700; color: var(--text); }
-.tag-group-line { flex: 1; height: 1px; background: var(--border); }
+.tag-group-line { flex: 1; height: 1px; background: linear-gradient(90deg, var(--border), transparent); }
 
 .sec-hdr { display: flex; align-items: center; gap: 5px; margin-top: 8px; padding: 5px 0; font-size: 12px; font-weight: 600; color: var(--text-dim); cursor: pointer; user-select: none; border-top: 1px solid var(--border); transition: color .15s ease; }
 .sec-hdr:hover { color: var(--text); }
@@ -188,8 +195,8 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .cal-month { margin-bottom: 14px; }
 .cal-mlabel { font-size: 13px; font-weight: 600; color: var(--text-2); display: block; margin-bottom: 6px; }
 .cal-days { display: flex; gap: 4px; flex-wrap: wrap; }
-.cal-cday { width: 15px; height: 15px; border-radius: 3px; background: var(--surface3); cursor: pointer; }
-.cal-cday:hover { outline: 2px solid var(--accent); outline-offset: -1px; }
+.cal-cday { width: 15px; height: 15px; border-radius: 3px; background: var(--surface3); cursor: pointer; transition: transform 0.12s var(--ease); }
+.cal-cday:hover { outline: 2px solid var(--accent); outline-offset: -1px; transform: scale(1.25); }
 .cal-cday.h1 { background: #1a6d3c; }
 .cal-cday.h2 { background: #238a4a; }
 .cal-cday.h3 { background: #30a758; }
@@ -232,6 +239,21 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .model-overlay-close { width: 26px; height: 26px; background: rgba(224,108,117,0.15); border: 1px solid #e06c75; border-radius: 4px; color: #e06c75; font-size: 16px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: background 0.2s; margin-left: auto; }
 .model-overlay-close:hover { background: rgba(224,108,117,0.3); }
 .model-overlay-canvas { flex: 1; position: relative; }
+
+/* ---- 移动端适配：单列、日历沉底、内容优先 ---- */
+@media (max-width: 900px) {
+  .page { flex-direction: column; padding: 16px; gap: 16px; }
+  .left-col { width: 100%; position: static; order: 2; padding: 16px; }
+  .right-col { max-width: 100%; }
+  .right-head { padding: 16px 16px 14px; }
+  .head-row { flex-direction: column; align-items: flex-start; gap: 10px; }
+  h1 { font-size: clamp(26px, 7vw, 36px); }
+  .head-meta { flex-wrap: wrap; gap: 10px; }
+  .entry { padding: 14px; }
+  .wave { height: 90px; opacity: 0.05; }
+  .cal-days { gap: 3px; }
+  .cal-cday { width: 18px; height: 18px; }
+}
 
 </style>
 </head>
@@ -310,7 +332,7 @@ function render() {
   if (mainline.length > 0) {
     var entries = mainline.slice().reverse();
     var currentTag = null;
-    entries.forEach(function(e) {
+    entries.forEach(function(e, idx) {
       var tag = e.tag || null;
       if (tag !== currentTag) {
         currentTag = tag;
@@ -328,6 +350,8 @@ function render() {
 
       var tagClass = tag ? ' tagged' : '';
       var tagStyle = tag ? ';--tag-color:' + tagColor(tag) : '';
+      // 条目出现动画 stagger（前 16 条，每条 +25ms）
+      tagStyle += ';--entry-delay:' + Math.min(idx, 15) * 25 + 'ms';
       var msClass = e.milestone ? ' milestone' : '';
       var dateId = e.timestamp ? e.timestamp.substring(0,10) : '';
       h += '<div class="entry' + tagClass + msClass + '" style="' + tagStyle + '"' + (dateId ? ' id="d-' + dateId + '"' : '') + '>';

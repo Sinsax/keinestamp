@@ -239,7 +239,7 @@
         class:milestone={!!entry.milestone}
         class:dimmed={isEntryDimmed(entry)}
         class:superseded={entry.superseded}
-        style={entryTag ? `--tag-color:${tagColor(entryTag)}` : ''}
+        style={`${entryTag ? `--tag-color:${tagColor(entryTag)}` : ''}--card-delay:${Math.min(i, 15) * 24}ms`}
         onclick={(e) => { e.stopPropagation(); onSelect(entry.id); }}
         oncontextmenu={(e) => openCtx(e, entry)}
       >

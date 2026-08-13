@@ -23,6 +23,8 @@
   --shadow-sm: 0 1px 2px rgba(27, 34, 43, 0.06);
   --shadow-md: 0 4px 12px rgba(27, 34, 43, 0.10);
   --shadow-lg: 0 16px 48px rgba(27, 34, 43, 0.18);
+  --accent-shadow: 0 2px 8px color-mix(in srgb, var(--accent) 35%, transparent);
+  --dialog-overlay: rgba(30, 40, 51, 0.35);
   --card-active: #fffdfd;
   --warning-soft: rgba(176, 128, 58, 0.12);
   --mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
@@ -70,7 +72,7 @@ button.accent {
 button.accent:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
-  box-shadow: 0 2px 8px rgba(217, 71, 71, 0.35);
+  box-shadow: var(--accent-shadow);
 }
 /* 危险操作确认按钮（如取消更改覆盖文件）：红色警示，与 accent 同构 */
 button.danger {
@@ -99,9 +101,10 @@ input, textarea, select {
 }
 input:focus, textarea:focus, select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(217, 71, 71, 0.12);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
+/* 滚动条：webkit 8px 细条 + Firefox thin 兼容 */
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
@@ -109,6 +112,7 @@ input:focus, textarea:focus, select:focus {
   border: 2px solid transparent; background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); background-clip: content-box; }
+* { scrollbar-width: thin; scrollbar-color: var(--surface3) transparent; }
 
 .app-layout { display: flex; flex-direction: column; height: 100%; }
 .body { display: flex; flex: 1; overflow: hidden; }
@@ -171,6 +175,16 @@ input:focus, textarea:focus, select:focus {
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.15s var(--ease), border-color 0.15s var(--ease),
     transform 0.15s var(--ease);
+  /* 列表出现动画：轻 fadeUp + 逐条 stagger（EntryList 传入 --card-delay） */
+  animation: card-in 0.3s var(--ease) both;
+  animation-delay: var(--card-delay, 0ms);
+}
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .entry-card { animation: none; }
 }
 .entry-card:hover { border-color: var(--accent); box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .entry-card.active {
@@ -201,7 +215,7 @@ input:focus, textarea:focus, select:focus {
 .dialog-overlay, .detail-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(30, 40, 51, 0.35);
+  background: var(--dialog-overlay);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   z-index: 200;
