@@ -78,7 +78,7 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
 - **Export**: `lore repository dump` 解析文件树 + 逐文件 `lore file write`（不支持目录级 write）
 - **Chinese filenames**: Lore 原生 UTF-8，无需 quotepath 处理
 - **CLI output**: 中文标签（`已提交`、`已回退到记录 ...`、`已恢复回退前的状态`、`已推送到远端`）。Log 格式：`  {short_hash}  {date}  {author}  ({file_count} 文件)`
-- **serve → loreserver**：serve.toml `enable_loreserver = true` 时启动探测 41339 health，离线则 spawn `loreserver --config %APPDATA%/Keinestamp/lore-server-config`（首次生成 local.toml：`[immutable_store.local].path` / `[mutable_store.local].path` → store 持久化于 `lore-server-store`，重启数据保留）；在线则跳过；serve 退出时 kill 拉起的实例（外部已在线不杀）。启动后解析子进程输出打印结构化信息（`parse_loreserver_info`：版本 / store 路径 / auth 状态）+ 常驻读取线程转发后续输出（防管道阻塞）
+- **serve → loreserver**：serve.toml `enable_loreserver = true` 时启动探测 41339 health，离线则 spawn `loreserver --config <程序目录>/lore-server-config`（首次生成 local.toml：`[immutable_store.local].path` / `[mutable_store.local].path` → store 持久化于 `<程序目录>/lore-server-store`，重启数据保留）；在线则跳过；serve 退出时 kill 拉起的实例（外部已在线不杀）。启动后解析子进程输出打印结构化信息（`parse_loreserver_info`：版本 / store 路径 / auth 状态）+ 常驻读取线程转发后续输出（防管道阻塞）
 - **备份**（2026-08-11 实测定稿）：GUI 备份 = `push_to_server`：读配置地址（app-config `lore_server_url`，默认 `lore://127.0.0.1:41337`）→ health 探测（`http://host:41339/health_check`）→ **仓库必须在线创建**（`lore repository create lore://host:port/<名>`，remote_url 自动绑定；**离线仓库 push 输出"Pushed"但数据不到服务器**，备份报"该项目为离线创建"）→ `lore push`（首推自动建分支，增量推送）。CLI `push` 同流程；`lore commit <MESSAGE>` 是位置参数（`-m` 不存在）；`lore repository config set` 不存在（remote_url 改 config.toml）。**loreserver 无认证（auth: None）**——仅限可信局域网，设置 UI 已标注
 - **离线仓库迁移**（`migrate_offline_to_online`，实测）：离线仓库无法直接备份——`repository create <url>/<名> --id <同ID>` 预注册（空目录，服务器按 ID 绑定名字，**本地 store/hash/历史全保留**）→ 设 remote_url → push 全量；失败清理服务器残留。GUI：备份时检测离线 → 弹窗「迁移并备份」引导；校验：无回退态
 - **3D 预览**：preview 路径存 timeline.json（不在 revision metadata）——rebuild_cache 从旧缓存沿用同 id 条目的 preview（记录后旧记录 3D 标签不丢）；`clean_old_glb_previews` **只删未被 timeline 引用的孤儿 GLB**（被引用文件即使超 max 也保留）
@@ -88,11 +88,13 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
 
 多租户 HTTP 服务器（web 部署）+ loreserver 拉起。结构与 v1 相同（两 token 认证、动态项目名路由、X-Project-Name、限速、路径穿越防护、100MB 上传限制），配置 `serve.toml`：
 
+**程序目录基准**（`app_config::exe_dir()`，便携部署）：`KEINESTAMP_BASE_DIR` 环境变量优先（Linux 软链部署必须用它，`current_exe` 会解析到真实路径），否则 exe 所在目录。serve 命令查找 serve.toml：`--config` → `<程序目录>/serve.toml` → 命令参数目录（旧位置兼容）→ 自动生成 `<程序目录>/serve.toml`；**web_root 相对路径解析为相对程序目录**（绝对路径直接用）；`.keinestamp-projects.json` 在 web_root 父目录（web_root 默认 `<程序目录>/web-root` 时即程序目录）；loreserver 配置/store 在 `<程序目录>/lore-server-config|store`：
+
 ```toml
 host = "0.0.0.0"
 port = 7799
 deploy_token = "hex-token"      # app → server upload/health auth
-web_root = "C:/Projects/Alice/web-timeline"
+web_root = "web-root"           # 相对程序目录（便携）；也可绝对路径
 enable_loreserver = true        # 可选：拉起 loreserver（备份服务器，持久化 store，跟随 serve 生命周期）
 ```
 

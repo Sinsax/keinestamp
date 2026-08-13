@@ -1,4 +1,4 @@
-﻿use std::collections::HashMap;
+use std::collections::HashMap;
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -105,7 +105,7 @@ pub fn check_lore_env() -> Result<LoreEnvInfo> {
 
 /// 指定 bin 检测（可测试；不依赖全局环境）
 pub fn check_lore_env_at(bin: &str) -> Result<LoreEnvInfo> {
-    let out = Command::new(bin)
+    let out = crate::process_util::hide_console(Command::new(bin))
         .arg("--version")
         .output()
         .map_err(|e| anyhow::anyhow!("未找到 lore（{}）：{}（请重新构建，build.rs 自动捆绑 v{}）", bin, e, LORE_MIN_VERSION))?;
@@ -168,7 +168,9 @@ pub fn run_lore_remote(project_root: &Path, args: &[&str]) -> Result<String> {
 /// 执行 lore（cwd 可选；串行 + 超时兜底）。所有 lore spawn 的唯一出口。
 fn run_lore_at(cwd: Option<&Path>, args: &[&str], offline: bool) -> Result<String> {
     let _guard = LORE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    let mut cmd = Command::new(lore_bin());
+    // CREATE_NO_WINDOW：GUI（无控制台子系统 exe）spawn 子进程会新开控制台窗口闪烁——
+    // 与其他 spawn 点（blender/loreserver/explorer）一致
+    let mut cmd = crate::process_util::hide_console(Command::new(lore_bin()));
     let mut args_owned: Vec<&str> = args.to_vec();
     if offline {
         args_owned.push("--offline");

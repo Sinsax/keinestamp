@@ -196,6 +196,22 @@ pub fn set_auto_connect(v: bool) {
     cfg.save();
 }
 
+/// 程序所在目录（`KEINESTAMP_BASE_DIR` 环境变量优先，否则 current_exe 父目录）。
+/// serve 相关配置（serve.toml / web-root / .keinestamp-projects.json / lore-server）以此为基准，
+/// 便携部署：整个目录拷贝即用。软链部署（Linux）时 current_exe 会解析到真实路径，
+/// 用 `KEINESTAMP_BASE_DIR` 指向实际部署目录。
+pub fn exe_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("KEINESTAMP_BASE_DIR") {
+        if !dir.trim().is_empty() {
+            return PathBuf::from(dir);
+        }
+    }
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
 pub fn default_app_config_path() -> PathBuf {
     let (base, dir_name) = if cfg!(target_os = "windows") {
         (

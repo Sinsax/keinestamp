@@ -1,4 +1,4 @@
-﻿use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -349,16 +349,15 @@ fn cmd_serve(path: &Path, port: u16, host: &str, config_path: Option<&Path>) -> 
     let config = if let Some(cp) = config_path {
         keinestamp::serve::load_config(cp)?
     } else {
-        let serve_toml = path.join("serve.toml");
-        if serve_toml.exists() {
-            keinestamp::serve::load_config(&serve_toml)?
-        } else {
-            let exe_dir = std::env::current_exe()
-                .ok()
-                .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-                .unwrap_or_else(|| path.to_path_buf());
-            let web_root = exe_dir.join("web-root");
-            keinestamp::serve::auto_generate_config(&serve_toml, port, host, &web_root)?
+        let base = keinestamp::app_config::exe_dir();
+        // serve.toml 查找：程序目录优先（便携部署），其次旧位置（命令参数目录，兼容）
+        let candidates = [base.join("serve.toml"), path.join("serve.toml")];
+        match candidates.iter().find(|c| c.exists()) {
+            Some(p) => keinestamp::serve::load_config(p)?,
+            None => {
+                let web_root = base.join("web-root");
+                keinestamp::serve::auto_generate_config(&base.join("serve.toml"), port, host, &web_root)?
+            }
         }
     };
     keinestamp::serve::start(config)

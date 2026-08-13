@@ -85,7 +85,7 @@ fn default_port() -> u16 { 7799 }
 pub fn load_config(path: &Path) -> Result<ServeConfig> {
     let content = std::fs::read_to_string(path)
         .with_context(|| format!("failed to read serve config {:?}", path))?;
-    let config: ServeConfig = toml::from_str(&content)
+    let mut config: ServeConfig = toml::from_str(&content)
         .with_context(|| format!("failed to parse serve config {:?}", path))?;
 
     if config.deploy_token.is_none() {
@@ -93,6 +93,11 @@ pub fn load_config(path: &Path) -> Result<ServeConfig> {
     }
     if config.web_root.as_os_str().is_empty() {
         anyhow::bail!("serve.toml missing `web_root`");
+    }
+
+    // web_root 相对路径 → 相对程序所在目录（serve.toml 随 exe 目录拷贝即用，便携部署）
+    if !config.web_root.is_absolute() {
+        config.web_root = crate::app_config::exe_dir().join(&config.web_root);
     }
 
     Ok(config)
@@ -1106,19 +1111,13 @@ enable_loreserver = false
 
 // --- loreserver（备份服务器）拉起 ---
 
-/// loreserver 配置目录 / store 持久化目录（%APPDATA%/Keinestamp/ 下）
+/// loreserver 配置目录 / store 持久化目录（程序所在目录下，便携部署）
 pub fn loreserver_config_dir() -> std::path::PathBuf {
-    crate::app_config::default_app_config_path()
-        .parent()
-        .map(|p| p.join("lore-server-config"))
-        .unwrap_or_else(|| std::path::PathBuf::from("lore-server-config"))
+    crate::app_config::exe_dir().join("lore-server-config")
 }
 
 fn loreserver_store_dir() -> std::path::PathBuf {
-    crate::app_config::default_app_config_path()
-        .parent()
-        .map(|p| p.join("lore-server-store"))
-        .unwrap_or_else(|| std::path::PathBuf::from("lore-server-store"))
+    crate::app_config::exe_dir().join("lore-server-store")
 }
 
 fn loreserver_bin() -> Option<std::path::PathBuf> {
@@ -2059,13 +2058,24 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
 host = "127.0.0.1"
 port = 8888
 deploy_token = "abc123"
-web_root = "/tmp/web"
+web_root = "web-root"
 "#)?;
         let config = load_config(&config_path)?;
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 8888);
         assert_eq!(config.deploy_token.as_deref(), Some("abc123"));
-        assert_eq!(config.web_root, Path::new("/tmp/web"));
+        // 相对 web_root → 解析为程序所在目录下（便携部署）
+        let expected = crate::app_config::exe_dir().join("web-root");
+        assert_eq!(config.web_root, expected);
+        // 绝对 web_root → 直接用
+        let abs_path = dir.join("abs-web");
+        let abs_str = abs_path.to_string_lossy().replace('\\', "\\\\");
+        std::fs::write(
+            &config_path,
+            format!("host = \"127.0.0.1\"\nport = 8888\ndeploy_token = \"abc123\"\nweb_root = \"{}\"\n", abs_str),
+        )?;
+        let config = load_config(&config_path)?;
+        assert_eq!(config.web_root, abs_path);
         std::fs::remove_dir_all(&dir)?;
         Ok(())
     }
