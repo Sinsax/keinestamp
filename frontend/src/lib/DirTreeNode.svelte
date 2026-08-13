@@ -26,7 +26,7 @@
     openFolder(fullDir)
   }
 
-  const isDir = $derived(node.children.length > 0)
+  const isDir = $derived(node.isDir || node.children.length > 0)
   const isCollapsed = $derived(collapsed.has(node.path))
   const pad = $derived(depth * 18)
 </script>

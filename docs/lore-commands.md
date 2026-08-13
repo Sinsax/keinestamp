@@ -214,6 +214,7 @@ lore revision revert <sig>
 | 命令 | 说明 |
 |---|---|
 | `lore file write --path <file> --revision <sig> --output <dest>` | 单文件导出，输出 `File written <path>`；`--path` 必填 |
+| `lore file reset [--revision <sig>] <paths>...` | 还原文件到指定 revision（默认 HEAD）：M 覆盖回目标版本 / D 从目标版本恢复；**不创建父目录**（实测 os error 2），嵌套路径须先 create_dir_all；隐藏文件（loreignore 等）须 `--force`（`reset_hidden_dirty`） |
 | `lore repository dump [--revision <sig>] [--path <p>] [--max-depth N]` | 文件树列表（v1 git ls-tree 替代） |
 | `lore file diff [paths]... [--source <sig>] [--target <sig>]` | unified diff：`--- <file>@N` / `+++ <file>` |
 | `lore revision diff <src> [--target <dst>] [--path <p>]` | revision 间 diff |

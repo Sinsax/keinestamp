@@ -18,3 +18,6 @@ _three/
 # Lore 构建产物（build.rs 自动下载生成）
 src-tauri/resources/lore-bin/
 
+# ZCode 会话产物（计划/上下文，不入库）
+.zcode/
+

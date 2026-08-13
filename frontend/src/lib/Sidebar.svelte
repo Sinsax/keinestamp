@@ -4,12 +4,14 @@
 
   let {
     trackedFiles = [],
+    emptyDirs = [],
     activePath = '',
     collapsed = false,
     onExpand = () => {},
     onCloseProject = (_p: string) => {},
   }: {
     trackedFiles?: string[]
+    emptyDirs?: string[]
     activePath?: string
     collapsed?: boolean
     onExpand?: () => void
@@ -104,7 +106,7 @@
           <div>无文件</div>
         </div>
       {:else}
-        <DirTree paths={trackedFiles} {activePath} onContextMenu={openContextMenu} />
+        <DirTree paths={[...trackedFiles, ...emptyDirs]} dirs={emptyDirs} {activePath} onContextMenu={openContextMenu} />
       {/if}
     </div>
     {#if activePath}

@@ -119,6 +119,14 @@ export async function getTrackedFiles(path: string): Promise<string[]> {
   return invoke<string[]>('get_tracked_files', { path })
 }
 
+export async function getEmptyDirs(path: string): Promise<string[]> {
+  return invoke<string[]>('get_empty_dirs', { path })
+}
+
+export async function discardFile(path: string, file: string): Promise<void> {
+  return invoke<void>('discard_file', { path, file })
+}
+
 export async function setEntryMilestone(path: string, entryId: string, milestone: boolean): Promise<void> {
   return invoke<void>('set_entry_milestone', { path, entryId, milestone })
 }

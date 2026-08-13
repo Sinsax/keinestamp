@@ -72,6 +72,18 @@ button.accent:hover:not(:disabled) {
   border-color: var(--accent-hover);
   box-shadow: 0 2px 8px rgba(217, 71, 71, 0.35);
 }
+/* 危险操作确认按钮（如取消更改覆盖文件）：红色警示，与 accent 同构 */
+button.danger {
+  background: var(--error);
+  border-color: var(--error);
+  color: #fff;
+  font-weight: 600;
+}
+button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--error) 82%, #000);
+  border-color: color-mix(in srgb, var(--error) 82%, #000);
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--error) 40%, transparent);
+}
 
 input, textarea, select {
   font-family: inherit;

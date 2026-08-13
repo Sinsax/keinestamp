@@ -426,12 +426,18 @@ fn open_folder(path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn get_ignore_info(project_root: String, files: Option<Vec<String>>) -> Result<serde_json::Value, String> {
-    let _ = files;
     // v2：忽略规则存项目级 .loreignore（Lore 原生过滤，status/stage 自动生效）；
     // ignored 返回规则列表供设置界面展示；tracked 概念不存在
+    // rule_ignored = 传入文件列表中命中规则者（后端权威匹配，lore 语义 hidden::is_ignored）——
+    // 变更面板灰显忽略文件以此为准（前端不再自复制匹配逻辑，消除语义漂移）
     let root = PathBuf::from(&project_root);
     let rules = keinestamp::hidden::load_ignore_rules(&root);
-    Ok(serde_json::json!({ "tracked": [], "ignored": rules, "rule_ignored": [] }))
+    let rule_ignored: Vec<String> = files
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|f| keinestamp::hidden::is_ignored(f, &rules))
+        .collect();
+    Ok(serde_json::json!({ "tracked": [], "ignored": rules, "rule_ignored": rule_ignored }))
 }
 
 #[tauri::command]
@@ -629,6 +635,20 @@ async fn status(path: String) -> Result<StatusResult, String> {
 }
 
 #[tauri::command]
+async fn discard_file(path: String, file: String) -> Result<(), String> {
+    // 取消单个文件更改（git restore 语义）：M 覆盖回 HEAD / D 从 HEAD 恢复。
+    // 前端菜单仅对状态码 M/D 显示；staged/untracked 不在此范围
+    eprintln!("[debug] discard_file({}, {})", path, file);
+    validate_entry(&file)?;
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        map_err(keinestamp::lore_project::discard_file_changes(&meta.project_root, &file))
+    });
+    handle.await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String> {
     // spawn lore 可能耗时 → async 防主线程阻塞
     let handle = tokio::task::spawn_blocking(move || {
@@ -765,6 +785,42 @@ async fn get_tracked_files(path: String) -> Result<Vec<String>, String> {
         let mut files = vec![];
         map_err(walk(&meta.project_root, "", &mut files).map_err(|e| anyhow::anyhow!("{}", e)))?;
         Ok(files)
+    });
+    handle.await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn get_empty_dirs(path: String) -> Result<Vec<String>, String> {
+    // 空目录在文件树不显示（get_tracked_files 只列文件）→ 单独返回"无文件后代"的目录
+    // （带尾斜杠，沿用 lore 目录行惯例 `out/`），前端并入 DirTree 渲染为文件夹节点
+    let handle = tokio::task::spawn_blocking(move || {
+        // 返回该子树内是否有文件（含后代）；无 → 本目录为"空"目录，push 入 out
+        fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<bool> {
+            let mut has_files = false;
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                if name.starts_with('.') || name == "node_modules" || name == "target" || name == "web" {
+                    continue;
+                }
+                let rel = if prefix.is_empty() { name.to_string() } else { format!("{}/{}", prefix, name) };
+                if entry.file_type()?.is_dir() {
+                    has_files |= walk(&entry.path(), &rel, out)?;
+                } else {
+                    has_files = true;
+                }
+            }
+            if !has_files && !prefix.is_empty() {
+                out.push(format!("{}/", prefix));
+            }
+            Ok(has_files)
+        }
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let mut out = vec![];
+        map_err(walk(&meta.project_root, "", &mut out).map_err(|e| anyhow::anyhow!("{}", e)))?;
+        Ok(out)
     });
     handle.await.map_err(|e| e.to_string())?
 }
@@ -1316,6 +1372,8 @@ pub fn run() {
             set_entry_milestone,
             get_project_log,
             get_tracked_files,
+            get_empty_dirs,
+            discard_file,
             download_blender,
             refresh_blender_versions,
             get_cached_blender_versions,

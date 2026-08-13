@@ -1,13 +1,16 @@
 export interface FileTreeNode {
   name: string
   path: string
+  isDir: boolean
   children: FileTreeNode[]
 }
 
 function sortTree(nodes: FileTreeNode[]) {
   nodes.sort((a, b) => {
-    if (a.children.length > 0 && b.children.length === 0) return -1
-    if (a.children.length === 0 && b.children.length > 0) return 1
+    const dirA = a.isDir || a.children.length > 0
+    const dirB = b.isDir || b.children.length > 0
+    if (dirA && !dirB) return -1
+    if (!dirA && dirB) return 1
     return a.name.localeCompare(b.name)
   })
   for (const n of nodes) {
@@ -15,7 +18,8 @@ function sortTree(nodes: FileTreeNode[]) {
   }
 }
 
-export function buildFileTree(paths: string[]): FileTreeNode[] {
+export function buildFileTree(paths: string[], dirs?: Iterable<string>): FileTreeNode[] {
+  const dirSet = new Set(dirs ?? [])
   const root: FileTreeNode[] = []
 
   for (const fullPath of paths) {
@@ -28,9 +32,11 @@ export function buildFileTree(paths: string[]): FileTreeNode[] {
       let node = current.find((n) => n.name === part)
 
       if (!node) {
+        const nodePath = parts.slice(0, i + 1).join('/')
         node = {
           name: part,
-          path: parts.slice(0, i + 1).join('/'),
+          path: nodePath,
+          isDir: dirSet.has(nodePath),
           children: [],
         }
         current.push(node)

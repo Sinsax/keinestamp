@@ -48,6 +48,7 @@ interface BlenderDownloadProgress {
   let statusError = $state(false)
 let statusErrorMsg = $state('')
   let trackedFiles = $state<string[]>([])
+  let emptyDirs = $state<string[]>([])
   let statusText = $state('Ready')
   let toastId = $state(0)
   let toasts = $state<{ id: number; msg: string; type: string }[]>([])
@@ -71,6 +72,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   let pendingReinit = $state<string | null>(null)
   // 统一确认弹窗：回退丢弃 / 恢复丢弃（丢弃=执行，留下=取消不操作）
   let pendingConfirm = $state<{ kind: 'rollback' | 'restore'; entry?: TimelineEntry; title: string; message: string } | null>(null)
+  // 取消更改（git restore）：M 覆盖工作区修改有数据丢失风险 → 弹确认框
+  let pendingDiscard = $state<{ file: string } | null>(null)
   let deploying = $state(false)
   let backupBusy = $state(false)
   let recording = $state(false)
@@ -131,14 +134,24 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function loadTrackedFiles(path: string) {
     if (projectType !== 'initialized') {
       trackedFiles = []
+      emptyDirs = []
       return
     }
+    // 两个命令独立容错：get_empty_dirs 失败只清空 emptyDirs——
+    // trackedFiles 是变更面板灰显忽略文件的数据源，不能连坐清空
     try {
       const files = await api.getTrackedFiles(path)
       if (path !== activePath) return
       trackedFiles = files
     } catch {
       if (path === activePath) trackedFiles = []
+    }
+    try {
+      const dirs = await api.getEmptyDirs(path)
+      if (path !== activePath) return
+      emptyDirs = dirs
+    } catch {
+      if (path === activePath) emptyDirs = []
     }
   }
 
@@ -247,6 +260,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
         statusOutput = ''
         statusError = false
         trackedFiles = []
+        emptyDirs = []
         pendingReinit = path
         pushToast('项目配置缺失（.keinestamp.toml）：需要重新生成', 'error')
       } else {
@@ -254,6 +268,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
         statusOutput = ''
         statusError = false
         trackedFiles = []
+        emptyDirs = []
       }
       if (seq !== loadSeq) return
       statusText = `${path.split(/[/\\]/).pop() || path} — ${pt}`
@@ -265,6 +280,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       statusOutput = ''
       statusError = false
       trackedFiles = []
+      emptyDirs = []
     }
   }
 
@@ -586,6 +602,31 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
   // 重建 web 产物（暂移除：web 由记录时自动生成）
 
+  // 取消更改（git restore 语义）：D（已删除）直接恢复；M（已修改）弹确认框后覆盖回 HEAD
+  async function handleDiscardChanges(file: string, state: 'M' | 'D') {
+    if (state === 'M') {
+      pendingDiscard = { file }
+      return
+    }
+    await doDiscard(file)
+  }
+
+  async function doDiscard(file: string) {
+    console.log('[discard] doDiscard', { activePath, file })
+    if (!activePath) {
+      pushToast('取消更改失败: 未打开项目', 'error')
+      return
+    }
+    try {
+      await api.discardFile(activePath, file)
+      pushToast(`已取消更改 ${file}`, 'success')
+      // 轻量刷新：status/变更面板 + 回退状态（trackedFiles 全量 walk 不受影响）
+      await Promise.all([refreshStatus(), refreshRollbackState()])
+    } catch (e: any) {
+      pushToast(`取消更改失败: ${e}`, 'error')
+    }
+  }
+
   let conflictFiles = $state<string[] | null>(null)
   let resolvingConflict = $state(false)
   let pendingMigrate = $state<string | null>(null)
@@ -649,6 +690,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     statusOutput = ''
     statusError = false
     trackedFiles = []
+    emptyDirs = []
     statusText = 'Ready'
   }
 
@@ -779,6 +821,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   <div class="body" onclick={() => selectedEntryId = ''}>
     <Sidebar
       {trackedFiles}
+      {emptyDirs}
       {activePath}
       collapsed={sidebarCollapsed}
       onExpand={() => sidebarCollapsed = false}
@@ -826,7 +869,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} />
+            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} onDiscardChanges={handleDiscardChanges} />
           {/if}
         </div>
 
@@ -932,6 +975,19 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     cancelLabel="取消"
     onConfirm={confirmMigrateAndBackup}
     onCancel={() => (pendingMigrate = null)}
+  />
+{/if}
+
+{#if pendingDiscard}
+  <!-- 不用 {@const}（事件闭包作用域隐患）：onConfirm 内直接可选链取值 + 守卫 -->
+  <ConfirmDialog
+    title="取消更改"
+    message={`将丢弃「${pendingDiscard.file}」的未提交修改，恢复到最近记录版本。\n此操作不可撤销。`}
+    okLabel="取消更改"
+    cancelLabel="留下"
+    danger
+    onConfirm={() => { const f = pendingDiscard?.file ?? ''; pendingDiscard = null; if (f) doDiscard(f) }}
+    onCancel={() => (pendingDiscard = null)}
   />
 {/if}
 

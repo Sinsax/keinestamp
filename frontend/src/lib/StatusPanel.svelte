@@ -2,7 +2,6 @@
   import { parseStatus, ruleHidden, findRuleHidden, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
-  import { untrack } from 'svelte'
   import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore } from '../api'
 
   let {
@@ -18,6 +17,7 @@
     rollbackDeletedFiles = [],
     rollbackModifiedFiles = [],
     onSelectionChange = (_sel: string[] | null) => {},
+    onDiscardChanges = (_file: string, _state: 'M' | 'D') => {},
   }: {
     statusOutput: string
     onRefresh: () => void
@@ -31,6 +31,7 @@
     rollbackDeletedFiles?: string[]
     rollbackModifiedFiles?: string[]
     onSelectionChange?: (sel: string[] | null) => void
+    onDiscardChanges?: (file: string, state: 'M' | 'D') => void
   } = $props()
 
   const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp']
@@ -82,6 +83,8 @@
     return out
   })
   const tree = $derived(buildFileTree(visibleFiles))
+  // 可见文件中被忽略的数量（灰显条目计数，徽标展示）
+  const ignoredVisibleCount = $derived(visibleFiles.filter((p) => isIgnored(p)).length)
   const fileSet = $derived(new Set(statusFiles.map((f) => f.path)))
   const selectionSet = $derived(selection === null ? null : new Set(selection))
   const selectedCount = $derived(
@@ -283,6 +286,8 @@
   $effect(() => {
     const path = activePath
     statusOutput
+    // 依赖 trackedFiles（全量 walk）：10s 轮询刷新时同步重取后端权威忽略清单
+    const allFiles = trackedFiles
     if (!path) {
       trackedSet = new Set()
       ignoredSet = new Set()
@@ -290,8 +295,7 @@
       return
     }
     // untrack：写 ruleIgnoredSet 不触发本 effect 重跑（避免循环刷屏）
-    const files = untrack(() => statusFiles.map((f) => f.path))
-    getIgnoreInfo(path, files)
+    getIgnoreInfo(path, allFiles)
       .then((info) => {
         if (path !== activePath) return
         trackedSet = new Set(info.tracked)
@@ -302,11 +306,13 @@
   })
 
   function isIgnored(path: string): boolean {
+    // 后端权威忽略清单（lore 语义匹配）优先；回退前端规则匹配（异常/旧后端时）
+    if (ruleIgnoredSet.has(path)) return true
     if (ruleHidden(path, ignoredSet) || ruleHidden(path, ruleIgnoredSet)) return true
     const parts = path.split('/')
     for (let i = 1; i < parts.length; i++) {
       const prefix = parts.slice(0, i).join('/')
-      if (ruleHidden(prefix, ignoredSet) || ruleHidden(prefix, ruleIgnoredSet)) return true
+      if (ruleIgnoredSet.has(prefix) || ruleHidden(prefix, ignoredSet) || ruleHidden(prefix, ruleIgnoredSet)) return true
     }
     return false
   }
@@ -393,6 +399,21 @@
     await navigator.clipboard.writeText(name)
   }
 
+  /** 取消更改（git restore）仅对已修改/已删除（M/D）的文件显示；staged/untracked 不在范围 */
+  function canDiscard(path: string): boolean {
+    const st = statusOf(path)
+    return !!st && (st.x === 'M' || st.x === 'D')
+  }
+
+  function menuDiscardChanges() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu || menu.isDir) return
+    const st = statusOf(menu.path)
+    if (!st || (st.x !== 'M' && st.x !== 'D')) return
+    onDiscardChanges(menu.path, st.x === 'M' ? 'M' : 'D')
+  }
+
   async function menuIgnore(kind: 'file' | 'ext' | 'dir') {
     const menu = contextMenu
     closeContextMenu()
@@ -445,7 +466,7 @@
 <div class="status-panel">
   <div class="sp-header">
     <span class="sp-title">变更</span>
-    <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件</span>
+    <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件{#if ignoredVisibleCount > 0} · {ignoredVisibleCount} 已忽略{/if}</span>
     <div class="sp-spacer"></div>
     {#if !allSelected}
       <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
@@ -458,7 +479,10 @@
     </button>
   </div>
 
-  {#if statusFiles.length === 0 && ignoredSet.size === 0}
+  {#if visibleFiles.length === 0}
+    <!-- 空态判定基于实际可见内容（visibleFiles = status 变更 + 灰显忽略文件 + 回退检出）：
+         ① 只有被忽略文件的工作区 → visibleFiles 非空 → 走下方列表灰显展示（忽略文件不隐藏）；
+         ② 干净/仅空目录（lore 目录行已被后端过滤）→ 显示提示而非空白列表 -->
     <div class="sp-empty">
       <div class="sp-empty-icon"><svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor" opacity="0.5"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg></div>
       {#if statusError}
@@ -471,6 +495,9 @@
   {:else}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="sp-list" oncontextmenu={(e) => e.preventDefault()}>
+      {#if statusFiles.length === 0 && ignoredVisibleCount === visibleFiles.length && visibleFiles.length > 0}
+        <div class="sp-ignored-only-hint">仅被忽略文件（灰显，可右键取消忽略）</div>
+      {/if}
       {#each tree as node (node.path)}
         <StatusTreeItem
           {node}
@@ -542,6 +569,9 @@
       <button onclick={menuOpenFolder}>打开所在文件夹</button>
       <button onclick={menuCopyPath}>复制路径</button>
       <button onclick={menuCopyName}>复制名称</button>
+      {#if canDiscard(contextMenu.path)}
+        <button class="ctx-danger" onclick={menuDiscardChanges} title="丢弃此文件的未提交更改，恢复到最近记录版本">取消更改</button>
+      {/if}
       <div class="ctx-sep"></div>
       {#if isIgnored(contextMenu.path)}
         <button onclick={menuUnignore}>取消忽略</button>
@@ -618,6 +648,11 @@
     font-size: 13px;
   }
   .sp-empty-icon { font-size: 28px; opacity: 0.5; }
+  .sp-ignored-only-hint {
+    font-size: 10px;
+    color: var(--text-dim);
+    padding: 2px 8px 6px;
+  }
   .sp-list {
     flex: 1;
     overflow-y: auto;
@@ -728,6 +763,14 @@
   .ctx-menu button:hover {
     background: var(--surface2);
     color: var(--accent);
+  }
+  /* 危险操作菜单项（取消更改）：常态红字，hover 浅红底（覆盖默认 hover 变 accent） */
+  .ctx-menu button.ctx-danger {
+    color: var(--error);
+  }
+  .ctx-menu button.ctx-danger:hover {
+    background: color-mix(in srgb, var(--error) 12%, transparent);
+    color: var(--error);
   }
   .ctx-menu button:disabled {
     opacity: 0.4;

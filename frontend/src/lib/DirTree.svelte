@@ -4,15 +4,20 @@
 
   let {
     paths = [],
+    dirs = [],
     activePath = '',
     onContextMenu = (_path: string, _isDir: boolean, _x: number, _y: number) => {},
   }: {
     paths?: string[]
+    dirs?: string[]
     activePath?: string
     onContextMenu?: (path: string, isDir: boolean, x: number, y: number) => void
   } = $props()
 
-  const tree = $derived(buildFileTree(paths))
+  const dirSet = $derived(
+    new Set(dirs.map((d) => (d.endsWith('/') ? d.slice(0, -1) : d)))
+  )
+  const tree = $derived(buildFileTree(paths, dirSet))
 
   function collectDirPaths(nodes: FileTreeNode[]): string[] {
     const dirs: string[] = []

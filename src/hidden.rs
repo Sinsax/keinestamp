@@ -53,6 +53,90 @@ pub fn is_hidden(path: &str, list: &[String]) -> bool {
     list.iter().any(|h| rule_matches(h, path))
 }
 
+/// lore `.loreignore` 语义匹配（docs/lore-commands.md:60，gitignore 风格，源码 filter.rs）：
+/// - 规则按序求值、最后命中者生效；`!` 前缀取反
+/// - 首 `/` 根锚定；尾 `/` 目录规则（任意层级的该目录名，根锚定时仅根级）
+/// - 无 `/` 裸规则 = 任意层级段名（精确相等，非前缀——`record` 不匹配 `recording/x`）
+/// - 含 `/` 规则 = 根级段前缀匹配（`**` 跨段递归、`*`/`?` 段内通配）
+/// - 大小写不敏感（规则与路径均小写化后比较）
+/// 供 `get_ignore_info` 计算权威忽略清单（变更面板灰显），不用于应用层隐藏。
+pub fn is_ignored(path: &str, rules: &[String]) -> bool {
+    let mut ignored = false;
+    for raw in rules {
+        let rule = raw.trim();
+        if rule.is_empty() || rule.starts_with('#') {
+            continue;
+        }
+        let (negated, rule) = match rule.strip_prefix('!') {
+            Some(r) => (true, r.trim()),
+            None => (false, rule),
+        };
+        if rule.is_empty() {
+            continue;
+        }
+        if lore_rule_matches(rule, path) {
+            ignored = !negated;
+        }
+    }
+    ignored
+}
+
+fn lore_rule_matches(rule: &str, path: &str) -> bool {
+    // 双方小写化（lore 大小写不敏感；中文文件名 to_lowercase 恒等）
+    let path_norm = path.replace('\\', "/").to_lowercase();
+    let rule_lower = rule.to_lowercase();
+    let root_anchored = rule_lower.starts_with('/');
+    let rule = rule_lower.trim_start_matches('/');
+    let dir_rule = rule.ends_with('/');
+    let rule = rule.trim_end_matches('/');
+    if rule.is_empty() {
+        return false;
+    }
+    let rule_segs: Vec<&str> = rule.split('/').collect();
+    let segs: Vec<&str> = path_norm.split('/').collect();
+    if dir_rule {
+        if root_anchored {
+            return segs.first().map(|s| *s == rule).unwrap_or(false);
+        }
+        return segs.iter().any(|s| *s == rule);
+    }
+    if root_anchored {
+        return segments_prefix_match(&rule_segs, &segs);
+    }
+    if rule_segs.len() == 1 {
+        if rule_segs[0] == "**" {
+            return true;
+        }
+        return segs.iter().any(|s| segment_match(rule_segs[0], s));
+    }
+    segments_prefix_match(&rule_segs, &segs)
+}
+
+/// 段序列前缀匹配（规则段是路径段的前缀；`**` 匹配零或多个段）。
+/// 规则耗尽即视为匹配——命中的是目录时其下全部路径随之忽略（与 git 语义一致）。
+fn segments_prefix_match(pattern: &[&str], text: &[&str]) -> bool {
+    if pattern.is_empty() {
+        return true;
+    }
+    if pattern[0] == "**" {
+        for skip in 0..=text.len() {
+            if segments_prefix_match(&pattern[1..], &text[skip..]) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if text.is_empty() {
+        return false;
+    }
+    segment_match(pattern[0], text[0]) && segments_prefix_match(&pattern[1..], &text[1..])
+}
+
+/// 单段匹配（`*`/`?` 通配；大小写不敏感——双方已小写化）
+fn segment_match(pattern: &str, text: &str) -> bool {
+    wildcard_match(pattern, text)
+}
+
 fn rule_matches(rule: &str, path: &str) -> bool {
     // Windows 反斜杠路径归一化为 `/`，保证目录 glob 规则（如 `cache/*`）可匹配
     let rule = rule.replace('\\', "/");
@@ -156,6 +240,86 @@ mod tests {
         assert_eq!(rules, vec!["*.blend", ".keinestamp/.keinestamp.toml", "cache/"]);
         std::fs::remove_dir_all(&dir).unwrap();
         Ok(())
+    }
+
+    #[test]
+    fn test_is_ignored_bare_rule_any_level() {
+        let rules = vec!["record".to_string()];
+        assert!(is_ignored("record/week1/x.png", &rules));
+        assert!(is_ignored("a/record/x.png", &rules));
+        assert!(is_ignored("record", &rules));
+        // 段名精确相等：不误伤前缀
+        assert!(!is_ignored("recording/x.png", &rules));
+        assert!(!is_ignored("x.png", &rules));
+    }
+
+    #[test]
+    fn test_is_ignored_dir_rule_any_level() {
+        let rules = vec!["out/".to_string()];
+        assert!(is_ignored("out/x.png", &rules));
+        assert!(is_ignored("a/out/x.png", &rules));
+        assert!(!is_ignored("outx/x.png", &rules));
+    }
+
+    #[test]
+    fn test_is_ignored_root_anchored() {
+        let rules = vec!["/out/".to_string(), "/top".to_string()];
+        assert!(is_ignored("out/x.png", &rules));
+        assert!(!is_ignored("a/out/x.png", &rules));
+        assert!(is_ignored("top/a.png", &rules));
+        assert!(!is_ignored("a/top/a.png", &rules));
+    }
+
+    #[test]
+    fn test_is_ignored_case_insensitive() {
+        let rules = vec!["RECORD".to_string()];
+        assert!(is_ignored("record/x.png", &rules));
+        assert!(is_ignored("Record/X.png", &rules));
+    }
+
+    #[test]
+    fn test_is_ignored_double_star_recursive() {
+        let rules = vec!["cache/**".to_string()];
+        assert!(is_ignored("cache/a.png", &rules));
+        assert!(is_ignored("cache/a/b/c.png", &rules));
+        let rules2 = vec!["**/temp".to_string()];
+        assert!(is_ignored("temp", &rules2));
+        assert!(is_ignored("a/temp", &rules2));
+        assert!(is_ignored("a/b/temp", &rules2));
+        let rules3 = vec!["a/**/b".to_string()];
+        assert!(is_ignored("a/b", &rules3));
+        assert!(is_ignored("a/x/b", &rules3));
+        assert!(is_ignored("a/x/y/b", &rules3));
+    }
+
+    #[test]
+    fn test_is_ignored_negation_last_wins() {
+        let rules = vec!["*.tmp".to_string(), "!keep.tmp".to_string()];
+        assert!(is_ignored("a/x.tmp", &rules));
+        assert!(!is_ignored("keep.tmp", &rules));
+        // 后规则重新忽略（最后命中者生效）
+        let rules2 = vec!["*.tmp".to_string(), "!keep.tmp".to_string(), "keep.tmp".to_string()];
+        assert!(is_ignored("keep.tmp", &rules2));
+    }
+
+    #[test]
+    fn test_is_ignored_wildcard_ext() {
+        let rules = vec!["*.blend".to_string()];
+        assert!(is_ignored("models/x.blend", &rules));
+        assert!(!is_ignored("models/x.blend1", &rules));
+        assert!(!is_ignored("models/x.blenda", &rules));
+        // `?` 恰好一位：`yeki.blend` 不被 `*.blend?` 匹配（主文件可跟踪）
+        let rules2 = vec!["*.blend?".to_string()];
+        assert!(is_ignored("models/x.blend1", &rules2));
+        assert!(!is_ignored("models/yeki.blend", &rules2));
+    }
+
+    #[test]
+    fn test_is_ignored_preset_unaffected() {
+        // 应用层预设 `.keinestamp/`（目录规则）——新引擎下行为一致
+        let rules = vec![".keinestamp/".to_string()];
+        assert!(is_ignored(".keinestamp/web/timeline.json", &rules));
+        assert!(!is_ignored("models/x.blend", &rules));
     }
 
     #[test]

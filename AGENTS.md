@@ -139,6 +139,7 @@ cd src-tauri; cargo build         # Backend only
 | `restore_rollback` | `()` | 撤销回退（branch reset 回 head_before） |
 | `get_rollback_conflicts` / `keep_rollback_file` / `resolve_rollback_conflicts` | `[]` / `()` | v1 兼容签名，Lore 无 git 式冲突（UI 已移除） |
 | `status` | `{clean, output}` | `changed_files`（过滤隐藏）；output 中文标签 `未提交的修改：` + `  {A/M/D/??} {path}` |
+| `discard_file` | `()` | 取消单个文件更改（git restore）：`lore file reset <path>` 还原 HEAD——M 覆盖回 HEAD / D 从 HEAD 恢复（file reset 不建父目录，先 create_dir_all）；前端菜单仅 M/D 显示，M 弹确认框（2026-08-13） |
 | `log` / `get_project_log` | `LogEntry[]` / `String[]` | revision_history 过滤 kind=web |
 | `read_config` / `update_config` | 同 v1 | site_name 校验 ASCII + 锁定 |
 | `get_timeline` | `Timeline` | 读 `web/timeline.json`（含 rollback_marker） |

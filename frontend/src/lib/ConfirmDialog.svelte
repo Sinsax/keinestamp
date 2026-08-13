@@ -4,6 +4,7 @@
     message,
     okLabel = '确认',
     cancelLabel = '取消',
+    danger = false,
     onConfirm,
     onCancel,
   }: {
@@ -11,6 +12,8 @@
     message: string
     okLabel?: string
     cancelLabel?: string
+    // 危险操作确认（如覆盖文件）：确定按钮标红
+    danger?: boolean
     onConfirm: () => void
     onCancel: () => void
   } = $props()
@@ -41,7 +44,7 @@
     <div class="confirm-msg">{message}</div>
     <div class="actions">
       <button onclick={onCancel}>{cancelLabel}</button>
-      <button onclick={onConfirm} class="accent">{okLabel}</button>
+      <button onclick={onConfirm} class:accent={!danger} class:danger={danger}>{okLabel}</button>
     </div>
   </div>
 </div>

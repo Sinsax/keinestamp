@@ -6,6 +6,10 @@ pub fn changed_files(project_root: &Path, hidden: &[String]) -> Result<Vec<LoreS
     Ok(lore_backend::status_lines(project_root)?
         .into_iter()
         .filter(|f| !crate::hidden::is_hidden(&f.path, hidden))
+        // 目录行（`A out/`）需过滤：lore 把目录作为一等条目，空目录/未跟踪目录都会出
+        // 目录行 → 变更面板出现"幻影文件"。文件行足以在树中呈现目录节点；与 record/
+        // commit_files 的过滤语义一致（四层防御第 2 层）
+        .filter(|f| !f.path.ends_with('/'))
         .collect())
 }
 
@@ -302,7 +306,7 @@ fn rollback_inner(
         }
     }
     // 无父补 init 场景（None 分支）：change_files = 写回的文件列表（工作区 = 检出版）
-    let mut change_files: Vec<String> = if backfilled_init.is_some() {
+    let change_files: Vec<String> = if backfilled_init.is_some() {
         backfilled_files.clone()
     } else {
         dump_tree_files(project_root, revision)?
@@ -415,6 +419,22 @@ fn discard_dirty(project_root: &Path, hidden: &[String]) -> Result<()> {
         }
         lore_backend::run_lore(project_root, &args)?;
     }
+    Ok(())
+}
+
+/// 取消单个文件的更改（git restore 语义）：`lore file reset <path>` 还原到 HEAD——
+/// M（已修改）覆盖回最近记录版本 / D（已删除）从 HEAD 恢复。
+/// 仅工作区改动（前端菜单按状态码 M/D 控制；staged/untracked 不在此范围）。
+pub fn discard_file_changes(project_root: &Path, path: &str) -> Result<()> {
+    if path.is_empty() || path.ends_with('/') {
+        bail!("无效路径");
+    }
+    let full = project_root.join(path);
+    if let Some(parent) = full.parent() {
+        // file reset 不创建父目录（实测 os error 2）——D 恢复嵌套路径时须先建
+        std::fs::create_dir_all(parent)?;
+    }
+    lore_backend::run_lore(project_root, &["file", "reset", path])?;
     Ok(())
 }
 
@@ -809,6 +829,74 @@ mod tests {
         std::fs::write(root.join(".keinestamp/web/b.txt"), "2").unwrap();        let files = changed_files(&root, &vec![".keinestamp/".to_string()]).unwrap();
         assert!(files.iter().all(|f| !f.path.starts_with(".keinestamp/")));
         assert!(files.iter().any(|f| f.path == "a.txt"));
+    }
+
+    #[test]
+    fn test_changed_files_filters_dir_lines() {
+        // lore 把目录作为一等条目：空目录/未跟踪目录会输出目录行（`A out/`）→ 变更面板
+        // 会出现"幻影文件" → changed_files 必须过滤目录行（文件行足以呈现树节点）
+        let root = tmp_root("cfdir");
+        create_repo(&root).unwrap();
+        // 空目录（lore status 报 `A out/`）
+        std::fs::create_dir_all(root.join("out")).unwrap();
+        // 未跟踪目录含文件（lore status 报 `A models/` + `A models/x.blend`）
+        std::fs::create_dir_all(root.join("models")).unwrap();
+        std::fs::write(root.join("models/x.blend"), "1").unwrap();
+        let files = changed_files(&root, &vec![".keinestamp/".to_string()]).unwrap();
+        assert!(
+            files.iter().all(|f| !f.path.ends_with('/')),
+            "目录行应被过滤: {:?}",
+            files.iter().map(|f| &f.path).collect::<Vec<_>>()
+        );
+        assert!(
+            files.iter().any(|f| f.path == "models/x.blend"),
+            "目录下文件行应保留"
+        );
+    }
+
+    #[test]
+    fn test_discard_file_changes_modified_and_deleted() {
+        // 取消更改（git restore 语义）：M 覆盖回最新 HEAD / D 从 HEAD 恢复；目录行/空路径拒绝
+        let root = tmp_root("discard");
+        create_repo(&root).unwrap();
+        let hidden = vec![".keinestamp/".to_string()];
+        // 两次提交：HEAD 是第二版，reset 应还原到最新 HEAD
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        lore_backend::commit_files(&root, "c1", &[], &["a.txt".to_string()]).unwrap();
+        std::fs::write(root.join("a.txt"), "v2").unwrap();
+        lore_backend::commit_files(&root, "c2", &[], &["a.txt".to_string()]).unwrap();
+        // M：修改后取消 → 内容还原到 v2 + status 干净
+        std::fs::write(root.join("a.txt"), "v3-modified").unwrap();
+        discard_file_changes(&root, "a.txt").unwrap();
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "v2");
+        assert!(
+            changed_files(&root, &hidden)
+                .unwrap()
+                .iter()
+                .all(|f| f.path != "a.txt")
+        );
+        // D：删除后取消 → 恢复
+        std::fs::remove_file(root.join("a.txt")).unwrap();
+        discard_file_changes(&root, "a.txt").unwrap();
+        assert!(root.join("a.txt").exists());
+        assert_eq!(std::fs::read_to_string(root.join("a.txt")).unwrap(), "v2");
+        // 嵌套路径 + 空格/中文文件名（覆盖用户项目 `refer/ChatGPT Image ....png` 特征）
+        let space_name = "refer/ChatGPT Image 2026年7月29日 03_28_37.png";
+        let nested = root.join(space_name);
+        std::fs::create_dir_all(nested.parent().unwrap()).unwrap();
+        std::fs::write(&nested, "img1").unwrap();
+        lore_backend::commit_files(&root, "c3", &[], &[space_name.to_string()]).unwrap();
+        std::fs::write(&nested, "img2-modified").unwrap();
+        discard_file_changes(&root, space_name).unwrap();
+        assert_eq!(std::fs::read_to_string(&nested).unwrap(), "img1");
+        // D + 父目录也删了：file reset 不建父目录 → create_dir_all 兜底恢复
+        std::fs::remove_file(&nested).unwrap();
+        std::fs::remove_dir_all(nested.parent().unwrap()).unwrap();
+        discard_file_changes(&root, space_name).unwrap();
+        assert_eq!(std::fs::read_to_string(&nested).unwrap(), "img1");
+        // 防御：目录行/空路径拒绝
+        assert!(discard_file_changes(&root, "out/").is_err());
+        assert!(discard_file_changes(&root, "").is_err());
     }
 
     #[test]
