@@ -77,7 +77,7 @@ fn perform_init(project_root: &Path) -> Result<()> {
     // changes 区可重新勾选/修改），而非"reset 自身无差异"（初次提交回退无意义）
     crate::lore_backend::init_commit(project_root)?;
 
-    let meta = MetaConfig::new(project_root.to_path_buf());
+    let meta = MetaConfig::new(project_root.to_path_buf())?;
     let web_root = &meta.web_root;
 
     std::fs::create_dir_all(web_root)

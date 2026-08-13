@@ -25,18 +25,18 @@ pub struct MetaConfig {
 }
 
 impl MetaConfig {
-    pub fn new(project_root: PathBuf) -> Self {
+    pub fn new(project_root: PathBuf) -> Result<Self> {
         let web_root = project_root.join(".keinestamp").join("web");
-        Self {
+        Ok(Self {
             version: env!("CARGO_PKG_VERSION").to_string(),
             init_time: chrono::Utc::now().to_rfc3339(),
             project_root,
             web_root,
-            access_token: Some(generate_access_token()),
+            access_token: Some(generate_access_token()?),
             project_id: Some(generate_project_id()),
             site_name: None,
             site_locked: false,
-        }
+        })
     }
 }
 
@@ -65,10 +65,12 @@ pub fn generate_project_id() -> String {
     format!("{:016x}{:08x}", n, pid)
 }
 
-pub fn generate_access_token() -> String {
+pub fn generate_access_token() -> Result<String> {
     let mut bytes = [0u8; 24];
-    getrandom::getrandom(&mut bytes).unwrap_or_default();
-    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+    // 熵源失败必须显式报错：unwrap_or_default 会产出可预测的全零 token
+    getrandom::getrandom(&mut bytes)
+        .map_err(|e| anyhow::anyhow!("生成访问令牌失败（系统熵源不可用）: {}", e))?;
+    Ok(bytes.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 pub fn validate_site_name(name: &str) -> Result<()> {
@@ -121,14 +123,8 @@ pub fn write_meta(path: &Path, config: &MetaConfig) -> Result<()> {
     stripped.web_root = PathBuf::new();
     let content = toml::to_string_pretty(&stripped)?;
 
-    let tmp_path = parent.join(format!(
-        ".keinestamp.tmp.{}.toml",
-        std::process::id()
-    ));
-    std::fs::write(&tmp_path, &content)
-        .with_context(|| format!("failed to write temporary config to {:?}", tmp_path))?;
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("failed to rename {:?} to {:?}", tmp_path, path))?;
+    crate::process_util::atomic_write(path, content.as_bytes())
+        .with_context(|| format!("failed to write config to {:?}", path))?;
 
     Ok(())
 }
@@ -221,7 +217,7 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let path = meta_path(&dir);
-        let config = MetaConfig::new(dir.clone());
+        let config = MetaConfig::new(dir.clone())?;
 
         write_meta(&path, &config)?;
         let read_back = read_meta(&path)?;
@@ -271,7 +267,7 @@ mod tests {
     fn test_project_id_in_new_meta() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("keinestamp_test_pid_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
-        let config = MetaConfig::new(dir.clone());
+        let config = MetaConfig::new(dir.clone())?;
         assert!(config.project_id.is_some());
         assert_eq!(config.project_id.as_ref().unwrap().len(), 24);
         std::fs::remove_dir_all(&dir)?;
@@ -279,20 +275,21 @@ mod tests {
     }
 
     #[test]
-    fn test_generate_access_token_length() {
-        let t1 = generate_access_token();
-        let t2 = generate_access_token();
+    fn test_generate_access_token_length() -> Result<()> {
+        let t1 = generate_access_token()?;
+        let t2 = generate_access_token()?;
         assert_eq!(t1.len(), 48);
         assert_eq!(t2.len(), 48);
         assert_ne!(t1, t2);
         assert!(t1.chars().all(|c| c.is_ascii_hexdigit()));
+        Ok(())
     }
 
     #[test]
     fn test_access_token_in_new_meta() -> Result<()> {
         let dir = std::env::temp_dir().join(format!("keinestamp_test_at_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
-        let config = MetaConfig::new(dir.clone());
+        let config = MetaConfig::new(dir.clone())?;
         assert!(config.access_token.is_some());
         assert_eq!(config.access_token.as_ref().unwrap().len(), 48);
         std::fs::remove_dir_all(&dir)?;

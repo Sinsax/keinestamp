@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn test_detect_initialized() -> Result<()> {
         let dir = tmp_dir("initialized");
-        let meta = MetaConfig::new(dir.clone());
+        let meta = MetaConfig::new(dir.clone())?;
         let meta_path = config::meta_path(&dir);
         config::write_meta(&meta_path, &meta)?;
 

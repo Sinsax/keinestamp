@@ -54,12 +54,15 @@ pub fn is_hidden(path: &str, list: &[String]) -> bool {
 }
 
 fn rule_matches(rule: &str, path: &str) -> bool {
+    // Windows 反斜杠路径归一化为 `/`，保证目录 glob 规则（如 `cache/*`）可匹配
+    let rule = rule.replace('\\', "/");
+    let path = path.replace('\\', "/");
     if rule.contains('*') || rule.contains('?') {
         let rule_segs: Vec<&str> = rule.split('/').collect();
         if rule_segs.len() == 1 {
             // 无 / 的规则：匹配任意层级下的文件名（如 `*.blend` 匹配 `models/x.blend`）
-            let file = path.rsplit('/').next().unwrap_or(path);
-            wildcard_match(rule, file)
+            let file = path.rsplit('/').next().unwrap_or(&path);
+            wildcard_match(&rule, file)
         } else {
             // 含 / 的规则：段数必须一致（`cache/*` 匹配 `cache/x`，不匹配 `cache/a/b`）
             let path_segs: Vec<&str> = path.split('/').collect();
@@ -67,7 +70,7 @@ fn rule_matches(rule: &str, path: &str) -> bool {
                 && rule_segs.iter().zip(path_segs.iter()).all(|(r, p)| wildcard_match(r, p))
         }
     } else {
-        path == rule || path.starts_with(rule)
+        path == rule || path.starts_with(&rule)
     }
 }
 

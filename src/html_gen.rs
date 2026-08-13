@@ -3,47 +3,31 @@ use crate::three_assets;
 use anyhow::{Context, Result};
 use std::path::Path;
 
-fn compute_diff(project_root: &Path, entry_id: &str, file_path: &str) -> String {
-    let output = crate::process_util::hide_console(std::process::Command::new("git"))
-        .args([
-            "-c", "core.quotepath=false",
-            "show",
-            entry_id,
-            "--",
-            file_path,
-        ])
-        .current_dir(project_root)
-        .output();
-    match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => String::new(),
-    }
+/// JSON 注入 `<script>` 前的转义：serde_json 不转义 `<`/`/`/U+2028/U+2029，
+/// 提交信息/tag/文件路径含 `</script>` 会闭合脚本块（存储型 XSS）。`\u003c` 等是合法 JSON 转义。
+fn json_safe(s: &str) -> String {
+    s.replace('<', "\\u003c")
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029")
+}
+
+/// HTML 文本节点转义（page_title 注入 `<title>`）
+fn html_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
 
 pub fn generate_index_html(
     web_root: &Path,
-    project_root: &Path,
+    _project_root: &Path,
     timeline: &Timeline,
     page_title: &str,
 ) -> Result<()> {
     eprintln!("[debug] generate_index_html: web_root={:?}, {} entries", web_root, timeline.entries.len());
     let timeline_json = serde_json::to_string_pretty(timeline)?;
-
-    let mut diffs_map = std::collections::BTreeMap::new();
-    for entry in &timeline.entries {
-        let mut entry_diffs = std::collections::BTreeMap::new();
-        for file in &entry.files {
-            if file.ends_with(".blend") { continue; }
-            let diff = compute_diff(project_root, &entry.id, file);
-            if !diff.is_empty() {
-                entry_diffs.insert(file.clone(), diff);
-            }
-        }
-        if !entry_diffs.is_empty() {
-            diffs_map.insert(entry.id.clone(), entry_diffs);
-        }
-    }
-    let diffs_json = serde_json::to_string(&diffs_map)?;
 
     let mut glb_map = std::collections::BTreeMap::new();
     for entry in &timeline.entries {
@@ -78,19 +62,15 @@ pub fn generate_index_html(
     three_assets::ensure_threejs(&three_dir)?;
 
     let html = TEMPLATE
-        .replace("{{TIMELINE_JSON}}", &timeline_json)
-        .replace("{{GLB_JSON}}", &glb_json)
-        .replace("{{DIFFS_JSON}}", &diffs_json)
-        .replace("{{CALENDAR_JSON}}", &calendar_json)
-        .replace("{{PAGE_TITLE}}", page_title)
+        .replace("{{TIMELINE_JSON}}", &json_safe(&timeline_json))
+        .replace("{{GLB_JSON}}", &json_safe(&glb_json))
+        .replace("{{CALENDAR_JSON}}", &json_safe(&calendar_json))
+        .replace("{{PAGE_TITLE}}", &html_escape(page_title))
         .replace("{{FAVICON_B64}}", crate::three_assets::logo_favicon_b64());
 
     let html_path = web_root.join("index.html");
-    let tmp_path = web_root.join(format!("index.html.tmp{}", std::process::id()));
-    std::fs::write(&tmp_path, &html)
+    crate::process_util::atomic_write(&html_path, html.as_bytes())
         .with_context(|| format!("failed to write index.html to {:?}", web_root))?;
-    std::fs::rename(&tmp_path, &html_path)
-        .with_context(|| format!("failed to replace index.html in {:?}", web_root))?;
 
     Ok(())
 }
@@ -203,20 +183,6 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .st-add { color: var(--success); }
 .st-del { color: var(--error); }
 .st-mod { color: var(--warning); }
-.diff-entry { margin-bottom: 6px; }
-.diff-path { font-size: 11px; font-family: monospace; color: var(--tint); padding: 2px 6px; background: var(--tint-soft); border-radius: 3px; margin-bottom: 3px; }
-.diff-empty { font-size: 11px; color: var(--text-dim); padding: 2px 6px; }
-.diff-loading { font-size: 11px; color: var(--text-dim); padding: 4px 6px; }
-.dl { display: flex; gap: 8px; font-family: monospace; font-size: 11px; line-height: 1.6; padding: 0 4px; border-radius: 2px; }
-.dl-num { width: 32px; text-align: right; flex-shrink: 0; color: var(--text-dim); font-size: 10px; user-select: none; }
-.dl-text { white-space: pre; flex: 1; }
-.dl.add { background: var(--tint-soft); color: var(--success); }
-.dl.add .dl-num { color: var(--success); }
-.dl.del { background: var(--accent-soft); color: var(--error); }
-.dl.del .dl-num { color: var(--error); }
-.dl.mod { background: color-mix(in srgb, var(--tint) 10%, transparent); color: var(--tint); }
-.dl.mod .dl-num { color: var(--tint); }
-.dl:hover { filter: brightness(1.15); }
 .cal { }
 .cal-title { font-size: 14px; font-weight: 700; color: var(--text); }
 .cal-month { margin-bottom: 14px; }
@@ -313,7 +279,6 @@ document.getElementById('theme-toggle').addEventListener('click', function() {
 });
 var data = {{TIMELINE_JSON}};
 var glbData = {{GLB_JSON}};
-var diffsData = {{DIFFS_JSON}};
 var calData = {{CALENDAR_JSON}};
 
 var TAG_PRESETS = {'建模':0,'UV拆分':1,'绑定':2,'贴图':3,'修复':4};
@@ -332,50 +297,6 @@ function esc(s) {
 
 function statusIcon(s) { return s==='A'?'+':s==='D'?'−':s==='M'?'~':'·'; }
 function statusCls(s) { return s==='A'?'st-add':s==='D'?'st-del':s==='M'?'st-mod':''; }
-
-function parseDiff(diffText, fileStatus) {
-  if (fileStatus === 'A') return [];
-  var result = [];
-  var newLineNum = 0, oldLineNum = 0, hunkHasDel = false;
-  var hunkBuf = [];
-
-  function flushHunk() {
-    for (var k = 0; k < hunkBuf.length; k++) {
-      var h = hunkBuf[k];
-      if (h.prefix === '+') {
-        result.push({ lineNum: newLineNum, type: hunkHasDel ? 'mod' : 'add', text: h.text });
-        newLineNum++;
-      } else if (h.prefix === '-') {
-        result.push({ lineNum: oldLineNum, type: 'del', text: h.text });
-        oldLineNum++;
-      }
-      if (h.prefix === ' ') { newLineNum++; oldLineNum++; }
-    }
-    hunkBuf = [];
-    hunkHasDel = false;
-  }
-
-  var lines = diffText.split('\n');
-  for (var i = 0; i < lines.length; i++) {
-    var rawLine = lines[i];
-    var m = rawLine.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
-    if (m) {
-      flushHunk();
-      oldLineNum = parseInt(m[1]);
-      newLineNum = parseInt(m[2]);
-      continue;
-    }
-    if (rawLine.startsWith('diff --git') || rawLine.startsWith('index ') || rawLine.startsWith('---') || rawLine.startsWith('+++')) continue;
-    if (rawLine.startsWith('+') || rawLine.startsWith('-') || rawLine.startsWith(' ')) {
-      var prefix = rawLine[0];
-      if (prefix === '-') hunkHasDel = true;
-      if (prefix !== ' ') hunkBuf.push({ prefix: prefix, text: rawLine.slice(1) });
-      else { newLineNum++; oldLineNum++; }
-    }
-  }
-  flushHunk();
-  return result;
-}
 
 function render() {
   document.getElementById('project-title').textContent = data.project || 'Keinestamp';
@@ -405,10 +326,6 @@ function render() {
         }
       }
 
-      var eDiffs = diffsData && diffsData[e.id] ? diffsData[e.id] : {};
-      var textFiles = (e.files||[]).filter(function(f, i){ return f.indexOf('.blend')===-1 && (e.file_status||[])[i]!=='A'; });
-      var blendFiles = (e.files||[]).filter(function(f){ return f.indexOf('.blend')!==-1; });
-
       var tagClass = tag ? ' tagged' : '';
       var tagStyle = tag ? ';--tag-color:' + tagColor(tag) : '';
       var msClass = e.milestone ? ' milestone' : '';
@@ -431,31 +348,6 @@ function render() {
           var st = (e.file_status&&e.file_status[i])||'';
           h += '<div class="fs-line ' + statusCls(st) + '"><span class="fs-badge ' + statusCls(st) + '">' + statusIcon(st) + '</span><span class="fs-path">' + esc(f) + '</span></div>';
         });
-        h += '</div>';
-      }
-
-      if (textFiles.length > 0) {
-        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▸</span><span>文本改动 (' + textFiles.length + ')</span></div>';
-        h += '<div class="sec-body" style="display:none">';
-        if (diffsData) {
-          textFiles.forEach(function(f) {
-            var fi = (e.files||[]).indexOf(f);
-            var fst = fi >= 0 && (e.file_status||[])[fi] ? (e.file_status||[])[fi] : 'M';
-            var d = eDiffs[f];
-            var lines = d ? parseDiff(d, fst) : [];
-            h += '<div class="diff-entry"><div class="diff-path">' + esc(f) + '</div>';
-            if (lines.length > 0) {
-              lines.forEach(function(ln) {
-                h += '<div class="dl ' + ln.type + '"><span class="dl-num">' + ln.lineNum + '</span><span class="dl-text">' + esc(ln.text) + '</span></div>';
-              });
-            } else {
-              h += '<div class="diff-empty">无差异</div>';
-            }
-            h += '</div>';
-          });
-        } else {
-          h += '<div class="diff-loading">加载差异中...</div>';
-        }
         h += '</div>';
       }
 
@@ -1110,7 +1002,7 @@ mod tests {
         assert!(html.contains("Test Project"));
         assert!(html.contains("暂无记录"));
         assert!(html.contains("empty-icon"));
-        assert!(html.contains("var diffsData = {}"));
+        assert!(!html.contains("diffsData"), "diff feature removed");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1145,8 +1037,45 @@ mod tests {
         assert!(html.contains("abc123"));
         assert!(html.contains("建模"));
         assert!(html.contains("tag-badge"));
-        assert!(html.contains("var diffsData ="));
+        assert!(!html.contains("diffsData"), "diff feature removed");
         assert!(!html.contains("\"milestone\": true"), "non-milestone entry has milestone false");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_escapes_script_injection() -> Result<()> {
+        // 存储型 XSS 防护：消息/tag 含 `</script>` 必须被 JSON 转义，标题须 HTML 转义
+        let dir = std::env::temp_dir().join("keinestamp_html_xss");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir)?;
+
+        let timeline = Timeline {
+            project: "Test".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "</script><script>alert(1)</script>".to_string(),
+                files: vec!["a.png".to_string()],
+                file_status: vec![],
+                preview: String::new(),
+                tag: Some("<img src=x onerror=alert(2)>".to_string()),
+                milestone: false, superseded: false, parent: String::new(),
+            }],
+            rollback_marker: None,
+            removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "\"><script>alert(3)</script>")?;
+
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(html.contains(r"\u003c/script>\u003cscript>alert(1)\u003c/script>"), "message must be JSON-escaped");
+        assert!(!html.contains("</script><script>alert(1)"), "raw script injection must not appear");
+        assert!(html.contains(r"\u003cimg src=x onerror=alert(2)>"), "tag must be JSON-escaped");
+        assert!(html.contains("&quot;&gt;&lt;script&gt;alert(3)&lt;/script&gt;"), "page title must be HTML-escaped");
+        assert!(!html.contains("<title>\"><script>"), "raw title injection must not appear");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())

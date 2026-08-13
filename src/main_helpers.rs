@@ -23,7 +23,12 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
     if entry.preview.is_empty() || !preview_path.exists() {
         eprintln!("(该提交无缩略图)");
     } else {
-        std::fs::copy(&preview_path, output_dir.join(preview_path.file_name().unwrap()))
+        // preview 可能是目录/尾斜杠路径 → file_name() 为 None，跳过复制而非 panic
+        let Some(file_name) = preview_path.file_name() else {
+            eprintln!("(预览路径无文件名，跳过复制: {:?})", preview_path);
+            return Ok(());
+        };
+        std::fs::copy(&preview_path, output_dir.join(file_name))
             .with_context(|| format!("failed to copy preview {:?}", preview_path))?;
     }
 

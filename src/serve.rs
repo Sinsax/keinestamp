@@ -669,9 +669,9 @@ html[data-moon="full"] .bm-logo {
 
 <main class="hero">
   <div class="hero-text">
-    <div class="eyebrow">Blender · Git · Timeline <span class="dot">●</span></div>
+    <div class="eyebrow">Blender · Lore · Timeline <span class="dot">●</span></div>
     <h1>Keinestamp</h1>
-    <p class="hero-sub">Blender Git Progress Board</p>
+    <p class="hero-sub">Blender Lore Progress Board</p>
     <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok">✓ 已记录</span><span class="cursor"></span></code>
   </div>
   <div class="hero-art">
@@ -1966,7 +1966,7 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
     fn index_page_has_brand_and_features() {
         let html = index_page_html();
         assert!(html.contains("Keinestamp"));
-        assert!(html.contains("Blender Git Progress Board"));
+        assert!(html.contains("Blender Lore Progress Board"));
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");

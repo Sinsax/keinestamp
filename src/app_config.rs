@@ -51,15 +51,8 @@ impl AppConfig {
             let _ = std::fs::create_dir_all(parent);
         }
         if let Ok(content) = toml::to_string_pretty(self) {
-            let tmp = path.with_extension(format!(
-                "tmp{}_{}",
-                std::process::id(),
-                path.file_name()
-                    .map(|s| s.to_string_lossy())
-                    .unwrap_or_default()
-            ));
-            if std::fs::write(&tmp, &content).is_ok() {
-                let _ = std::fs::rename(&tmp, path);
+            if let Err(e) = crate::process_util::atomic_write(path, content.as_bytes()) {
+                eprintln!("[debug] AppConfig save failed: {}", e);
             }
         }
     }

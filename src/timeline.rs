@@ -68,20 +68,8 @@ pub fn read_timeline(path: &Path) -> Result<Timeline> {
 pub fn write_timeline(path: &Path, timeline: &Timeline) -> Result<()> {
     let content = serde_json::to_string_pretty(timeline)?;
 
-    let parent = path.parent().context("timeline path has no parent")?;
-    std::fs::create_dir_all(parent)?;
-
-    let file_name = path.file_name().map(|s| s.to_string_lossy()).unwrap_or_default();
-    let safe_name = file_name.strip_suffix(".json").unwrap_or(&file_name);
-    let tmp_path = parent.join(format!(
-        "timeline.tmp.{}.{}.json",
-        std::process::id(),
-        safe_name,
-    ));
-    std::fs::write(&tmp_path, &content)
-        .with_context(|| format!("failed to write temporary timeline to {:?}", tmp_path))?;
-    std::fs::rename(&tmp_path, path)
-        .with_context(|| format!("failed to rename {:?} to {:?}", tmp_path, path))?;
+    crate::process_util::atomic_write(path, content.as_bytes())
+        .with_context(|| format!("failed to write timeline to {:?}", path))?;
 
     Ok(())
 }
@@ -137,7 +125,8 @@ pub fn remove_entries_after(path: &Path, entry_id: &str) -> Result<()> {
     let mut timeline = read_timeline(path)?;
     let start = match timeline.entries.iter().position(|e| e.id == entry_id || e.id.starts_with(entry_id)) {
         Some(pos) => pos,
-        None => 0,
+        // 防御：id 未命中时禁止 truncate(0) 清空整条时间线（数据丢失陷阱）
+        None => anyhow::bail!("entry not found: {}", entry_id),
     };
     if start < timeline.entries.len() {
         timeline.entries.truncate(start);
@@ -278,7 +267,14 @@ fn lore_date_to_iso(date: &str) -> String {
 /// 该 revision 相对其父的改动文件列表（`revision diff <parent> --target <sig>` 状态行解析）。
 /// 首条 revision（无父）用 `repository dump` 列全部文件。容错：失败返回空数组。
 fn entry_files(project_root: &Path, revision: &str) -> Vec<String> {
-    let parent = crate::lore_backend::revision_parent(project_root, revision).unwrap_or(None);
+    let parent = match crate::lore_backend::revision_parent(project_root, revision) {
+        Ok(p) => p,
+        Err(e) => {
+            // 读取父失败：不要错误地落入"全树 dump"分支（会把该 revision 的全部文件误列为改动）
+            eprintln!("[debug] entry_files: revision_parent 失败（{}），返回空文件列表", e);
+            return Vec::new();
+        }
+    };
     let output = match &parent {
         Some(p) => crate::lore_backend::run_lore(
             project_root,
@@ -321,7 +317,10 @@ fn parse_dump_paths(out: &str) -> Vec<String> {
             if !l.contains(" addr ") {
                 return None;
             }
-            let path = l.split_whitespace().next()?;
+            // dump 行格式 `<path> id <N> ... addr ...`——路径可能含空格，
+            // 必须用 " id " 定位取完整路径（split_whitespace 会截断）
+            let sep = l.find(" id ")?;
+            let path = l[..sep].trim();
             if path.ends_with('/') {
                 None
             } else {
@@ -356,6 +355,24 @@ mod tests {
             superseded: false,
             parent: String::new(),
         }
+    }
+
+    #[test]
+    fn test_parse_dump_paths_keeps_spaces() {
+        // dump 行格式 `<path> id <N> ... addr ...`——路径含空格必须完整保留
+        let out = "refer/芙姆米新1皮三视图 拷贝.png id 12 ... addr 0xabc123\n\
+                   refer/ dir-id 3 ... (目录行无 addr)\n\
+                   ChatGPT Image 2026年7月24日.png id 5 ... addr 0xdef456\n\
+                   a/b/clean.png id 1 ... addr 0x111";
+        let paths = parse_dump_paths(out);
+        assert_eq!(
+            paths,
+            vec![
+                "refer/芙姆米新1皮三视图 拷贝.png",
+                "ChatGPT Image 2026年7月24日.png",
+                "a/b/clean.png",
+            ]
+        );
     }
 
     #[test]

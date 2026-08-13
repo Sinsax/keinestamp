@@ -1,6 +1,6 @@
 {
   "productName": "Keinestamp",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "identifier": "com.keinestamp.desktop",
   "build": {
     "frontendDist": "../frontend/dist",
@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws://localhost:5173 http://localhost:5173"
     }
   },
   "bundle": {

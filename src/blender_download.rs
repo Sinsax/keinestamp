@@ -79,6 +79,16 @@ fn list_installed_versions_from(dir: &Path) -> Vec<String> {
     installed
 }
 
+/// 查找已安装版本的安装目录（目录名形如 `blender-4.2.0-windows-x64`/`-linux-x64`，跨平台不硬编码）
+fn find_installed_blender_dir(dir: &Path, version: &str) -> Option<PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    let want = format!("blender-{}-", version);
+    entries.flatten().find_map(|e| {
+        let name = e.file_name().to_string_lossy().to_string();
+        name.starts_with(&want).then_some(e.path())
+    })
+}
+
 /// 删除已安装的 Blender 版本；**最少保留一个**（唯一版本拒绝删除）。
 /// 若 app-config 的 blender_path 指向被删版本 → 清空（下次 ensure_blender 自动回退默认）。
 pub fn delete_blender_version(version: &str) -> Result<()> {
@@ -93,7 +103,8 @@ fn delete_blender_version_at(dir: &Path, version: &str) -> Result<()> {
     if installed.len() <= 1 {
         anyhow::bail!("至少保留一个 Blender 版本（当前仅 {}）", installed.join(", "));
     }
-    let target = dir.join(format!("blender-{}-windows-x64", version));
+    let target = find_installed_blender_dir(dir, version)
+        .ok_or_else(|| anyhow::anyhow!("未找到 Blender {} 的安装目录", version))?;
     std::fs::remove_dir_all(&target)
         .map_err(|e| anyhow::anyhow!("删除 {} 失败: {}", target.display(), e))?;
     // blender_path 指向被删版本 → 清空
@@ -305,13 +316,15 @@ fn extract_blender(
 
     eprintln!("[debug] extract_blender: extracting archive...");
     let extract_result = if cfg!(target_os = "windows") {
-        let script = format!(
-            "Expand-Archive -Path '{}' -DestinationPath '{}' -Force",
-            archive_path.to_string_lossy(),
-            app_dir.to_string_lossy()
-        );
+        // 路径经环境变量传入，避免把用户路径插进 -Command 字符串（单引号/注入问题）
         crate::process_util::hide_console(std::process::Command::new("powershell"))
-            .args(["-NoProfile", "-Command", &script])
+            .env("KS_ARC", archive_path)
+            .env("KS_DIR", app_dir)
+            .args([
+                "-NoProfile",
+                "-Command",
+                "Expand-Archive -Path $env:KS_ARC -DestinationPath $env:KS_DIR -Force",
+            ])
             .output()
             .map_err(|e| anyhow::anyhow!("解压失败: {}", e))?
     } else {
@@ -537,7 +550,9 @@ pub fn set_current_blender_version(version: &str) -> Result<()> {
 
 fn set_current_blender_version_at(dir: &Path, version: &str) -> Result<()> {
     let exe_name = if cfg!(target_os = "windows") { "blender.exe" } else { "blender" };
-    let exe = dir.join(format!("blender-{}-windows-x64", version)).join(exe_name);
+    let install_dir = find_installed_blender_dir(dir, version)
+        .ok_or_else(|| anyhow::anyhow!("未安装该 Blender 版本: {}", version))?;
+    let exe = install_dir.join(exe_name);
     if !exe.exists() {
         anyhow::bail!("未安装该 Blender 版本: {}", version);
     }

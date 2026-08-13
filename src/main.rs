@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "keinestamp", version, about = "Keinestamp - Blender Git Progress Board")]
+#[command(name = "keinestamp", version, about = "Keinestamp - Blender Lore Progress Board")]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -114,10 +114,18 @@ enum Commands {
 
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    // 前置依赖检测：Lore v0.8.6（编译期捆绑；缺失/版本不符 → 报错退出）
-    if let Err(e) = keinestamp::lore_backend::check_lore_env() {
-        eprintln!("错误：{}", e);
-        std::process::exit(1);
+    // 前置依赖检测：Lore v0.8.6（编译期捆绑；缺失/版本不符 → 报错退出）。
+    // 仅拦截需要 lore 的子命令：blender 版本列表/下载与配置查看不依赖 lore。
+    let needs_lore = !matches!(
+        cli.command,
+        Some(Commands::DownloadBlender { .. })
+            | Some(Commands::ListBlenderVersions)
+    );
+    if needs_lore {
+        if let Err(e) = keinestamp::lore_backend::check_lore_env() {
+            eprintln!("错误：{}", e);
+            std::process::exit(1);
+        }
     }
     match cli.command {
         Some(Commands::Init { path }) => {
@@ -159,7 +167,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         None => {
-            println!("Keinestamp - Blender Git Progress Board");
+            println!("Keinestamp - Blender Lore Progress Board");
             println!("用法: keinestamp <子命令> [选项]");
             println!("子命令: init, record, push, pull, rollback, restore, status, log, config, export, serve, deploy, download-blender, list-blender-versions");
             println!("GUI 模式: 运行 `cargo tauri dev` 或使用编译后的 Tauri 应用");
@@ -185,8 +193,10 @@ fn cmd_record(path: &Path, message: &str) -> anyhow::Result<()> {
     }
 
     let rev = keinestamp::lore_project::record(&meta.project_root, message, None, None, &hidden)?;
-    // 回退状态下记录 = 顶替，成功后清除回退标记
-    let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
+    // 回退状态下记录 = 顶替，成功后清除回退标记；失败只警告（提交已成功）
+    if let Err(e) = keinestamp::lore_project::clear_rollback(&meta.project_root) {
+        eprintln!("⚠️ 警告：清除回退标记失败: {}", e);
+    }
 
     let short_hash = &rev[..7.min(rev.len())];
     println!("已提交 {} — {}", short_hash, message);
@@ -309,9 +319,15 @@ fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
         let short_id = &r.id[..7.min(r.id.len())];
         let date = format_date(&r.date);
         let file_count = file_counts.get(&r.id).copied().unwrap_or(0);
+        // 作者取 identity 捕获的 Creator（配置身份后 lore history 附加行）；未配置 → "lore"
+        let author = r
+            .metadata
+            .get("creator")
+            .map(String::as_str)
+            .unwrap_or("lore");
         println!(
             "  {}  {}  {}  ({} 文件)",
-            short_id, date, "lore", file_count
+            short_id, date, author, file_count
         );
         println!("         {}", r.message);
     }

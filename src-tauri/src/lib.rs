@@ -110,7 +110,11 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             Some(f) => map_err(keinestamp::lore_project::record(&meta.project_root, &message, tag.as_deref(), Some(&f), &hidden))?,
             None => map_err(keinestamp::lore_project::record(&meta.project_root, &message, tag.as_deref(), None, &hidden))?,
         };
-        map_err(keinestamp::lore_project::clear_rollback(&meta.project_root))?;
+        // 提交已成功 → 后续步骤（清回退态/时间线重建/HTML 生成）失败只降级为警告，
+        // 不把"已提交"误报成"记录失败"（否则用户重试报"无改动可记录"）
+        if let Err(e) = keinestamp::lore_project::clear_rollback(&meta.project_root) {
+            eprintln!("[debug] record: clear_rollback 失败（降级为警告）: {e}");
+        }
         let short_hash = hash[..7.min(hash.len())].to_string();
 
         let blender_path_buf = if !skip_preview && has_blend {
@@ -179,13 +183,16 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
             .unwrap_or_default();
 
         emit("html", "生成页面...");
-        let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
-        map_err(keinestamp::html_gen::generate_index_html(
-            &meta.web_root,
-            &meta.project_root,
-            &timeline,
-            &project_name,
-        ))?;
+        if let Err(e) = keinestamp::timeline::read_timeline(&timeline_path).and_then(|timeline| {
+            keinestamp::html_gen::generate_index_html(
+                &meta.web_root,
+                &meta.project_root,
+                &timeline,
+                &project_name,
+            )
+        }) {
+            eprintln!("[debug] record: 时间线/HTML 生成失败（降级为警告，提交已成功）: {e}");
+        }
         // web 产物版本自增（.keinestamp/ 整体隔离，web 不入库；部署 zip 上传磁盘产物）
         let _ = keinestamp::lore_project::bump_web_version(&meta.project_root);
 
@@ -502,10 +509,17 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
         let meta = read_meta(&p)?;
         match keinestamp::timeline::read_marker(&meta.project_root) {
             Ok(Some(m)) => {
-                let head_matches = keinestamp::lore_backend::current_revision(&meta.project_root)
-                    .map(|cur| cur == m.rollback_point) // current == X-1（回退后 HEAD）
-                    .unwrap_or(false);
+                let head_matches = match keinestamp::lore_backend::current_revision(&meta.project_root) {
+                    Ok(cur) => cur == m.rollback_point, // current == X-1（回退后 HEAD）
+                    Err(_) => {
+                        // 读取失败（超时/锁竞争等瞬态错误）：保守保留回退态（不清 marker/备份），
+                        // 视为仍处于回退态，等待下次成功轮询再判定——避免一次瞬态失败销毁回退前未提交改动
+                        eprintln!("[debug] rollback state: current_revision 读取失败，保守保留回退态");
+                        true
+                    }
+                };
                 if !head_matches {
+                    // 只有确认 HEAD 已前进（current_revision 读取成功且 != rollback_point）才清理——
                     // 半状态残留（HEAD 已前进但 marker 未清——异常退出/恢复失败等）：
                     // 自动清理（marker + 备份），避免"恢复按钮 disabled + 回退态残留"卡死
                     eprintln!("[debug] rollback marker 不一致（HEAD 已前进），自动清理回退态");
@@ -615,25 +629,29 @@ async fn status(path: String) -> Result<StatusResult, String> {
 }
 
 #[tauri::command]
-fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String> {
-    eprintln!("[debug] log({}, count={:?})", path, count);
-    let p = PathBuf::from(&path);
-    let meta = read_meta(&p)?;
-    let hist = map_err(keinestamp::lore_backend::revision_history(&meta.project_root))?;
-    let c = count.unwrap_or(20);
-    let entries: Vec<LogEntry> = hist
-        .iter()
-        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
-        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
-        .take(c)
-        .map(|r| LogEntry {
-            hash: r.id[..7.min(r.id.len())].to_string(),
-            date: format_lore_date(&r.date),
-            message: r.message.clone(),
-        })
-        .collect();
-    eprintln!("[debug] log → {} entries (showing {})", entries.len(), c);
-    Ok(entries)
+async fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String> {
+    // spawn lore 可能耗时 → async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        eprintln!("[debug] log({}, count={:?})", path, count);
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let hist = map_err(keinestamp::lore_backend::revision_history(&meta.project_root))?;
+        let c = count.unwrap_or(20);
+        let entries: Vec<LogEntry> = hist
+            .iter()
+            .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
+            .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
+            .take(c)
+            .map(|r| LogEntry {
+                hash: r.id[..7.min(r.id.len())].to_string(),
+                date: format_lore_date(&r.date),
+                message: r.message.clone(),
+            })
+            .collect();
+        eprintln!("[debug] log → {} entries (showing {})", entries.len(), c);
+        Ok(entries)
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -676,13 +694,17 @@ fn update_config(
 }
 
 #[tauri::command]
-fn export_entry(path: String, entry_id: String, output_dir: String) -> Result<(), String> {
-    eprintln!("[debug] export_entry({}, entry_id={}, output_dir={})", path, entry_id, output_dir);
-    map_err(keinestamp::main_helpers::export_entry(
-        Path::new(&path),
-        &entry_id,
-        Path::new(&output_dir),
-    ))
+async fn export_entry(path: String, entry_id: String, output_dir: String) -> Result<(), String> {
+    // dump + 逐文件 write 可能耗时 → async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        eprintln!("[debug] export_entry({}, entry_id={}, output_dir={})", path, entry_id, output_dir);
+        map_err(keinestamp::main_helpers::export_entry(
+            Path::new(&path),
+            &entry_id,
+            Path::new(&output_dir),
+        ))
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -717,30 +739,34 @@ fn get_timeline(path: String) -> Result<keinestamp::timeline::Timeline, String> 
 }
 
 #[tauri::command]
-fn get_tracked_files(path: String) -> Result<Vec<String>, String> {
-    fn walk(dir: &Path, prefix: &str, files: &mut Vec<String>) -> std::io::Result<()> {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            let name = entry.file_name();
-            let name = name.to_string_lossy();
-            // v2：web/ 为部署产物目录（主仓库内），不计入文件列表
-            if name.starts_with('.') || name == "node_modules" || name == "target" || name == "web" {
-                continue;
+async fn get_tracked_files(path: String) -> Result<Vec<String>, String> {
+    // 全树递归 walk 可能耗时（大项目 + 每 10s 轮询）→ async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        fn walk(dir: &Path, prefix: &str, files: &mut Vec<String>) -> std::io::Result<()> {
+            for entry in std::fs::read_dir(dir)? {
+                let entry = entry?;
+                let name = entry.file_name();
+                let name = name.to_string_lossy();
+                // v2：web/ 为部署产物目录（主仓库内），不计入文件列表
+                if name.starts_with('.') || name == "node_modules" || name == "target" || name == "web" {
+                    continue;
+                }
+                let rel = if prefix.is_empty() { name.to_string() } else { format!("{}/{}", prefix, name) };
+                if entry.file_type()?.is_dir() {
+                    walk(&entry.path(), &rel, files)?;
+                } else {
+                    files.push(rel);
+                }
             }
-            let rel = if prefix.is_empty() { name.to_string() } else { format!("{}/{}", prefix, name) };
-            if entry.file_type()?.is_dir() {
-                walk(&entry.path(), &rel, files)?;
-            } else {
-                files.push(rel);
-            }
+            Ok(())
         }
-        Ok(())
-    }
-    let p = PathBuf::from(&path);
-    let meta = read_meta(&p)?;
-    let mut files = vec![];
-    map_err(walk(&meta.project_root, "", &mut files).map_err(|e| anyhow::anyhow!("{}", e)))?;
-    Ok(files)
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let mut files = vec![];
+        map_err(walk(&meta.project_root, "", &mut files).map_err(|e| anyhow::anyhow!("{}", e)))?;
+        Ok(files)
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1043,8 +1069,12 @@ fn set_auto_restore_project(enabled: bool) {
 }
 
 #[tauri::command]
-fn list_server_repos(url: String) -> Result<Vec<(String, String)>, String> {
-    keinestamp::lore_backend::list_server_repos(&url).map_err(|e| e.to_string())
+async fn list_server_repos(url: String) -> Result<Vec<(String, String)>, String> {
+    // 远程命令（连接可能超时）→ async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        keinestamp::lore_backend::list_server_repos(&url).map_err(|e| e.to_string())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1067,8 +1097,12 @@ async fn check_lore_env() -> Result<serde_json::Value, String> {
 }
 
 #[tauri::command]
-fn delete_server_repo(url: String, name: String) -> Result<(), String> {
-    keinestamp::lore_backend::delete_server_repo(&url, &name).map_err(|e| e.to_string())
+async fn delete_server_repo(url: String, name: String) -> Result<(), String> {
+    // 远程命令（连接可能超时）→ async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        keinestamp::lore_backend::delete_server_repo(&url, &name).map_err(|e| e.to_string())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1106,57 +1140,61 @@ async fn clone_server_repo(url: String, name: String, dest_parent: String) -> Re
 static LOCAL_SERVERS: OnceLock<Mutex<HashMap<String, u16>>> = OnceLock::new();
 
 #[tauri::command]
-fn open_web_timeline(path: String) -> Result<(), String> {
-    eprintln!("[debug] open_web_timeline({})", path);
-    let p = PathBuf::from(&path);
-    let meta_path = keinestamp::config::meta_path(&p);
-    let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-    let html_path = meta.web_root.join("index.html");
-    if !html_path.exists() {
-        return Err("index.html not found — commit first to generate the timeline".to_string());
-    }
-    let key = meta.web_root.to_string_lossy().to_string();
-    let wr = meta.web_root.clone();
-    let port = {
-        let map = LOCAL_SERVERS.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut guard = map.lock().map_err(|e| e.to_string())?;
-        let reuse = match guard.get(&key) {
-            Some(p) => {
-                let alive = format!("127.0.0.1:{}", p)
-                    .parse::<std::net::SocketAddr>()
-                    .map(|a| std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(300)).is_ok())
-                    .unwrap_or(false);
-                if alive {
-                    Some(*p)
-                } else {
-                    guard.remove(&key);
-                    None
-                }
-            }
-            None => None,
-        };
-        if let Some(p) = reuse {
-            p
-        } else {
-            let (tx, rx) = std::sync::mpsc::channel();
-            std::thread::spawn(move || {
-                let _ = keinestamp::serve::serve_local(&wr, tx);
-            });
-            let p = rx.recv_timeout(std::time::Duration::from_secs(5))
-                .map_err(|_| "timeline server failed to start".to_string())?;
-            guard.insert(key, p);
-            p
+async fn open_web_timeline(path: String) -> Result<(), String> {
+    // recv_timeout(5s) 等服务端启动 → async 防主线程阻塞
+    let handle = tokio::task::spawn_blocking(move || {
+        eprintln!("[debug] open_web_timeline({})", path);
+        let p = PathBuf::from(&path);
+        let meta_path = keinestamp::config::meta_path(&p);
+        let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
+        let html_path = meta.web_root.join("index.html");
+        if !html_path.exists() {
+            return Err("index.html not found — commit first to generate the timeline".to_string());
         }
-    };
-    let url = format!("http://127.0.0.1:{}/", port);
-    #[cfg(target_os = "windows")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();
-    #[cfg(target_os = "macos")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&url).spawn();
-    #[cfg(target_os = "linux")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&url).spawn();
-    result.map_err(|e| format!("failed to open timeline: {}", e))?;
-    Ok(())
+        let key = meta.web_root.to_string_lossy().to_string();
+        let wr = meta.web_root.clone();
+        let port = {
+            let map = LOCAL_SERVERS.get_or_init(|| Mutex::new(HashMap::new()));
+            let mut guard = map.lock().map_err(|e| e.to_string())?;
+            let reuse = match guard.get(&key) {
+                Some(p) => {
+                    let alive = format!("127.0.0.1:{}", p)
+                        .parse::<std::net::SocketAddr>()
+                        .map(|a| std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(300)).is_ok())
+                        .unwrap_or(false);
+                    if alive {
+                        Some(*p)
+                    } else {
+                        guard.remove(&key);
+                        None
+                    }
+                }
+                None => None,
+            };
+            if let Some(p) = reuse {
+                p
+            } else {
+                let (tx, rx) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    let _ = keinestamp::serve::serve_local(&wr, tx);
+                });
+                let p = rx.recv_timeout(std::time::Duration::from_secs(5))
+                    .map_err(|_| "timeline server failed to start".to_string())?;
+                guard.insert(key, p);
+                p
+            }
+        };
+        let url = format!("http://127.0.0.1:{}/", port);
+        #[cfg(target_os = "windows")]
+        let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();
+        #[cfg(target_os = "macos")]
+        let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&url).spawn();
+        #[cfg(target_os = "linux")]
+        let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&url).spawn();
+        result.map_err(|e| format!("failed to open timeline: {}", e))?;
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -1164,6 +1202,10 @@ fn open_site(url: String) -> Result<(), String> {
     eprintln!("[debug] open_site({})", url);
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("invalid URL, must start with http:// or https://".to_string());
+    }
+    // 防御 shell 元字符注入（cmd /c start <url> 会解析 &| 等）
+    if url.contains(['&', '|', '<', '>', '^', '"', '\'', '`', '\n', '\r']) {
+        return Err("invalid URL: contains shell metacharacters".to_string());
     }
     #[cfg(target_os = "windows")]
     let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();

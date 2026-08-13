@@ -183,26 +183,13 @@ fn run_lore_at(cwd: Option<&Path>, args: &[&str], offline: bool) -> Result<Strin
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
-    let mut child = cmd.spawn().context("failed to spawn lore")?;
-    let deadline = std::time::Instant::now() + LORE_CMD_TIMEOUT;
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) => {
-                if std::time::Instant::now() > deadline {
-                    let _ = child.kill();
-                    bail!("lore {:?} 超时（{}s），已终止", args, LORE_CMD_TIMEOUT.as_secs());
-                }
-                std::thread::sleep(std::time::Duration::from_millis(50));
-            }
-            Err(e) => bail!("lore wait failed: {}", e),
-        }
+    let label = format!("lore {:?}", args);
+    let (status, stdout, stderr) =
+        crate::process_util::run_with_timeout(&mut cmd, LORE_CMD_TIMEOUT, &label)?;
+    if !status.success() {
+        bail!("lore {:?} failed: {}", args, translate_lore_error(&String::from_utf8_lossy(&stderr)));
     }
-    let out = child.wait_with_output().context("failed to read lore output")?;
-    if !out.status.success() {
-        bail!("lore {:?} failed: {}", args, translate_lore_error(&String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
 }
 
 /// lore 底层错误转译（保留原文）：Address not found = 该 revision 的数据已不在本地存储。
@@ -364,8 +351,8 @@ pub fn revision_metadata(project_root: &Path, revision: &str) -> Result<HashMap<
 /// 每块含 Revision/Signature/Date/message 行，message 为 Date 后缩进行。
 pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
     let out = run_lore(project_root, &["history"])?;
-    let mut revs: Vec<(u32, String, String, Vec<String>)> = Vec::new();
-    let mut cur: Option<(u32, String, String, Vec<String>)> = None;
+    let mut revs: Vec<(u32, String, String, Vec<String>, String)> = Vec::new();
+    let mut cur: Option<(u32, String, String, Vec<String>, String)> = None;
     let mut in_message = false;
     for line in out.lines() {
         let t = line.trim_end();
@@ -375,7 +362,7 @@ pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
             }
             in_message = false;
             if let Ok(number) = rest.trim_start_matches([' ', ':']).trim().parse::<u32>() {
-                cur = Some((number, String::new(), String::new(), Vec::new()));
+                cur = Some((number, String::new(), String::new(), Vec::new(), String::new()));
             }
         } else if let Some(c) = cur.as_mut() {
             if let Some(rest) = t.strip_prefix("Signature") {
@@ -385,8 +372,11 @@ pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
                 in_message = true;
             } else if in_message {
                 let trimmed = t.trim();
-                // lore 配置身份后会在 message 块附加 Creator/Committer 行 → 过滤（保留真实 message）
-                if !trimmed.is_empty()
+                // lore 配置身份后会在 message 块附加 Creator/Committer 行 → 过滤（保留真实 message），
+                // Creator 值捕获进 metadata（CLI log 可显示作者）
+                if let Some(rest) = trimmed.strip_prefix("Creator:") {
+                    c.4 = rest.trim().to_string();
+                } else if !trimmed.is_empty()
                     && !trimmed.starts_with("Creator")
                     && !trimmed.starts_with("Committer")
                 {
@@ -399,8 +389,11 @@ pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
         revs.push(prev);
     }
     let mut out_revs = Vec::new();
-    for (number, id, date, msg_lines) in revs {
-        let metadata = revision_metadata(project_root, &id).unwrap_or_default();
+    for (number, id, date, msg_lines, creator) in revs {
+        let mut metadata = revision_metadata(project_root, &id).unwrap_or_default();
+        if !creator.is_empty() {
+            metadata.insert("creator".to_string(), creator);
+        }
         out_revs.push(LoreRevision {
             number,
             id,

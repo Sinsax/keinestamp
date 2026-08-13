@@ -74,40 +74,53 @@ for name, state in saved.items():
     let temp_script = output_dir.join(format!("glb_export_{}.py", std::process::id()));
     std::fs::write(&temp_script, python_script)?;
 
-    let result = blender_cmd(blender_path)
-        .arg(blend_path)
-        .arg("--python")
-        .arg(&temp_script)
-        .arg("--")
-        .arg(&output_path)
-        .output();
+    // 超时兜底 + 输出管道排空（blender 挂死/输出量大时防止 record 无限卡死）
+    let label = format!("Blender GLB export: {}", blend_path.display());
+    let result = crate::process_util::run_with_timeout(
+        &mut blender_cmd(blender_path)
+            .arg(blend_path)
+            .arg("--python")
+            .arg(&temp_script)
+            .arg("--")
+            .arg(&output_path)
+            // 必须显式接管管道：run_with_timeout 依赖 take() 排空；不设则 stderr 捕获为空
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped()),
+        std::time::Duration::from_secs(300),
+        &label,
+    );
+    let (status, _stdout, stderr) = match result {
+        Ok(x) => x,
+        Err(e) => {
+            if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
+                if io_err.kind() == std::io::ErrorKind::NotFound {
+                    eprintln!("[debug] export_to_glb: Blender not found in PATH");
+                    anyhow::bail!("Blender not found in PATH. Please install Blender or configure the path.")
+                }
+            }
+            eprintln!("[debug] export_to_glb: failed to run Blender: {}", e);
+            anyhow::bail!("Failed to run Blender: {}", e)
+        }
+    };
 
     eprintln!("[debug] export_to_glb: Blender process completed");
 
     let _ = std::fs::remove_file(&temp_script);
 
-    match result {
-        Ok(o) if o.status.success() && output_path.exists() => {
+    match status {
+        st if st.success() && output_path.exists() => {
             eprintln!("[debug] export_to_glb: success → {:?}", output_path);
             Ok(output_path)
         }
-        Ok(o) if o.status.success() => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
+        st if st.success() => {
+            let stderr = String::from_utf8_lossy(&stderr);
             eprintln!("[debug] export_to_glb: Blender exited 0 but GLB not found, stderr: {}", stderr.trim().chars().take(300).collect::<String>());
             anyhow::bail!("Blender GLB export produced no output for {:?}: {}", blend_path, stderr.trim().chars().take(200).collect::<String>())
         }
-        Ok(o) => {
-            let stderr = String::from_utf8_lossy(&o.stderr);
+        _ => {
+            let stderr = String::from_utf8_lossy(&stderr);
             eprintln!("[debug] export_to_glb: Blender failed: {}", stderr.trim().chars().take(200).collect::<String>());
             anyhow::bail!("Blender GLB export failed for {:?}: {}", blend_path, stderr.trim())
-        }
-        Err(e) => {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                eprintln!("[debug] export_to_glb: Blender not found in PATH");
-                anyhow::bail!("Blender not found in PATH. Please install Blender or configure the path.")
-            }
-            eprintln!("[debug] export_to_glb: failed to run Blender: {}", e);
-            anyhow::bail!("Failed to run Blender: {}", e)
         }
     }
 }

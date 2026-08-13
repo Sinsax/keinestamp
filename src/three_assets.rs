@@ -137,7 +137,7 @@ pub(crate) fn transform_addon_js(content: &str) -> String {
             continue;
         }
 
-        if trimmed == "export {" || trimmed == "export {" {
+        if trimmed == "export {" {
             in_export_block = true;
             continue;
         }
