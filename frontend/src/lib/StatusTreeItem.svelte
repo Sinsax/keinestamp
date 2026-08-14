@@ -141,8 +141,8 @@
         <span class="sp-ignored-badge">已忽略</span>
       {/if}
       <span class="sp-badges">
-        <!-- [debug] 临时：显示每行 previewMarked 布尔值 -->
-        <span class="sp-badge sp-badge-3d" title="debug">3D:{String(previewMarked)}</span>
+        <!-- [debug] 临时：显示每行 previewMarked 布尔值 + 完整路径 -->
+        <span class="sp-badge sp-badge-3d" title="debug">3D:{String(previewMarked)}[{node.path}]</span>
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>
         {:else if rollbackMark}
