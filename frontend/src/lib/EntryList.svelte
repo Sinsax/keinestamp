@@ -90,6 +90,12 @@
     if (m) onRollback(m.entry)
   }
 
+  function ctxTogglePreview() {
+    const m = ctxMenu
+    closeCtx()
+    if (m && m.entry.preview) togglePreview(m.entry)
+  }
+
   const ctxRollbackDisabled = $derived(rollbackBusy || (ctxMenu ? isEntryDimmed(ctxMenu.entry) : false))
 
   // 只有当前选中回退的记录（superseded_point = X）灰显不可回退；其余记录（含 X 之后、被顶替出主线的）均可回退。
@@ -269,13 +275,11 @@
           <span class="hash">{entry.id.slice(0, 7)}</span>
           <span class="top-right">
             {#if entry.preview}
-              <button
+              <span
                 class="preview-badge"
                 class:active={entry.previewEnabled !== false}
-                class:busy={previewBusy === entry.id}
-                title={entry.previewEnabled === false ? '3D 预览已关闭，点击开启' : '该记录有 3D 预览，点击关闭'}
-                onclick={(e) => { e.stopPropagation(); togglePreview(entry); }}
-              >3D</button>
+                title={entry.previewEnabled === false ? '3D 预览已关闭（右键记录可开启）' : '该记录有 3D 预览（右键记录可关闭）'}
+              >3D</span>
             {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
           </span>
@@ -314,6 +318,11 @@
     <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
     <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
       <button class="ctx-item" onclick={ctxExport}>导出</button>
+      {#if ctxMenu.entry.preview}
+        <button class="ctx-item" onclick={ctxTogglePreview} disabled={previewBusy === ctxMenu.entry.id}>
+          {ctxMenu.entry.previewEnabled === false ? '开启 3D 预览' : '关闭 3D 预览'}
+        </button>
+      {/if}
       <button class="ctx-item" onclick={ctxRollback} disabled={ctxRollbackDisabled} title={rollbackPoint ? '该记录为当前回退点，不可回退' : ''}>回退</button>
     </div>
   {/if}
@@ -465,12 +474,6 @@
     margin-right: 6px;
     vertical-align: 1px;
     user-select: none;
-    cursor: pointer;
-    transition: all 0.15s var(--ease);
-  }
-  .preview-badge:hover {
-    border-color: var(--accent);
-    color: var(--accent);
   }
   .preview-badge.active {
     color: var(--accent);
@@ -480,10 +483,6 @@
   .preview-badge:not(.active) {
     opacity: 0.55;
     text-decoration: line-through;
-  }
-  .preview-badge.busy {
-    opacity: 0.4;
-    pointer-events: none;
   }
   .superseded-header {
     display: flex;
