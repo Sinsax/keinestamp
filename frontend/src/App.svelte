@@ -116,6 +116,16 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     window.addEventListener('pointercancel', onUp)
   }
 
+  // 全局禁用 WebView2 默认右键菜单（刷新/另存为/打印等）：组件自定义菜单已自行
+  // preventDefault（条目/文件行/菜单背景），这里兜底未覆盖区域（时间线空白、文件树空白等）；
+  // 输入框/文本域保留原生复制/粘贴菜单
+  function globalContextMenu(e: MouseEvent) {
+    const target = e.target as HTMLElement | null
+    if (!target) return
+    if (target.closest('input, textarea, [contenteditable="true"]')) return
+    e.preventDefault()
+  }
+
   function pushToast(msg: string, type: string = 'info') {
     if (type === 'error') console.log(`[debug] toast error:`, msg)
     const id = ++toastId
@@ -803,6 +813,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     }
   })
 </script>
+
+<svelte:window oncontextmenu={globalContextMenu} />
 
 <div class="app-layout">
   <TitleBar />

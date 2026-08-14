@@ -60,6 +60,25 @@ fn request_ip_trusted(request: &tiny_http::Request) -> IpAddr {
     request_ip(request)
 }
 
+// 客户端是否走 HTTPS——用于登录 cookie 动态 Secure：
+// 反代场景（trust_proxy=true）读 X-Forwarded-Proto（Caddy 需显式 header_up X-Forwarded-Proto https，
+// 因为 Caddy 对 cloudflared 的回源是 http，默认会写 http）；直连场景按 TLS 连接判断。
+// 效果：公网（HTTPS）cookie 带 Secure（http 请求不发 cookie，堵住 301 跳转前的明文盲区），
+// 局域网 HTTP 直连不带 Secure（保持登录体验）。
+fn request_is_https(request: &tiny_http::Request) -> bool {
+    if *TRUST_PROXY.get().unwrap_or(&false) {
+        if let Some(h) = request.headers().iter().find(|h| h.field.equiv("X-Forwarded-Proto")) {
+            if let Some(first) = h.value.as_str().split(',').next() {
+                if first.trim().eq_ignore_ascii_case("https") {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+    request.secure()
+}
+
 // --- Serve config ---
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1054,7 +1073,10 @@ fn handle_login_post(
     if is_valid {
         log_info("LOGIN", &format!("{} project={} → success", ip, project_name));
         rate_limiter.record_success(&ip);
-        let set_cookie = format!("keinestamp_token={}; Path=/{}/; HttpOnly; SameSite=Lax", decoded, project_name);
+        // 动态 Secure：HTTPS 来源（反代 X-Forwarded-Proto=https 或 TLS 直连）加 Secure，
+        // HTTP 直连（局域网自用）不加——公网堵 301 前明文盲区，局域网保持登录体验
+        let secure = if request_is_https(&request) { "; Secure" } else { "" };
+        let set_cookie = format!("keinestamp_token={}; Path=/{}/; HttpOnly; SameSite=Lax{}", decoded, project_name, secure);
         let redirect = Response::from_string("")
             .with_status_code(302)
             .with_header(Header::from_bytes(&b"Location"[..], format!("/{}/", project_name).as_bytes().to_vec()).unwrap())

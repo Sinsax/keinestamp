@@ -88,7 +88,7 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
 
 多租户 HTTP 服务器（web 部署）+ loreserver 拉起。结构与 v1 相同（两 token 认证、动态项目名路由、X-Project-Name、限速、路径穿越防护、100MB 上传限制），配置 `serve.toml`：
 
-**程序目录基准**（`app_config::exe_dir()`，便携部署）：`KEINESTAMP_BASE_DIR` 环境变量优先（Linux 软链部署必须用它，`current_exe` 会解析到真实路径），否则 exe 所在目录。serve 命令查找 serve.toml：`--config` → `<程序目录>/serve.toml` → 命令参数目录（旧位置兼容）→ 自动生成 `<程序目录>/serve.toml`；**web_root 相对路径解析为相对程序目录**（绝对路径直接用）；`.keinestamp-projects.json` 在 web_root 父目录（web_root 默认 `<程序目录>/web-root` 时即程序目录）；loreserver 配置/store 在 `<程序目录>/lore-server-config|store`：
+**程序目录基准**（`app_config::exe_dir()`，便携部署）：`KEINESTAMP_BASE_DIR` 环境变量优先（Linux 软链部署必须用它，`current_exe` 会解析到真实路径），否则 exe 所在目录。serve 命令查找 serve.toml：`--config` → `<程序目录>/serve.toml` → 命令参数目录（旧位置兼容）→ 自动生成 `<程序目录>/serve.toml`；**web_root 相对路径解析为相对程序目录**（绝对路径直接用）；`.keinestamp-projects.json` 在 web_root 父目录（web_root 默认 `<程序目录>/web-root` 时即程序目录）；loreserver 配置/store 在 `<程序目录>/lore-server-config|store`；**登录 cookie 动态 Secure**（`request_is_https`）：`trust_proxy=true` 时按 `X-Forwarded-Proto: https` 判断（Caddy 对 cloudflared 是 http 回源，需显式 `header_up X-Forwarded-Proto https`），否则按 TLS 连接——HTTPS 来源 cookie 带 `Secure`（堵 http→https 跳转前的明文盲区），HTTP 直连（局域网自用）不带：
 
 ```toml
 host = "0.0.0.0"
