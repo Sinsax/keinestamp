@@ -3,6 +3,7 @@
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
   import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore } from '../api'
+  import { isPreviewable } from './preview'
 
   let {
     statusOutput,
@@ -449,7 +450,7 @@
   function menuTogglePreviewMark() {
     const menu = contextMenu
     closeContextMenu()
-    if (!menu || menu.isDir || !menu.path.endsWith('.blend')) return
+    if (!menu || menu.isDir || !isPreviewable(menu.path)) return
     onTogglePreviewMark(menu.path)
   }
 
@@ -581,7 +582,7 @@
       <button onclick={menuOpenFolder}>打开所在文件夹</button>
       <button onclick={menuCopyPath}>复制路径</button>
       <button onclick={menuCopyName}>复制名称</button>
-      {#if !contextMenu.isDir && contextMenu.path.endsWith('.blend')}
+      {#if !contextMenu.isDir && isPreviewable(contextMenu.path)}
         <button onclick={menuTogglePreviewMark}>
           {previewMarked.has(contextMenu.path) ? '取消 3D 预览标记' : '标记 3D 预览'}
         </button>

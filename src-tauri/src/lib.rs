@@ -102,7 +102,9 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                 .map(|f| f.path)
                 .collect(),
         };
-        let has_blend = changed_files.iter().any(|f| f.ends_with(".blend"));
+        // 预览配置（阶段 1：仅 .blend → glb；后续类型加入默认映射即扩）
+        let preview_cfg = keinestamp::preview::PreviewConfig::default();
+        let has_previewable = changed_files.iter().any(|f| preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None);
 
         // 记录（回退状态下 = 顶替：Lore branch reset 后 HEAD 即回退点，新记录自然顶替）；
         // 成功后清回退标记
@@ -117,7 +119,7 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
         }
         let short_hash = hash[..7.min(hash.len())].to_string();
 
-        let blender_path_buf = if !skip_preview && has_blend {
+        let blender_path_buf = if !skip_preview && has_previewable {
             emit("blender_prepare", "准备 Blender...");
             match keinestamp::blender_download::ensure_blender() {
                 Ok(path) => Some(path),
@@ -131,31 +133,39 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
         };
         let blender_path: Option<&Path> = blender_path_buf.as_deref();
 
-        let preview_path = if !skip_preview && has_blend {
+        let preview_path = if !skip_preview && has_previewable {
             let glb_config = keinestamp::blender_render::RenderConfig {
                 output_dir: meta.web_root.join("previews_glb"),
                 ..Default::default()
             };
-            // 3D 预览标记：只导出用户标记（preview_files）的 .blend；
-            // 未标记（None，旧调用兼容）→ 导出全部 .blend（原行为）
+            // 预览标记：只生成用户标记（preview_files）的可预览文件；
+            // 未标记（None，旧调用兼容）→ 生成全部可预览文件（原行为）
             let preview_targets: Option<Vec<&String>> = preview_files
                 .as_ref()
-                .map(|list| changed_files.iter().filter(|f| list.contains(f) && f.ends_with(".blend")).collect());
+                .map(|list| changed_files.iter().filter(|f| list.contains(f) && preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None).collect());
             let mut glb_names: Vec<String> = Vec::new();
-            let mut blend_sources: Vec<&String> = preview_targets
+            let mut preview_sources: Vec<&String> = preview_targets
                 .clone()
-                .unwrap_or_else(|| changed_files.iter().filter(|f| f.ends_with(".blend")).collect());
-            blend_sources.sort();
-            blend_sources.dedup();
-            for bf in blend_sources {
+                .unwrap_or_else(|| changed_files.iter().filter(|f| preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None).collect());
+            preview_sources.sort();
+            preview_sources.dedup();
+            for bf in preview_sources {
+                let kind = preview_cfg.kind_of(bf);
                 let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-                let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
+                let base_name = safe_name.strip_suffix(".blend").unwrap_or(&safe_name).to_string();
+                let glb_name = format!("{}_{}", short_hash, base_name);
                 let bpath = meta.project_root.join(bf);
-                emit("blender_export", &format!("导出 GLB: {}", bf));
-                if let Err(e) = keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
-                    eprintln!("[debug] record: GLB export skipped: {e}");
-                } else {
-                    glb_names.push(glb_name);
+                match kind {
+                    keinestamp::preview::PreviewKind::Glb => {
+                        emit("blender_export", &format!("导出 GLB: {}", bf));
+                        let provider = keinestamp::preview::GlbProvider { blender_path: blender_path.map(|p| p.to_path_buf()) };
+                        if let Ok(Some(_)) = provider.generate(&bpath, &glb_config.output_dir, &glb_name) {
+                            glb_names.push(glb_name);
+                        }
+                    }
+                    _ => {
+                        eprintln!("[debug] record: 预览类型 {} 尚未实现，跳过 {}", kind.as_str(), bf);
+                    }
                 }
             }
             let _ = keinestamp::blender_render::clean_old_glb_previews(

@@ -36,17 +36,19 @@ pub fn generate_index_html(
             continue;
         }
         for file in &entry.files {
-            if file.ends_with(".blend") {
-                let short_hash = &entry.id[..7.min(entry.id.len())];
-                let safe_name = file.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-                let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
-                let glb_rel = format!("./previews_glb/{}.glb", glb_name);
-                let glb_path = web_root.join("previews_glb").join(format!("{}.glb", glb_name));
-                if glb_path.exists() {
-                    glb_map.entry(entry.id.clone())
-                        .or_insert_with(Vec::new)
-                        .push(serde_json::json!({"file": file, "url": glb_rel}));
-                }
+            // 预览配置判定（阶段 1：仅 .blend → glb；后续类型加入默认映射即扩）
+            if crate::preview::PreviewConfig::default().kind_of(file) != crate::preview::PreviewKind::Glb {
+                continue;
+            }
+            let short_hash = &entry.id[..7.min(entry.id.len())];
+            let safe_name = file.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
+            let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
+            let glb_rel = format!("./previews_glb/{}.glb", glb_name);
+            let glb_path = web_root.join("previews_glb").join(format!("{}.glb", glb_name));
+            if glb_path.exists() {
+                glb_map.entry(entry.id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(serde_json::json!({"file": file, "url": glb_rel}));
             }
         }
     }
@@ -1120,7 +1122,7 @@ mod tests {
                 files: vec!["char.blend".to_string(), "textures/diffuse.png".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
-                tag: Some("建模".to_string()), milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
+                tag: Some("建模".to_string()), milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),
@@ -1159,7 +1161,7 @@ mod tests {
                 file_status: vec![],
                 preview: String::new(),
                 tag: Some("<img src=x onerror=alert(2)>".to_string()),
-                milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
+                milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
             }],
             rollback_marker: None,
             removed_entries: Vec::new(),
@@ -1196,7 +1198,7 @@ mod tests {
                     files: vec!["a.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
+                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
                 },
                 TimelineEntry {
                     id: "bbb222bbb222".to_string(),
@@ -1206,7 +1208,7 @@ mod tests {
                     files: vec!["b.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: true, parent: String::new(), preview_enabled: true,
+                    tag: None, milestone: false, superseded: true, parent: String::new(), preview_enabled: true, preview_type: String::new(),
                 },
                 TimelineEntry {
                     id: "ccc333ccc333".to_string(),
@@ -1216,7 +1218,7 @@ mod tests {
                     files: vec!["c.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
+                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
                 },
             ],
             rollback_marker: None,
@@ -1254,7 +1256,7 @@ mod tests {
                 preview: "previews/abc123.png".to_string(),
                 tag: None,
                 milestone: true,
-                superseded: false, parent: String::new(), preview_enabled: true,
+                superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),
@@ -1287,7 +1289,7 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
+                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),
@@ -1322,7 +1324,7 @@ mod tests {
                 files: vec!["fix.txt".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
+                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),

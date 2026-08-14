@@ -45,6 +45,9 @@ pub struct TimelineEntry {
     #[serde(default)]
     pub file_status: Vec<String>,
     pub preview: String,
+    /// 预览类型（"glb"/"image"/"video"/""）；旧数据空 → 前端按 preview 后缀推断
+    #[serde(default)]
+    pub preview_type: String,
     #[serde(default)]
     pub tag: Option<String>,
     #[serde(default)]
@@ -229,6 +232,16 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
                 .collect()
         })
         .unwrap_or_default();
+    // 沿用预览类型（旧缓存可能已带；新记录由 html_gen/前端推断兜底）
+    let old_preview_types: std::collections::HashMap<String, String> = old_timeline
+        .as_ref()
+        .map(|t| {
+            t.entries
+                .iter()
+                .map(|e| (e.id.clone(), e.preview_type.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
     let hist = crate::lore_backend::revision_history(project_root)?;
     let mut entries: Vec<TimelineEntry> = hist
         .iter()
@@ -243,6 +256,7 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             files: entry_files(project_root, &r.id),
             file_status: Vec::new(),
             preview: old_previews.get(&r.id).cloned().unwrap_or_default(),
+            preview_type: old_preview_types.get(&r.id).cloned().unwrap_or_default(),
             preview_enabled: old_preview_enabled.get(&r.id).copied().unwrap_or(true),
             tag: r.metadata.get("tag").cloned(),
             milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
@@ -380,6 +394,7 @@ mod tests {
             files: vec!["test.blend".to_string()],
             file_status: vec!["A".to_string()],
             preview: format!("previews/{}.png", id),
+            preview_type: String::new(),
             tag: None,
             milestone: false,
             superseded: false,

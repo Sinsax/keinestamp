@@ -28,6 +28,7 @@ interface BlenderDownloadProgress {
   import { openFolder } from './api'
   import { open } from '@tauri-apps/plugin-dialog'
   import { parseStatus } from './lib/statusParse'
+  import { isPreviewable } from './lib/preview'
   import { listen } from '@tauri-apps/api/event'
 
   function cleanPath(p: string): string {
@@ -72,9 +73,9 @@ let statusErrorMsg = $state('')
     else next.add(path)
     previewMarked = next
   }
-  // 本次提交范围中是否有标记 3D 预览的 .blend（决定记录弹窗是否显示 3D 预览选框）
+  // 本次提交范围中是否有标记预览的文件（决定记录弹窗是否显示 3D 预览选框）
   const hasPreviewMarked = $derived(
-    [...previewMarked].some((f) => f.endsWith('.blend') && (commitSelection === null || commitSelection.includes(f)))
+    [...previewMarked].some((f) => isPreviewable(f) && (commitSelection === null || commitSelection.includes(f)))
   )
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] })
   // 回退版本改动标注：change_files（回退改动，可勾选）+ deleted_files（回退删除，只读）
@@ -389,8 +390,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
           /* ignore info unavailable — fall back to raw selection */
         }
       }
-      // 3D 预览标记：仅标记的 .blend 生成 GLB（空数组 = 不生成；后端按提交文件交集过滤）
-      const previewFiles = [...previewMarked].filter((f) => f.endsWith('.blend'))
+      // 预览标记：仅标记的可预览文件生成预览（空数组 = 不生成；后端按提交文件交集过滤）
+      const previewFiles = [...previewMarked].filter((f) => isPreviewable(f))
       const hash = await api.record(activePath, msg, tag, noPreview, files, previewFiles)
       pushToast(`已记录 ${hash}`, 'success')
       previewMarked = new Set()
