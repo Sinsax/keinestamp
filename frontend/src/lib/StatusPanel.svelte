@@ -477,7 +477,7 @@
 <div class="status-panel">
   <div class="sp-header">
     <span class="sp-title">变更</span>
-    <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件{#if ignoredVisibleCount > 0} · {ignoredVisibleCount} 已忽略{/if}{#if previewMarked.size > 0} · [debug]3D标记:{previewMarked.size}{/if}</span>
+    <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件{#if ignoredVisibleCount > 0} · {ignoredVisibleCount} 已忽略{/if}{#if previewMarked.size > 0} · [debug]3D:[{[...previewMarked].join('|')}]{/if}</span>
     <div class="sp-spacer"></div>
     {#if !allSelected}
       <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
