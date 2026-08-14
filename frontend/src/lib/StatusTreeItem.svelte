@@ -22,6 +22,7 @@
     rollbackDeletedSet = new Set<string>(),
     rollbackModifiedSet = new Set<string>(),
     previewMarked = false,
+    debugMarkedList = [] as string[],
   }: {
     node: FileTreeNode
     depth?: number
@@ -40,7 +41,20 @@
     rollbackDeletedSet?: Set<string>
     rollbackModifiedSet?: Set<string>
     previewMarked?: boolean
+    debugMarkedList?: string[]
   } = $props()
+
+  // [debug] 临时诊断：对比标记路径与行路径的差异类型
+  function debugDiag(path: string, markedList: string[]): string {
+    if (markedList.length === 0) return 'none'
+    const m = markedList[0]
+    if (path === m) return 'same'
+    if (path.toLowerCase() === m.toLowerCase()) return 'case-only'
+    let i = 0
+    const max = Math.max(path.length, m.length)
+    while (i < max && path[i] === m[i]) i++
+    return `diff@${i} a=${path.charCodeAt(i) ?? '∅'} b=${m.charCodeAt(i) ?? '∅'} lenA=${path.length} lenB=${m.length}`
+  }
 
   let indet = $state(false)
   $effect(() => { indet = dirState(node) === 'partial' })
@@ -108,6 +122,7 @@
         {rollbackDeletedSet}
         {rollbackModifiedSet}
         {previewMarked}
+        {debugMarkedList}
       />
     {/each}
   {/if}
@@ -141,8 +156,8 @@
         <span class="sp-ignored-badge">已忽略</span>
       {/if}
       <span class="sp-badges">
-        <!-- [debug] 临时：JSON 转义显示真实字符（暴露尾随空格/转义差异） -->
-        <span class="sp-badge sp-badge-3d" title="debug">3D:{String(previewMarked)}{JSON.stringify(node.path)}</span>
+        <!-- [debug] 临时诊断 -->
+        <span class="sp-badge sp-badge-3d" title="debug">{debugDiag(node.path, debugMarkedList)}</span>
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>
         {:else if rollbackMark}
