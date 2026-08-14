@@ -146,7 +146,7 @@
             class="sp-badge sp-badge-3d"
             class:marked={previewMarked}
             title={previewMarked ? '已标记 3D 预览（右键取消）' : '未标记 3D 预览（右键标记，记录时生成 GLB）'}
-          >3D</span>
+          >3D{previewMarked ? '+' : ''}</span>
         {/if}
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>
