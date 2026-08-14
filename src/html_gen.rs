@@ -489,6 +489,9 @@ function createViewer(container, w, h, url, isOverlay) {
   controls.dampingFactor = 0.1;
   controls.target.set(0, 0, 0);
   controls.update();
+  // 按需渲染：交互（拖拽/缩放/键盘）开始与变化时标记并启动渲染循环，静止时自动停止
+  controls.addEventListener('start', function() { start(); });
+  controls.addEventListener('change', function() { markDirty(); });
 
   scene.add(new THREE.AmbientLight(0xffffff, 0.6));
   var keyLight = new THREE.DirectionalLight(0xffffff, 1.2);
@@ -518,6 +521,7 @@ function createViewer(container, w, h, url, isOverlay) {
   }
 
   function rebuildWireframe() {
+    markDirty();
     if (!modelObj) return;
     modelObj.traverse(function(c) {
       if (!c.isMesh) return;
@@ -540,6 +544,7 @@ function createViewer(container, w, h, url, isOverlay) {
   }
 
   function applyShading() {
+    markDirty();
     if (!modelObj) return;
     modelObj.traverse(function(c) {
       if (!c.isMesh) return;
@@ -573,6 +578,7 @@ function createViewer(container, w, h, url, isOverlay) {
       toTarget: target,
       t: 0
     };
+    markDirty();
   }
 
   function updateFrame() {
@@ -690,6 +696,7 @@ function createViewer(container, w, h, url, isOverlay) {
     ret.camera = to;
     controls.object = to;
     controls.update();
+    markDirty();
   }
 
   function resize(nw, nh) {
@@ -704,6 +711,7 @@ function createViewer(container, w, h, url, isOverlay) {
       orthoCam.updateProjectionMatrix();
     }
     renderer.setSize(nw, nh);
+    markDirty();
   }
 
   function showError(msg) {
@@ -783,6 +791,7 @@ function createViewer(container, w, h, url, isOverlay) {
         }
         tb.querySelectorAll('.shade-btn').forEach(function(x) { x.classList.remove('active'); });
         b.classList.add('active');
+        markDirty();
       });
       b.classList.add('shade-btn');
       if (currentShading === m) b.classList.add('active');
@@ -805,6 +814,7 @@ function createViewer(container, w, h, url, isOverlay) {
 
     var gridBtn = btn('网格', 'mbtn active', function() {
       grid.visible = !grid.visible;
+      markDirty();
       if (grid.visible) gridBtn.classList.add('active'); else gridBtn.classList.remove('active');
     });
     row2.appendChild(gridBtn);
@@ -858,7 +868,7 @@ function createViewer(container, w, h, url, isOverlay) {
       var cb = document.createElement('button');
       cb.className = 'model-overlay-close';
       cb.innerHTML = '&times;';
-      cb.addEventListener('click', function() { container.closest('.model-overlay').remove(); });
+      cb.addEventListener('click', function() { dispose(); container.closest('.model-overlay').remove(); });
       row2.appendChild(cb);
     }
     tb.appendChild(row1);
@@ -866,7 +876,62 @@ function createViewer(container, w, h, url, isOverlay) {
     return tb;
   }
 
-  var ret = { scene: scene, renderer: renderer, camera: camera, controls: controls, makeToolbar: makeToolbar, grid: grid, modelObj: modelObj, perspCam: perspCam, orthoCam: orthoCam, updateFrame: updateFrame, resize: resize };
+  // --- 按需渲染：静止时渲染循环退出（GPU 零占用），markDirty()/动画/交互时重启 ---
+  var dirty = true;
+  var running = false;
+  var animId = null;
+
+  function markDirty() {
+    dirty = true;
+    start();
+  }
+
+  function start() {
+    if (running) return;
+    running = true;
+    loop();
+  }
+
+  function loop() {
+    animId = null;
+    updateFrame();
+    renderer.render(scene, camera);
+    if (dirty || pendingAnim) {
+      dirty = false;
+      animId = requestAnimationFrame(loop);
+    } else {
+      running = false;
+    }
+  }
+
+  // 完整释放：geometry / material / texture（含线框边与透视克隆材质）+ renderer
+  function dispose() {
+    if (animId) cancelAnimationFrame(animId);
+    running = false;
+    animId = null;
+    if (modelObj) {
+      modelObj.traverse(function(c) {
+        if (!c.isMesh) return;
+        if (c.geometry) c.geometry.dispose();
+        var mats = Array.isArray(c.material) ? c.material : [c.material];
+        mats.forEach(function(m) {
+          if (!m) return;
+          if (m.map) m.map.dispose();
+          m.dispose();
+        });
+      });
+    }
+    originalMaterials.forEach(function(o) {
+      o.saved.forEach(function(m) {
+        if (!m) return;
+        if (m.map) m.map.dispose();
+        m.dispose();
+      });
+    });
+    renderer.dispose();
+  }
+
+  var ret = { scene: scene, renderer: renderer, camera: camera, controls: controls, makeToolbar: makeToolbar, grid: grid, modelObj: modelObj, perspCam: perspCam, orthoCam: orthoCam, updateFrame: updateFrame, resize: resize, dispose: dispose, start: start, markDirty: markDirty };
   return ret;
 }
 
@@ -884,13 +949,28 @@ function initModelsLazy() {
     });
     return;
   }
+  // 滑动防抖：进入视口只登记，滚动停下 150ms 后才真正创建 viewer——
+  // 避免滑动过程中连续创建（GLB 下载/解析/上下文创建都在主线程）导致卡顿；
+  // 离开视口立即释放（不延迟）。
+  var pendingLoad = new Set();
+  var loadTimer = null;
+  function flushPendingLoad() {
+    loadTimer = null;
+    pendingLoad.forEach(function(el) {
+      if (el.isConnected && !el.getAttribute('data-viewer-id')) enqueueViewer(el);
+    });
+    pendingLoad.clear();
+  }
   OBSERVER = new IntersectionObserver(function(entries) {
     entries.forEach(function(e) {
       var el = e.target;
       if (e.isIntersecting && !el.getAttribute('data-viewer-id')) {
-        enqueueViewer(el);
-      } else if (!e.isIntersecting && el.getAttribute('data-viewer-id')) {
-        disposeViewer(el);
+        pendingLoad.add(el);
+        if (loadTimer) clearTimeout(loadTimer);
+        loadTimer = setTimeout(flushPendingLoad, 150);
+      } else if (!e.isIntersecting) {
+        pendingLoad.delete(el);
+        if (el.getAttribute('data-viewer-id')) disposeViewer(el);
       }
     });
   }, { rootMargin: '200px' });
@@ -909,7 +989,8 @@ function initModelsLazy() {
 }
 
 function enqueueViewer(el) {
-  if (ACTIVE_VIEWERS.length < 5) {
+  // 页面最多同时显示两个模型预览 → 并发上限 2（超出排队，离开视口即释放）
+  if (ACTIVE_VIEWERS.length < 2) {
     createViewerFor(el);
   } else {
     VIEWER_QUEUE.push(el);
@@ -927,16 +1008,8 @@ function createViewerFor(el) {
   el.innerHTML = '';
   el.appendChild(v.makeToolbar(function() { openFullscreen(el); }));
   el.appendChild(v.renderer.domElement);
-  var entry = { id: id, el: el, viewer: v, animId: null };
-  ACTIVE_VIEWERS.push(entry);
-  function anim() {
-    var found = ACTIVE_VIEWERS.findIndex(function(x) { return x.id === id; });
-    if (found === -1 || !entry.el.isConnected) return;
-    entry.animId = requestAnimationFrame(anim);
-    v.updateFrame();
-    v.renderer.render(v.scene, v.camera);
-  }
-  anim();
+  ACTIVE_VIEWERS.push({ id: id, el: el, viewer: v });
+  v.start(); // 初始渲染一帧；模型加载完成/交互时由 markDirty 续跑
 }
 
 function disposeViewer(el) {
@@ -945,9 +1018,7 @@ function disposeViewer(el) {
   el.removeAttribute('data-viewer-id');
   var idx = ACTIVE_VIEWERS.findIndex(function(v) { return v.id === +id; });
   if (idx !== -1) {
-    var entry = ACTIVE_VIEWERS[idx];
-    cancelAnimationFrame(entry.animId);
-    entry.viewer.renderer.dispose();
+    ACTIVE_VIEWERS[idx].viewer.dispose();
     ACTIVE_VIEWERS.splice(idx, 1);
   }
   el.innerHTML = '<div class="model-placeholder">3D 已暂停，滚动回来看</div>';
@@ -977,17 +1048,14 @@ function openFullscreen(el) {
   document.body.appendChild(overlay);
 
   function onKey(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', onKey); }
+    if (e.key === 'Escape') {
+      v.dispose();
+      overlay.remove();
+      document.removeEventListener('keydown', onKey);
+    }
   }
   document.addEventListener('keydown', onKey);
-
-  function anim() {
-    if (!document.body.contains(overlay)) return;
-    requestAnimationFrame(anim);
-    v.updateFrame();
-    v.renderer.render(v.scene, v.camera);
-  }
-  anim();
+  v.start(); // 按需渲染：静止停止，交互/动画时续跑
 
   window.addEventListener('resize', function onResize() {
     if (!document.body.contains(overlay)) { window.removeEventListener('resize', onResize); return; }
