@@ -71,6 +71,8 @@ let statusErrorMsg = $state('')
     if (next.has(path)) next.delete(path)
     else next.add(path)
     previewMarked = next
+    // [debug] 临时定位：标记状态变化
+    pushToast(`[debug] 3D 标记: ${path} → ${next.has(path) ? '已标记' : '已取消'}（共 ${next.size} 个）`, 'info')
   }
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] })
   // 回退版本改动标注：change_files（回退改动，可勾选）+ deleted_files（回退删除，只读）
