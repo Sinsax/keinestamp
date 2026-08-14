@@ -9,8 +9,8 @@ export async function initProject(path: string): Promise<MetaConfig> {
   return invoke<MetaConfig>('init_project', { path })
 }
 
-export async function record(path: string, message: string, tag?: string | null, noPreview?: boolean, files?: string[] | null): Promise<string> {
-  return invoke<string>('record', { path, message, tag: tag ?? null, noPreview: noPreview ?? false, files: files ?? null })
+export async function record(path: string, message: string, tag?: string | null, noPreview?: boolean, files?: string[] | null, previewFiles?: string[] | null): Promise<string> {
+  return invoke<string>('record', { path, message, tag: tag ?? null, noPreview: noPreview ?? false, files: files ?? null, previewFiles: previewFiles ?? null })
 }
 
 export async function deploy(path: string): Promise<void> {
@@ -129,6 +129,10 @@ export async function discardFile(path: string, file: string): Promise<void> {
 
 export async function setEntryMilestone(path: string, entryId: string, milestone: boolean): Promise<void> {
   return invoke<void>('set_entry_milestone', { path, entryId, milestone })
+}
+
+export async function setEntryPreview(path: string, entryId: string, enabled: boolean): Promise<void> {
+  return invoke<void>('set_entry_preview', { path, entryId, enabled })
 }
 
 export async function downloadBlender(version?: string | null): Promise<string> {

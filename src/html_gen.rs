@@ -31,6 +31,10 @@ pub fn generate_index_html(
 
     let mut glb_map = std::collections::BTreeMap::new();
     for entry in &timeline.entries {
+        // 3D 预览开关：关闭的条目不渲染预览（GLB 文件保留）
+        if !entry.preview_enabled {
+            continue;
+        }
         for file in &entry.files {
             if file.ends_with(".blend") {
                 let short_hash = &entry.id[..7.min(entry.id.len())];
@@ -1116,7 +1120,7 @@ mod tests {
                 files: vec!["char.blend".to_string(), "textures/diffuse.png".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
-                tag: Some("建模".to_string()), milestone: false, superseded: false, parent: String::new(),
+                tag: Some("建模".to_string()), milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),
@@ -1155,7 +1159,7 @@ mod tests {
                 file_status: vec![],
                 preview: String::new(),
                 tag: Some("<img src=x onerror=alert(2)>".to_string()),
-                milestone: false, superseded: false, parent: String::new(),
+                milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
             }],
             rollback_marker: None,
             removed_entries: Vec::new(),
@@ -1192,7 +1196,7 @@ mod tests {
                     files: vec!["a.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: false, parent: String::new(),
+                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
                 },
                 TimelineEntry {
                     id: "bbb222bbb222".to_string(),
@@ -1202,7 +1206,7 @@ mod tests {
                     files: vec!["b.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: true, parent: String::new(),
+                    tag: None, milestone: false, superseded: true, parent: String::new(), preview_enabled: true,
                 },
                 TimelineEntry {
                     id: "ccc333ccc333".to_string(),
@@ -1212,7 +1216,7 @@ mod tests {
                     files: vec!["c.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: false, parent: String::new(),
+                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
                 },
             ],
             rollback_marker: None,
@@ -1250,7 +1254,7 @@ mod tests {
                 preview: "previews/abc123.png".to_string(),
                 tag: None,
                 milestone: true,
-                superseded: false, parent: String::new(),
+                superseded: false, parent: String::new(), preview_enabled: true,
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),
@@ -1283,7 +1287,7 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false, parent: String::new(),
+                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),
@@ -1318,7 +1322,7 @@ mod tests {
                 files: vec!["fix.txt".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false, parent: String::new(),
+                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true,
             }],
         rollback_marker: None,
         removed_entries: Vec::new(),

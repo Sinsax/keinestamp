@@ -49,12 +49,19 @@ pub struct TimelineEntry {
     pub tag: Option<String>,
     #[serde(default)]
     pub milestone: bool,
+    /// 3D 预览开关：关闭后 web/GUI 不渲染该记录预览（GLB 文件保留，重新开启即恢复）
+    #[serde(default = "default_true")]
+    pub preview_enabled: bool,
     /// 被顶替出主线的记录（回退后显示灰显；数据保留在 store 但不在主线历史）
     #[serde(default)]
     pub superseded: bool,
     /// 父记录签名（主线按顺序推导；回退时读缓存免 lore 调用；旧缓存空 → fallback lore revision info）
     #[serde(default)]
     pub parent: String,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 pub fn read_timeline(path: &Path) -> Result<Timeline> {
@@ -98,6 +105,18 @@ pub fn set_entry_milestone(path: &Path, entry_id: &str, milestone: bool) -> Resu
         .find(|e| e.id == entry_id || e.id.starts_with(entry_id))
         .context("entry not found")?;
     entry.milestone = milestone;
+    write_timeline(path, &timeline)
+}
+
+/// 切换条目的 3D 预览开关（只改展示缓存字段；GLB 文件保留不删）
+pub fn set_entry_preview(path: &Path, entry_id: &str, enabled: bool) -> Result<()> {
+    let mut timeline = read_timeline(path)?;
+    let entry = timeline
+        .entries
+        .iter_mut()
+        .find(|e| e.id == entry_id || e.id.starts_with(entry_id))
+        .context("entry not found")?;
+    entry.preview_enabled = enabled;
     write_timeline(path, &timeline)
 }
 
@@ -200,6 +219,16 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
                 .collect()
         })
         .unwrap_or_default();
+    // 沿用 3D 预览开关（同 preview：不在 revision metadata 里，重建后保留用户设置）
+    let old_preview_enabled: std::collections::HashMap<String, bool> = old_timeline
+        .as_ref()
+        .map(|t| {
+            t.entries
+                .iter()
+                .map(|e| (e.id.clone(), e.preview_enabled))
+                .collect()
+        })
+        .unwrap_or_default();
     let hist = crate::lore_backend::revision_history(project_root)?;
     let mut entries: Vec<TimelineEntry> = hist
         .iter()
@@ -214,6 +243,7 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             files: entry_files(project_root, &r.id),
             file_status: Vec::new(),
             preview: old_previews.get(&r.id).cloned().unwrap_or_default(),
+            preview_enabled: old_preview_enabled.get(&r.id).copied().unwrap_or(true),
             tag: r.metadata.get("tag").cloned(),
             milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
             superseded: false,
@@ -354,6 +384,7 @@ mod tests {
             milestone: false,
             superseded: false,
             parent: String::new(),
+            preview_enabled: true,
         }
     }
 

@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import { parseStatus, ruleHidden, findRuleHidden, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
@@ -16,8 +16,10 @@
     rollbackChangeFiles = [],
     rollbackDeletedFiles = [],
     rollbackModifiedFiles = [],
+    previewMarked = new Set<string>(),
     onSelectionChange = (_sel: string[] | null) => {},
     onDiscardChanges = (_file: string, _state: 'M' | 'D') => {},
+    onTogglePreviewMark = (_path: string) => {},
   }: {
     statusOutput: string
     onRefresh: () => void
@@ -30,8 +32,10 @@
     rollbackChangeFiles?: string[]
     rollbackDeletedFiles?: string[]
     rollbackModifiedFiles?: string[]
+    previewMarked?: Set<string>
     onSelectionChange?: (sel: string[] | null) => void
     onDiscardChanges?: (file: string, state: 'M' | 'D') => void
+    onTogglePreviewMark?: (path: string) => void
   } = $props()
 
   const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp']
@@ -442,6 +446,13 @@
     }
   }
 
+  function menuTogglePreviewMark() {
+    const menu = contextMenu
+    closeContextMenu()
+    if (!menu || menu.isDir || !menu.path.endsWith('.blend')) return
+    onTogglePreviewMark(menu.path)
+  }
+
   async function menuUnignore() {
     const menu = contextMenu
     closeContextMenu()
@@ -516,6 +527,7 @@
           rollbackChangeSet={rollbackChangeSet}
           rollbackDeletedSet={rollbackDeletedSet}
           rollbackModifiedSet={rollbackModifiedSet}
+          previewMarked={previewMarked.has(node.path)}
         />
       {/each}
     </div>
@@ -569,6 +581,11 @@
       <button onclick={menuOpenFolder}>打开所在文件夹</button>
       <button onclick={menuCopyPath}>复制路径</button>
       <button onclick={menuCopyName}>复制名称</button>
+      {#if !contextMenu.isDir && contextMenu.path.endsWith('.blend')}
+        <button onclick={menuTogglePreviewMark}>
+          {previewMarked.has(contextMenu.path) ? '取消 3D 预览标记' : '标记 3D 预览'}
+        </button>
+      {/if}
       {#if canDiscard(contextMenu.path)}
         <button class="ctx-danger" onclick={menuDiscardChanges} title="丢弃此文件的未提交更改，恢复到最近记录版本">取消更改</button>
       {/if}

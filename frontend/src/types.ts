@@ -19,6 +19,8 @@ export interface TimelineEntry {
   preview: string
   tag?: string | null
   milestone?: boolean
+  /** 3D 预览开关（关闭后不渲染该记录预览；GLB 保留，重新开启恢复） */
+  previewEnabled?: boolean
   superseded?: boolean
 }
 

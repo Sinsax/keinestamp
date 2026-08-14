@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import StatusTreeItem from './StatusTreeItem.svelte'
   import type { FileTreeNode } from './fileTree'
   import type { StatusFile } from './statusParse'
@@ -21,6 +21,7 @@
     rollbackChangeSet = new Set<string>(),
     rollbackDeletedSet = new Set<string>(),
     rollbackModifiedSet = new Set<string>(),
+    previewMarked = false,
   }: {
     node: FileTreeNode
     depth?: number
@@ -38,6 +39,7 @@
     rollbackChangeSet?: Set<string>
     rollbackDeletedSet?: Set<string>
     rollbackModifiedSet?: Set<string>
+    previewMarked?: boolean
   } = $props()
 
   let indet = $state(false)
@@ -105,6 +107,7 @@
         {rollbackChangeSet}
         {rollbackDeletedSet}
         {rollbackModifiedSet}
+        {previewMarked}
       />
     {/each}
   {/if}
@@ -138,6 +141,9 @@
         <span class="sp-ignored-badge">已忽略</span>
       {/if}
       <span class="sp-badges">
+        {#if previewMarked}
+          <span class="sp-badge sp-badge-3d" title="记录时生成此文件的 3D 预览（右键取消）">3D</span>
+        {/if}
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>
         {:else if rollbackMark}
@@ -197,5 +203,10 @@
     padding: 0 5px;
     flex-shrink: 0;
     letter-spacing: 0.5px;
+  }
+  :global(.sp-badge-3d) {
+    color: var(--accent) !important;
+    border-color: var(--accent) !important;
+    font-weight: 700 !important;
   }
 </style>

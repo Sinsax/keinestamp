@@ -75,8 +75,8 @@ struct CommitProgress {
 }
 
 #[tauri::command]
-async fn record(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>, files: Option<Vec<String>>) -> Result<String, String> {
-    eprintln!("[debug] record({}, message={:?}, tag={:?}, no_preview={}, files={:?})", path, message, tag, no_preview.unwrap_or(false), files);
+async fn record(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>, files: Option<Vec<String>>, preview_files: Option<Vec<String>>) -> Result<String, String> {
+    eprintln!("[debug] record({}, message={:?}, tag={:?}, no_preview={}, files={:?}, preview_files={:?})", path, message, tag, no_preview.unwrap_or(false), files, preview_files);
     let app_clone = app.clone();
     let handle = tokio::task::spawn_blocking(move || {
         let emit = |phase: &str, msg: &str| {
@@ -136,18 +136,26 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
                 output_dir: meta.web_root.join("previews_glb"),
                 ..Default::default()
             };
+            // 3D 预览标记：只导出用户标记（preview_files）的 .blend；
+            // 未标记（None，旧调用兼容）→ 导出全部 .blend（原行为）
+            let preview_targets: Option<Vec<&String>> = preview_files
+                .as_ref()
+                .map(|list| changed_files.iter().filter(|f| list.contains(f) && f.ends_with(".blend")).collect());
             let mut glb_names: Vec<String> = Vec::new();
-            for bf in &changed_files {
-                if bf.ends_with(".blend") {
-                    let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-                    let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
-                    let bpath = meta.project_root.join(bf);
-                    emit("blender_export", &format!("导出 GLB: {}", bf));
-                    if let Err(e) = keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
-                        eprintln!("[debug] record: GLB export skipped: {e}");
-                    } else {
-                        glb_names.push(glb_name);
-                    }
+            let mut blend_sources: Vec<&String> = preview_targets
+                .clone()
+                .unwrap_or_else(|| changed_files.iter().filter(|f| f.ends_with(".blend")).collect());
+            blend_sources.sort();
+            blend_sources.dedup();
+            for bf in blend_sources {
+                let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
+                let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
+                let bpath = meta.project_root.join(bf);
+                emit("blender_export", &format!("导出 GLB: {}", bf));
+                if let Err(e) = keinestamp::blender_render::export_to_glb(&bpath, &glb_config.output_dir, &glb_name, blender_path) {
+                    eprintln!("[debug] record: GLB export skipped: {e}");
+                } else {
+                    glb_names.push(glb_name);
                 }
             }
             let _ = keinestamp::blender_render::clean_old_glb_previews(
@@ -884,6 +892,37 @@ async fn set_entry_milestone(path: String, entry_id: String, milestone: bool) ->
 }
 
 #[tauri::command]
+async fn set_entry_preview(path: String, entry_id: String, enabled: bool) -> Result<(), String> {
+    eprintln!("[debug] set_entry_preview({}, entry_id={}, enabled={})", path, entry_id, enabled);
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        // 只写 timeline.json 展示缓存的开关字段（GLB 文件保留，重新开启即恢复）
+        let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
+        map_err(keinestamp::timeline::set_entry_preview(&timeline_path, &entry_id, enabled))?;
+
+        let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
+        let project_name = meta
+            .project_root
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        map_err(keinestamp::html_gen::generate_index_html(
+            &meta.web_root,
+            &meta.project_root,
+            &timeline,
+            &project_name,
+        ))?;
+
+        // web 产物版本自增（.keinestamp/ 整体隔离，web 不入库）
+        let _ = keinestamp::lore_project::bump_web_version(&meta.project_root);
+
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
     eprintln!("[debug] delete_entry({}, entry_id={})", path, entry_id);
     let handle = tokio::task::spawn_blocking(move || {
@@ -1370,6 +1409,7 @@ pub fn run() {
             open_site,
             delete_entry,
             set_entry_milestone,
+            set_entry_preview,
             get_project_log,
             get_tracked_files,
             get_empty_dirs,

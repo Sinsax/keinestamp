@@ -63,6 +63,15 @@ let statusErrorMsg = $state('')
   let siteLocked = $state(false)
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let commitSelection = $state<string[] | null>(null)
+  // 3D 预览标记：变更面板右键 .blend 标记；记录时只对这些文件生成 GLB（记录完成后清空）
+  let previewMarked = $state<Set<string>>(new Set())
+
+  function togglePreviewMark(path: string) {
+    const next = new Set(previewMarked)
+    if (next.has(path)) next.delete(path)
+    else next.add(path)
+    previewMarked = next
+  }
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] })
   // 回退版本改动标注：change_files（回退改动，可勾选）+ deleted_files（回退删除，只读）
 const rollbackChangeFiles = $derived(rollbackState.change_files)
@@ -376,8 +385,11 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
           /* ignore info unavailable — fall back to raw selection */
         }
       }
-      const hash = await api.record(activePath, msg, tag, noPreview, files)
+      // 3D 预览标记：仅标记的 .blend 生成 GLB（空数组 = 不生成；后端按提交文件交集过滤）
+      const previewFiles = [...previewMarked].filter((f) => f.endsWith('.blend'))
+      const hash = await api.record(activePath, msg, tag, noPreview, files, previewFiles)
       pushToast(`已记录 ${hash}`, 'success')
+      previewMarked = new Set()
       await loadProject(activePath)
       if (sel !== null && files) {
         const committed = new Set(files)
@@ -883,7 +895,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} onDiscardChanges={handleDiscardChanges} />
+            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} onDiscardChanges={handleDiscardChanges} {previewMarked} onTogglePreviewMark={togglePreviewMark} />
           {/if}
         </div>
 
@@ -910,6 +922,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
               onOpenSite={handleOpenSite}
               onOpenLocalView={handleLocalView}
               onMilestoneChange={() => loadProject(activePath, true)}
+              onPreviewChange={() => loadProject(activePath, true)}
               rollbackPoint={rollbackState.rollback_point}
               onExportEntry={handleExportEntry}
               onRollback={handleRollback}

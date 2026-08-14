@@ -1,7 +1,7 @@
 <script lang="ts">
   import DirTree from './DirTree.svelte'
   import type { TimelineEntry } from '../types'
-  import { setEntryMilestone, updateConfig } from '../api'
+  import { setEntryMilestone, setEntryPreview, updateConfig } from '../api'
   import { tagColor } from './tags'
 
   let {
@@ -17,6 +17,7 @@
     onOpenSite = () => {},
     onOpenLocalView = () => {},
     onMilestoneChange = async () => {},
+    onPreviewChange = async () => {},
     rollbackPoint = null,
     onExportEntry = (entry: TimelineEntry) => {},
     onRollback = (entry: TimelineEntry) => {},
@@ -34,6 +35,7 @@
     onOpenSite?: () => void
     onOpenLocalView?: () => void
     onMilestoneChange?: () => Promise<void>
+    onPreviewChange?: () => Promise<void>
     rollbackPoint?: string | null
     onExportEntry?: (entry: TimelineEntry) => void
     onRollback?: (entry: TimelineEntry) => void
@@ -50,6 +52,18 @@
       await onMilestoneChange()
     } catch { /* ignore */ }
     milestoneBusy = ''
+  }
+
+  let previewBusy = $state('')
+
+  async function togglePreview(entry: TimelineEntry) {
+    if (!activePath || previewBusy || !entry.preview) return
+    previewBusy = entry.id
+    try {
+      await setEntryPreview(activePath, entry.id, entry.previewEnabled !== false)
+      await onPreviewChange()
+    } catch { /* ignore */ }
+    previewBusy = ''
   }
 
   let ctxMenu = $state<{ x: number; y: number; entry: TimelineEntry } | null>(null)
@@ -255,7 +269,13 @@
           <span class="hash">{entry.id.slice(0, 7)}</span>
           <span class="top-right">
             {#if entry.preview}
-              <span class="preview-badge" title="该记录有 3D 预览">3D</span>
+              <button
+                class="preview-badge"
+                class:active={entry.previewEnabled !== false}
+                class:busy={previewBusy === entry.id}
+                title={entry.previewEnabled === false ? '3D 预览已关闭，点击开启' : '该记录有 3D 预览，点击关闭'}
+                onclick={(e) => { e.stopPropagation(); togglePreview(entry); }}
+              >3D</button>
             {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
           </span>
@@ -445,6 +465,25 @@
     margin-right: 6px;
     vertical-align: 1px;
     user-select: none;
+    cursor: pointer;
+    transition: all 0.15s var(--ease);
+  }
+  .preview-badge:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .preview-badge.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .preview-badge:not(.active) {
+    opacity: 0.55;
+    text-decoration: line-through;
+  }
+  .preview-badge.busy {
+    opacity: 0.4;
+    pointer-events: none;
   }
   .superseded-header {
     display: flex;
