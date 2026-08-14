@@ -900,15 +900,6 @@ async fn set_entry_preview(path: String, entry_id: String, enabled: bool) -> Res
         // 只写 timeline.json 展示缓存的开关字段（GLB 文件保留，重新开启即恢复）
         let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
         map_err(keinestamp::timeline::set_entry_preview(&timeline_path, &entry_id, enabled))?;
-        eprintln!("[debug] set_entry_preview: written entry_id={} enabled={} → {}", entry_id, enabled, timeline_path.display());
-        // [debug] 读取写入结果
-        if let Ok(tl) = keinestamp::timeline::read_timeline(&timeline_path) {
-            if let Some(e) = tl.entries.iter().find(|e| e.id == entry_id || e.id.starts_with(&entry_id)) {
-                eprintln!("[debug] set_entry_preview: verify entry preview={:?} preview_enabled={}", e.preview, e.preview_enabled);
-            } else {
-                eprintln!("[debug] set_entry_preview: VERIFY FAILED — entry not found in timeline");
-            }
-        }
 
         let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
         let project_name = meta

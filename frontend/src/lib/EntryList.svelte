@@ -62,13 +62,8 @@
     try {
       // 目标状态 = 当前状态取反（当前开启 → 关闭；当前关闭 → 开启）
       await setEntryPreview(activePath, entry.id, entry.preview_enabled === false)
-      // [debug] 临时定位：调用成功
-      console.log('[debug] setEntryPreview ok:', entry.id, 'target=', entry.preview_enabled === false)
       await onPreviewChange()
-      console.log('[debug] onPreviewChange done:', entry.id)
-    } catch (e) {
-      console.log('[debug] setEntryPreview FAILED:', entry.id, e)
-    }
+    } catch { /* ignore */ }
     previewBusy = ''
   }
 
