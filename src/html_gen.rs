@@ -479,7 +479,8 @@ function createViewer(container, w, h, url, isOverlay) {
 
   var renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // 1.5 上限：高分屏 2.25x 采样（原 2 = 4x），GPU 负载降 ~44%，画质差别极小——预览大模型时帧率更稳
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
 

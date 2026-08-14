@@ -1,4 +1,4 @@
-﻿use anyhow::Result;
+use anyhow::Result;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
@@ -29,16 +29,26 @@ fn blender_cmd(blender_path: Option<&Path>) -> std::process::Command {
     cmd
 }
 
+/// GLB 导出参数版本：变更导出脚本（减面策略/纹理尺寸等）后 +1，
+/// 旧版 GLB（无对应标记）会重新导出——否则"已存在跳过"会保留旧产物。
+const GLB_EXPORT_VERSION: u32 = 2;
+
 pub fn export_to_glb(blend_path: &Path, output_dir: &Path, output_name: &str, blender_path: Option<&Path>) -> Result<PathBuf> {
     eprintln!("[debug] export_to_glb: blend={:?}, output_dir={:?}, name={}, blender={:?}", blend_path, output_dir, output_name, blender_path);
     std::fs::create_dir_all(output_dir)?;
 
     let output_path = output_dir.join(format!("{}.glb", output_name));
-    if output_path.exists() {
-        eprintln!("[debug] export_to_glb: GLB already exists, skipping: {:?}", output_path);
+    let version_marker = output_dir.join(format!("{}.glb.v{}", output_name, GLB_EXPORT_VERSION));
+    if output_path.exists() && version_marker.exists() {
+        eprintln!("[debug] export_to_glb: GLB already exists (v{}), skipping: {:?}", GLB_EXPORT_VERSION, output_path);
         return Ok(output_path);
     }
+    if output_path.exists() {
+        eprintln!("[debug] export_to_glb: 旧版 GLB 无 v{} 标记，重新导出（瘦身参数变更）: {:?}", GLB_EXPORT_VERSION, output_path);
+    }
 
+    // 预览瘦身（v2）：临时移除形态键 → Decimate 减面（目标 ~5 万顶点）→ 贴图限 1024px。
+    // 全部为内存操作（--background 不保存），.blend 原文件零改动。
     let python_script = r#"import bpy
 import sys
 
@@ -49,6 +59,35 @@ for obj in bpy.data.objects:
     saved[obj.name] = obj.hide_render
     if obj.hide_viewport or obj.hide_get():
         obj.hide_render = True
+
+# 1) 移除形态键：Decimate(Collapse) 在带 shape keys 的网格上会异常/错乱；
+#    形态键本来就不导出（export_morph=False），预览无需保留
+for obj in bpy.data.objects:
+    if obj.type != 'MESH':
+        continue
+    while obj.data.shape_keys:
+        try:
+            obj.shape_key_remove(obj.data.shape_keys.reference_key)
+        except Exception:
+            break
+
+# 2) Decimate 减面（Collapse，目标 ~50000 顶点）：仅处理参与导出的可见网格
+TARGET_VERTS = 50000
+for obj in bpy.data.objects:
+    if obj.type != 'MESH' or obj.hide_render or not obj.data.vertices:
+        continue
+    vcount = len(obj.data.vertices)
+    if vcount > TARGET_VERTS:
+        md = obj.modifiers.new(name='_ks_preview_decimate', type='DECIMATE')
+        md.decimate_type = 'COLLAPSE'
+        md.ratio = max(TARGET_VERTS / vcount, 0.05)
+
+# 3) 贴图限尺寸（1024，保持比例）：内存操作，不写回文件
+TEX_SIZE = 1024
+for img in bpy.data.images:
+    if img.users > 0 and max(img.size) > TEX_SIZE:
+        s = TEX_SIZE / max(img.size)
+        img.scale(max(1, int(img.size[0] * s)), max(1, int(img.size[1] * s)))
 
 bpy.ops.export_scene.gltf(
     filepath=output_path,
@@ -109,6 +148,17 @@ for name, state in saved.items():
 
     match status {
         st if st.success() && output_path.exists() => {
+            // 写导出版本标记（缓存失效依据：脚本参数变更后旧 GLB 重新导出）
+            let _ = std::fs::write(&version_marker, "1");
+            // 清理旧版本标记
+            if let Ok(entries) = std::fs::read_dir(output_dir) {
+                for e in entries.flatten() {
+                    let name = e.file_name().to_string_lossy().to_string();
+                    if name.starts_with(&format!("{}.glb.v", output_name)) && name != version_marker.file_name().unwrap_or_default().to_string_lossy() {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
             eprintln!("[debug] export_to_glb: success → {:?}", output_path);
             Ok(output_path)
         }
