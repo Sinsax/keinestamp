@@ -21,7 +21,7 @@
     rollbackChangeSet = new Set<string>(),
     rollbackDeletedSet = new Set<string>(),
     rollbackModifiedSet = new Set<string>(),
-    previewMarked = false,
+    previewMarkedSet = new Set<string>(),
   }: {
     node: FileTreeNode
     depth?: number
@@ -39,7 +39,7 @@
     rollbackChangeSet?: Set<string>
     rollbackDeletedSet?: Set<string>
     rollbackModifiedSet?: Set<string>
-    previewMarked?: boolean
+    previewMarkedSet?: Set<string>
   } = $props()
 
   let indet = $state(false)
@@ -50,6 +50,7 @@
   const rollbackMark = $derived(rollbackChangeSet.has(node.path))
   const rollbackDeleted = $derived(rollbackDeletedSet.has(node.path))
   const rollbackModified = $derived(rollbackModifiedSet.has(node.path))
+  const isPreviewMarked = $derived(previewMarkedSet.has(node.path))
   // 整行着色：回退改动恒黄、回退删除恒红；普通状态 M/A/D/??
   const stClass = $derived(
     rollbackMark ? 'sp-st-m'
@@ -107,7 +108,7 @@
         {rollbackChangeSet}
         {rollbackDeletedSet}
         {rollbackModifiedSet}
-        {previewMarked}
+        {previewMarkedSet}
       />
     {/each}
   {/if}
@@ -144,9 +145,9 @@
         {#if node.path.endsWith('.blend')}
           <span
             class="sp-badge sp-badge-3d"
-            class:marked={previewMarked}
-            title={previewMarked ? '已标记 3D 预览（右键取消）' : '未标记 3D 预览（右键标记，记录时生成 GLB）'}
-          >3D{previewMarked ? '+' : ''}</span>
+            class:marked={isPreviewMarked}
+            title={isPreviewMarked ? '已标记 3D 预览（右键取消）' : '未标记 3D 预览（右键标记，记录时生成 GLB）'}
+          >3D{isPreviewMarked ? '+' : ''}</span>
         {/if}
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>

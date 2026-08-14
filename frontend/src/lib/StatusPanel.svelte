@@ -527,7 +527,7 @@
           rollbackChangeSet={rollbackChangeSet}
           rollbackDeletedSet={rollbackDeletedSet}
           rollbackModifiedSet={rollbackModifiedSet}
-          previewMarked={previewMarked.has(node.path)}
+          previewMarkedSet={previewMarked}
         />
       {/each}
     </div>
