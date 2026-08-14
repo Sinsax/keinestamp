@@ -914,9 +914,8 @@ async fn set_entry_preview(path: String, entry_id: String, enabled: bool) -> Res
             &project_name,
         ))?;
 
-        // web 产物版本自增（.keinestamp/ 整体隔离，web 不入库）
-        let _ = keinestamp::lore_project::bump_web_version(&meta.project_root);
-
+        // 3D 预览开关属显示偏好：重建页面让本地生效，但不自增 web 版本号
+        // （避免每次点击开关都触发"有新版本可部署"提示）
         Ok(())
     });
     handle.await.map_err(|e| e.to_string())?
