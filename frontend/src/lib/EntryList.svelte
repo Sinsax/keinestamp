@@ -61,9 +61,9 @@
     previewBusy = entry.id
     try {
       // 目标状态 = 当前状态取反（当前开启 → 关闭；当前关闭 → 开启）
-      await setEntryPreview(activePath, entry.id, entry.previewEnabled === false)
+      await setEntryPreview(activePath, entry.id, entry.preview_enabled === false)
       // [debug] 临时定位：调用成功
-      console.log('[debug] setEntryPreview ok:', entry.id, 'target=', entry.previewEnabled === false)
+      console.log('[debug] setEntryPreview ok:', entry.id, 'target=', entry.preview_enabled === false)
       await onPreviewChange()
       console.log('[debug] onPreviewChange done:', entry.id)
     } catch (e) {
@@ -283,8 +283,8 @@
             {#if entry.preview}
               <span
                 class="preview-badge"
-                class:active={entry.previewEnabled !== false}
-                title={entry.previewEnabled === false ? '3D 预览已关闭（右键记录可开启）' : '该记录有 3D 预览（右键记录可关闭）'}
+                class:active={entry.preview_enabled !== false}
+                title={entry.preview_enabled === false ? '3D 预览已关闭（右键记录可开启）' : '该记录有 3D 预览（右键记录可关闭）'}
               >3D</span>
             {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
@@ -326,7 +326,7 @@
       <button class="ctx-item" onclick={ctxExport}>导出</button>
       {#if ctxMenu.entry.preview}
         <button class="ctx-item" onclick={ctxTogglePreview} disabled={previewBusy === ctxMenu.entry.id}>
-          {ctxMenu.entry.previewEnabled === false ? '开启 3D 预览' : '关闭 3D 预览'}
+          {ctxMenu.entry.preview_enabled === false ? '开启 3D 预览' : '关闭 3D 预览'}
         </button>
       {/if}
       <button class="ctx-item" onclick={ctxRollback} disabled={ctxRollbackDisabled} title={rollbackPoint ? '该记录为当前回退点，不可回退' : ''}>回退</button>

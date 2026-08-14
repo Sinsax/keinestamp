@@ -141,9 +141,8 @@
         <span class="sp-ignored-badge">已忽略</span>
       {/if}
       <span class="sp-badges">
-        {#if previewMarked}
-          <span class="sp-badge sp-badge-3d" title="记录时生成此文件的 3D 预览（右键取消）">3D</span>
-        {/if}
+        <!-- [debug] 临时：显示每行 previewMarked 布尔值 -->
+        <span class="sp-badge sp-badge-3d" title="debug">3D:{String(previewMarked)}</span>
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>
         {:else if rollbackMark}
