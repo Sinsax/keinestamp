@@ -72,6 +72,10 @@ let statusErrorMsg = $state('')
     else next.add(path)
     previewMarked = next
   }
+  // 本次提交范围中是否有标记 3D 预览的 .blend（决定记录弹窗是否显示 3D 预览选框）
+  const hasPreviewMarked = $derived(
+    [...previewMarked].some((f) => f.endsWith('.blend') && (commitSelection === null || commitSelection.includes(f)))
+  )
   let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] })
   // 回退版本改动标注：change_files（回退改动，可勾选）+ deleted_files（回退删除，只读）
 const rollbackChangeFiles = $derived(rollbackState.change_files)
@@ -960,7 +964,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 </div>
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} busy={recording} progress={commitProgressMsg} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} busy={recording} progress={commitProgressMsg} {hasPreviewMarked} />
 {/if}
 
 {#if conflictFiles}

@@ -5,12 +5,15 @@
     lastTag = '',
     busy = false,
     progress = '',
+    hasPreviewMarked = false,
   }: {
     onConfirm: (msg: string, tag: string | null, noPreview: boolean) => Promise<boolean>
     onCancel: () => void
     lastTag?: string
     busy?: boolean
     progress?: string
+    /** 本次选择文件中是否有标记 3D 预览的 .blend（无标记则不显示 3D 预览选框） */
+    hasPreviewMarked?: boolean
   } = $props()
 
   const TAG_PRESETS = ['建模', 'UV拆分', '绑定', '贴图', '修复']
@@ -100,10 +103,12 @@
         />
       {/if}
     </div>
-    <div class="field row-field">
-      <label for="cd-preview">3D 预览</label>
-      <input id="cd-preview" type="checkbox" bind:checked={previewEnabled} />
-    </div>
+    {#if hasPreviewMarked}
+      <div class="field row-field">
+        <label for="cd-preview">3D 预览</label>
+        <input id="cd-preview" type="checkbox" bind:checked={previewEnabled} />
+      </div>
+    {/if}
     <div class="actions">
       <button onclick={onCancel} disabled={busy}>取消</button>
       <button onclick={handleConfirm} class="accent" disabled={busy || !message.trim()}>
