@@ -141,8 +141,12 @@
         <span class="sp-ignored-badge">已忽略</span>
       {/if}
       <span class="sp-badges">
-        {#if previewMarked}
-          <span class="sp-badge sp-badge-3d" title="记录时生成此文件的 3D 预览（右键取消）">3D</span>
+        {#if node.path.endsWith('.blend')}
+          <span
+            class="sp-badge sp-badge-3d"
+            class:marked={previewMarked}
+            title={previewMarked ? '已标记 3D 预览（右键取消）' : '未标记 3D 预览（右键标记，记录时生成 GLB）'}
+          >3D</span>
         {/if}
         {#if rollbackDeleted}
           <span class="sp-badge sp-badge-rbd">已检出删除</span>
@@ -205,8 +209,15 @@
     letter-spacing: 0.5px;
   }
   :global(.sp-badge-3d) {
+    color: var(--text-dim) !important;
+    border: 1px solid var(--border) !important;
+    font-weight: 600 !important;
+    opacity: 0.6;
+  }
+  :global(.sp-badge-3d.marked) {
     color: var(--accent) !important;
     border-color: var(--accent) !important;
     font-weight: 700 !important;
+    opacity: 1;
   }
 </style>
