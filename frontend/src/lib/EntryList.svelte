@@ -60,7 +60,8 @@
     if (!activePath || previewBusy || !entry.preview) return
     previewBusy = entry.id
     try {
-      await setEntryPreview(activePath, entry.id, entry.previewEnabled !== false)
+      // 目标状态 = 当前状态取反（当前开启 → 关闭；当前关闭 → 开启）
+      await setEntryPreview(activePath, entry.id, entry.previewEnabled === false)
       await onPreviewChange()
     } catch { /* ignore */ }
     previewBusy = ''
