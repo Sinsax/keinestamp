@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/exhd/keinestamp
-ExecStart=%h/exhd/keinestamp/keinestamp serve
+WorkingDirectory=%h/keinestamp
+Environment=KEINESTAMP_BASE_DIR=%h/keinestamp
+ExecStart=%h/keinestamp/keinestamp serve
 Restart=on-failure
 RestartSec=5
 # Hardening
@@ -14,7 +15,9 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=read-only
-ReadWritePaths=%h/exhd/keinestamp/web-root
+# 必须放开整个部署目录：web-root 与 .keinestamp-projects.json（web_root 父目录）都要可写。
+# 只放行 web-root 会导致注册表落盘失败（上传返回 200、内存注册可用，但重启即丢 token）。
+ReadWritePaths=%h/keinestamp
 
 [Install]
 WantedBy=default.target
