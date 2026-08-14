@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
 use tauri::Manager;
+use keinestamp::preview::PreviewProvider;
 
 fn map_err<T>(r: anyhow::Result<T>) -> Result<T, String> {
     r.map_err(|e| e.to_string())
