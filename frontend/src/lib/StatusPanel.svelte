@@ -49,9 +49,13 @@
     parseStatus(statusOutput).filter((f) => !isHiddenPath(f.path))
   )
   const statusMap = $derived(Object.fromEntries(statusFiles.map((f) => [f.path, f])) as Record<string, StatusFile>)
+  // 默认“全选”不自动包含已删除文件：删除必须显式勾选才会提交，避免误提交没注意到的删除
+  const autoSelectedFiles = $derived(statusFiles.filter((f) => f.x !== 'D'))
   // 回退版本改动标记：change_files（检出）+ deleted_files（回退删除，只读）+ modified_files（真修改）
   const rollbackChangeSet = $derived(new Set(rollbackActive ? rollbackChangeFiles : []))
-  const rollbackDeletedSet = $derived(new Set(rollbackActive ? rollbackDeletedFiles : []))
+  // 回退删除不再作为只读/自动提交项：文件已从工作区移除，会以普通 D 状态出现在 statusFiles 中，
+  // 由用户显式勾选后才提交。
+  const rollbackDeletedSet = $derived(new Set<string>())
   const rollbackModifiedSet = $derived(new Set(rollbackActive ? rollbackModifiedFiles : []))
   const visibleFiles = $derived.by(() => {
     const seen = new Set<string>()
@@ -71,13 +75,7 @@
         out.push(p)
       }
     }
-    // 回退删除文件：磁盘保留、只读标记（回退状态下；marker 清除后自然不在列表）
-    for (const p of rollbackDeletedFiles) {
-      if (isHiddenPath(p)) continue
-      if (seen.has(p)) continue
-      seen.add(p)
-      out.push(p)
-    }
+    // 回退删除文件已从工作区移除，会以普通 D 状态出现在 statusFiles 中，无需再单独加入
     // 回退检出文件：全部显示（含两版共有的——status 无变化不显示；含被忽略文件——灰色已检出）
     for (const p of rollbackChangeFiles) {
       if (isHiddenPath(p)) continue
@@ -93,9 +91,9 @@
   const fileSet = $derived(new Set(statusFiles.map((f) => f.path)))
   const selectionSet = $derived(selection === null ? null : new Set(selection))
   const selectedCount = $derived(
-    selection === null ? statusFiles.length : selection.filter((p) => fileSet.has(p)).length
+    selection === null ? autoSelectedFiles.length : selection.filter((p) => fileSet.has(p)).length
   )
-  const allSelected = $derived(selection === null || selectedCount === statusFiles.length)
+  const allSelected = $derived(selection === null || selectedCount === autoSelectedFiles.length)
 
   const dirFilesMap = $derived.by(() => {
     const map: Record<string, string[]> = {}
@@ -143,6 +141,9 @@
   let collapsedDirs = $state<Set<string>>(new Set())
   let userExpanded = $state<Set<string>>(new Set())
   let userCollapsed = $state<Set<string>>(new Set())
+  // 记录已经处于“已删除”状态的路径：用于检测“文件刚变成删除”时自动从选择中移除，
+  // 避免之前勾选/文件夹勾选残留的删除项在用户不知情时被提交。
+  let knownDeletedPaths = $state<Set<string>>(new Set())
 
   const autoFoldable = $derived.by(() => {
     const s = new Set<string>()
@@ -195,25 +196,34 @@
 
   function isChecked(path: string): boolean {
     if (isIgnored(path)) return selectionSet !== null && selectionSet.has(path)
+    const st = statusMap[path]
+    // 默认“全选”不自动勾选已删除文件；删除需要用户显式勾选
+    if (st?.x === 'D') return selectionSet !== null && selectionSet.has(path)
     return selectionSet === null || selectionSet.has(path)
   }
 
   function toggleFile(path: string) {
     const base = selection === null
-      ? statusFiles.map((f) => f.path)
+      ? autoSelectedFiles.map((f) => f.path)
       : [...selection]
     const next = base.includes(path)
       ? base.filter((p) => p !== path)
       : [...base, path]
     const allSel =
-      statusFiles.length === next.length &&
-      statusFiles.every((f) => next.includes(f.path))
+      autoSelectedFiles.length === next.length &&
+      autoSelectedFiles.every((f) => next.includes(f.path))
     onSelectionChange(allSel ? null : next)
   }
 
   function dirState(node: FileTreeNode): 'all' | 'none' | 'partial' {
     const fs = dirFilesMap[node.path] || []
-    if (selection === null) return fs.length === 0 ? 'none' : 'all'
+    if (selection === null) {
+      // 默认全选不包含已删除文件：目录里若混有删除，显示为“部分选择”
+      const autoFs = fs.filter((p) => statusMap[p]?.x !== 'D')
+      if (autoFs.length === 0) return 'none'
+      if (autoFs.length === fs.length) return 'all'
+      return 'partial'
+    }
     let count = 0
     for (const p of fs) if (selection.includes(p)) count++
     if (count === 0) return 'none'
@@ -223,16 +233,20 @@
 
   function toggleDir(node: FileTreeNode) {
     const fs = dirFilesMap[node.path] || []
-    const base = selection === null ? statusFiles.map((f) => f.path) : [...selection]
+    const base = selection === null ? autoSelectedFiles.map((f) => f.path) : [...selection]
     const baseSet = new Set(base)
     const allIn = fs.every((p) => baseSet.has(p))
+    // 先移除该目录下的所有旧选择（含已删除/不再出现在树中的残留路径），
+    // 避免“之前勾过文件夹，后来文件被删除，取消文件夹时残留删除项仍被提交”
+    const baseWithoutDir = base.filter(
+      (p) => p !== node.path && !p.startsWith(node.path + '/'),
+    )
     const next = allIn
-      // 取消：移除目录下文件 + 目录本身（目录路径残留会导致记录时 stage 目录 = 全提）
-      ? base.filter((p) => p !== node.path && !fs.includes(p))
-      : Array.from(new Set([...base, ...fs, node.path]))
+      ? baseWithoutDir
+      : Array.from(new Set([...baseWithoutDir, node.path, ...fs]))
     const allSel =
-      statusFiles.length === next.length &&
-      statusFiles.every((f) => next.includes(f.path))
+      autoSelectedFiles.length === next.length &&
+      autoSelectedFiles.every((f) => next.includes(f.path))
     onSelectionChange(allSel ? null : next)
   }
 
@@ -308,6 +322,22 @@
         ruleIgnoredSet = new Set(info.rule_ignored)
       })
       .catch(() => {})
+  })
+
+  // 当某个文件“刚变成已删除”时，自动把它从当前选择中移除；
+  // 用户如果确实要提交删除，需要在该文件变为 D 后重新显式勾选一次。
+  $effect(() => {
+    const currentDeleted = new Set(statusFiles.filter((f) => f.x === 'D').map((f) => f.path))
+    if (selection !== null) {
+      const newlyDeleted = [...currentDeleted].filter((p) => !knownDeletedPaths.has(p))
+      if (newlyDeleted.length > 0) {
+        const next = selection.filter((p) => !newlyDeleted.includes(p))
+        if (next.length !== selection.length) {
+          onSelectionChange(next)
+        }
+      }
+    }
+    knownDeletedPaths = currentDeleted
   })
 
   function isIgnored(path: string): boolean {
@@ -584,7 +614,7 @@
       <button onclick={menuCopyName}>复制名称</button>
       {#if !contextMenu.isDir && isPreviewable(contextMenu.path)}
         <button onclick={menuTogglePreviewMark}>
-          {previewMarked.has(contextMenu.path) ? '取消 3D 预览标记' : '标记 3D 预览'}
+          {previewMarked.has(contextMenu.path) ? '取消预览标记' : '标记预览'}
         </button>
       {/if}
       {#if canDiscard(contextMenu.path)}
@@ -707,6 +737,7 @@
     flex-shrink: 0;
   }
   :global(.sp-icon) { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
+  :global(.sp-file-icon) { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
   :global(.sp-ext-badge) {
     font-size: 9px;
     font-weight: 600;

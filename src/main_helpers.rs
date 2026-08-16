@@ -1,4 +1,4 @@
-﻿use anyhow::Context;
+use anyhow::Context;
 use std::path::Path;
 
 pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> anyhow::Result<()> {
@@ -51,9 +51,12 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
         entry.message,
         entry.files.len(),
     );
-    std::fs::write(output_dir.join("README.txt"), &readme)
-        .context("failed to write README.txt")?;
+    std::fs::write(output_dir.join("README.txt"), &readme).context("failed to write README.txt")?;
 
-    println!("已导出提交 {} 到 {:?}", &entry.id[..7.min(entry.id.len())], output_dir);
+    println!(
+        "已导出提交 {} 到 {:?}",
+        &entry.id[..7.min(entry.id.len())],
+        output_dir
+    );
     Ok(())
 }

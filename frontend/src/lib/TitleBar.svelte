@@ -36,7 +36,7 @@
     <img class="tb-icon" src={logo} alt="Keinestamp logo" />
     <span class="tb-title">Keinestamp</span>
     </div>
-    <div class="tb-subtitle">Blender Lore Progress Board</div>
+    <div class="tb-subtitle">Lore Progress Board</div>
   <div class="tb-spacer"></div>
   <div class="tb-controls">
     <button class="tb-btn" onclick={doMinimize} title="Minimize">

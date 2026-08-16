@@ -2,7 +2,11 @@ use clap::{Parser, Subcommand};
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
-#[command(name = "keinestamp", version, about = "Keinestamp - Blender Lore Progress Board")]
+#[command(
+    name = "keinestamp",
+    version,
+    about = "Keinestamp - Blender Lore Progress Board"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
@@ -97,7 +101,11 @@ enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
 
-        #[arg(long, required = true, help = "Server URL (e.g. http://192.168.0.100:7799)")]
+        #[arg(
+            long,
+            required = true,
+            help = "Server URL (e.g. http://192.168.0.100:7799)"
+        )]
         server: String,
 
         #[arg(long, help = "Deploy token (Bearer auth)")]
@@ -118,8 +126,7 @@ fn main() -> anyhow::Result<()> {
     // 仅拦截需要 lore 的子命令：blender 版本列表/下载与配置查看不依赖 lore。
     let needs_lore = !matches!(
         cli.command,
-        Some(Commands::DownloadBlender { .. })
-            | Some(Commands::ListBlenderVersions)
+        Some(Commands::DownloadBlender { .. }) | Some(Commands::ListBlenderVersions)
     );
     if needs_lore {
         if let Err(e) = keinestamp::lore_backend::check_lore_env() {
@@ -149,13 +156,24 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::Status { path }) => cmd_status(&path),
         Some(Commands::Log { path, count }) => cmd_log(&path, count),
         Some(Commands::Config { path, set }) => cmd_config(&path, set.as_deref()),
-        Some(Commands::Export { path, entry, output }) => cmd_export(&path, &entry, &output),
-        Some(Commands::Serve { path, port, host, config }) => cmd_serve(&path, port, &host, config.as_deref()),
-        Some(Commands::Deploy { path, server, deploy_token }) => cmd_deploy(&path, &server, deploy_token.as_deref()),
+        Some(Commands::Export {
+            path,
+            entry,
+            output,
+        }) => cmd_export(&path, &entry, &output),
+        Some(Commands::Serve {
+            path,
+            port,
+            host,
+            config,
+        }) => cmd_serve(&path, port, &host, config.as_deref()),
+        Some(Commands::Deploy {
+            path,
+            server,
+            deploy_token,
+        }) => cmd_deploy(&path, &server, deploy_token.as_deref()),
 
-        Some(Commands::DownloadBlender { version }) => {
-            cmd_download_blender(version.as_deref())
-        }
+        Some(Commands::DownloadBlender { version }) => cmd_download_blender(version.as_deref()),
         Some(Commands::ListBlenderVersions) => {
             let versions = keinestamp::blender_download::fetch_blender_versions()
                 .unwrap_or_else(|_| keinestamp::blender_download::list_blender_versions());
@@ -169,7 +187,9 @@ fn main() -> anyhow::Result<()> {
         None => {
             println!("Keinestamp - Blender Lore Progress Board");
             println!("用法: keinestamp <子命令> [选项]");
-            println!("子命令: init, record, push, pull, rollback, restore, status, log, config, export, serve, deploy, download-blender, list-blender-versions");
+            println!(
+                "子命令: init, record, push, pull, rollback, restore, status, log, config, export, serve, deploy, download-blender, list-blender-versions"
+            );
             println!("GUI 模式: 运行 `cargo tauri dev` 或使用编译后的 Tauri 应用");
             println!("查看详细帮助: keinestamp --help");
             Ok(())
@@ -239,7 +259,10 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
     }
 
     keinestamp::lore_project::rollback(&meta.project_root, &full, &hidden, false)?;
-    println!("已回退到记录 {}（可用 restore 恢复）", &full[..7.min(full.len())]);
+    println!(
+        "已回退到记录 {}（可用 restore 恢复）",
+        &full[..7.min(full.len())]
+    );
     Ok(())
 }
 
@@ -308,8 +331,11 @@ fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
     println!("{} 提交历史（最近 {} 条）：", project, count);
 
     // 文件数从 timeline 缓存取（展示缓存，rebuild_cache 在每次 record 时重建）；拿不到则显示 0
-    let mut file_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-    if let Ok(tl) = keinestamp::timeline::read_timeline(&keinestamp::timeline::timeline_cache_path(&meta.project_root)) {
+    let mut file_counts: std::collections::HashMap<String, usize> =
+        std::collections::HashMap::new();
+    if let Ok(tl) = keinestamp::timeline::read_timeline(&keinestamp::timeline::timeline_cache_path(
+        &meta.project_root,
+    )) {
         for e in &tl.entries {
             file_counts.insert(e.id.clone(), e.files.len());
         }
@@ -356,7 +382,12 @@ fn cmd_serve(path: &Path, port: u16, host: &str, config_path: Option<&Path>) -> 
             Some(p) => keinestamp::serve::load_config(p)?,
             None => {
                 let web_root = base.join("web-root");
-                keinestamp::serve::auto_generate_config(&base.join("serve.toml"), port, host, &web_root)?
+                keinestamp::serve::auto_generate_config(
+                    &base.join("serve.toml"),
+                    port,
+                    host,
+                    &web_root,
+                )?
             }
         }
     };
@@ -382,7 +413,14 @@ fn cmd_deploy(path: &Path, server: &str, deploy_token: Option<&str>) -> anyhow::
     }
     let project_id = meta.project_id.as_deref().unwrap_or("");
     let project_name = keinestamp::config::resolve_site_name(&meta);
-    let prefix = keinestamp::push::deploy_to_server(&meta.web_root, server_url, token, meta.access_token.as_deref(), &project_name, project_id)?;
+    let prefix = keinestamp::push::deploy_to_server(
+        &meta.web_root,
+        server_url,
+        token,
+        meta.access_token.as_deref(),
+        &project_name,
+        project_id,
+    )?;
     let url = if prefix.is_empty() {
         server_url.to_string()
     } else {
@@ -423,7 +461,11 @@ fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
 
     println!(
         "  自动连接:       {}",
-        if keinestamp::app_config::get_auto_connect() { "是" } else { "否" }
+        if keinestamp::app_config::get_auto_connect() {
+            "是"
+        } else {
+            "否"
+        }
     );
 
     if let Some(ref token) = meta.access_token {
@@ -432,7 +474,10 @@ fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
         println!("  访问令牌:       (未设置)");
     }
 
-    println!("  提交身份:       {}", keinestamp::app_config::get_lore_identity());
+    println!(
+        "  提交身份:       {}",
+        keinestamp::app_config::get_lore_identity()
+    );
 
     Ok(())
 }
@@ -444,7 +489,11 @@ fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
 
     let key = &kv[..equal_pos];
     let value_str = &kv[equal_pos + 1..];
-    let value = if value_str.is_empty() { None } else { Some(value_str) };
+    let value = if value_str.is_empty() {
+        None
+    } else {
+        Some(value_str)
+    };
 
     let meta_path = keinestamp::config::meta_path(path);
     let mut meta = keinestamp::config::read_meta(&meta_path)?;

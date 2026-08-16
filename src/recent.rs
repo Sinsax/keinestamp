@@ -90,8 +90,11 @@ impl RecentProjects {
 
     pub fn reorder_paths_to(paths: &[String], recent_path: &Path) {
         let mut recent = Self::load_from(recent_path);
-        let mut by_path: std::collections::HashMap<String, RecentEntry> =
-            recent.entries.into_iter().map(|e| (e.path.clone(), e)).collect();
+        let mut by_path: std::collections::HashMap<String, RecentEntry> = recent
+            .entries
+            .into_iter()
+            .map(|e| (e.path.clone(), e))
+            .collect();
         let mut out: Vec<RecentEntry> = Vec::new();
         for p in paths {
             if let Some(e) = by_path.remove(p) {
@@ -151,7 +154,11 @@ mod tests {
 
     fn temp_recent_path() -> PathBuf {
         let n = TEST_COUNTER.fetch_add(1, Ordering::Relaxed);
-        std::env::temp_dir().join(format!("keinestamp_recent_test_{}_{}.json", std::process::id(), n))
+        std::env::temp_dir().join(format!(
+            "keinestamp_recent_test_{}_{}.json",
+            std::process::id(),
+            n
+        ))
     }
 
     #[test]
@@ -194,10 +201,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
 
         for i in 0..25 {
-            RecentProjects::add_path_to(
-                Path::new(&format!("/tmp/proj_{}", i)),
-                &path,
-            );
+            RecentProjects::add_path_to(Path::new(&format!("/tmp/proj_{}", i)), &path);
         }
 
         let recent = RecentProjects::load_from(&path);

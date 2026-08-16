@@ -31,20 +31,34 @@ fn blender_cmd(blender_path: Option<&Path>) -> std::process::Command {
 
 /// GLB 导出参数版本：变更导出脚本（减面策略/纹理尺寸等）后 +1，
 /// 旧版 GLB（无对应标记）会重新导出——否则"已存在跳过"会保留旧产物。
-const GLB_EXPORT_VERSION: u32 = 2;
+const GLB_EXPORT_VERSION: u32 = 3;
 
-pub fn export_to_glb(blend_path: &Path, output_dir: &Path, output_name: &str, blender_path: Option<&Path>) -> Result<PathBuf> {
-    eprintln!("[debug] export_to_glb: blend={:?}, output_dir={:?}, name={}, blender={:?}", blend_path, output_dir, output_name, blender_path);
+pub fn export_to_glb(
+    blend_path: &Path,
+    output_dir: &Path,
+    output_name: &str,
+    blender_path: Option<&Path>,
+) -> Result<PathBuf> {
+    eprintln!(
+        "[debug] export_to_glb: blend={:?}, output_dir={:?}, name={}, blender={:?}",
+        blend_path, output_dir, output_name, blender_path
+    );
     std::fs::create_dir_all(output_dir)?;
 
     let output_path = output_dir.join(format!("{}.glb", output_name));
     let version_marker = output_dir.join(format!("{}.glb.v{}", output_name, GLB_EXPORT_VERSION));
     if output_path.exists() && version_marker.exists() {
-        eprintln!("[debug] export_to_glb: GLB already exists (v{}), skipping: {:?}", GLB_EXPORT_VERSION, output_path);
+        eprintln!(
+            "[debug] export_to_glb: GLB already exists (v{}), skipping: {:?}",
+            GLB_EXPORT_VERSION, output_path
+        );
         return Ok(output_path);
     }
     if output_path.exists() {
-        eprintln!("[debug] export_to_glb: 旧版 GLB 无 v{} 标记，重新导出（瘦身参数变更）: {:?}", GLB_EXPORT_VERSION, output_path);
+        eprintln!(
+            "[debug] export_to_glb: 旧版 GLB 无 v{} 标记，重新导出（瘦身参数变更）: {:?}",
+            GLB_EXPORT_VERSION, output_path
+        );
     }
 
     // 预览瘦身（v2）：临时移除形态键 → Decimate 减面（目标 ~5 万顶点）→ 贴图限 1024px。
@@ -61,15 +75,30 @@ for obj in bpy.data.objects:
         obj.hide_render = True
 
 # 1) 移除形态键：Decimate(Collapse) 在带 shape keys 的网格上会异常/错乱；
-#    形态键本来就不导出（export_morph=False），预览无需保留
+#    形态键本来就不导出（export_morph=False），预览无需保留。
+#    注意：不能直接删 reference_key（Basis）——Blender 可能拒绝，或把当前 active/last
+#    形态键烘进网格。必须先删掉所有非 Basis 的 key block，再整体删除 shape_keys 数据块。
 for obj in bpy.data.objects:
     if obj.type != 'MESH':
         continue
-    while obj.data.shape_keys:
+    key = obj.data.shape_keys
+    if key is None:
+        continue
+    # 先清掉非 Basis 的形态键
+    for kb in list(key.key_blocks):
+        if kb != key.reference_key:
+            try:
+                obj.shape_key_remove(kb)
+            except Exception:
+                pass
+    # 再删除整个 shape keys 数据块（含 Basis），确保网格回到 Basis 原始形态
+    try:
+        bpy.data.shape_keys.remove(key, do_unlink=True)
+    except Exception:
         try:
-            obj.shape_key_remove(obj.data.shape_keys.reference_key)
+            obj.shape_key_remove(key.reference_key)
         except Exception:
-            break
+            pass
 
 # 2) Decimate 减面（Collapse，目标 ~50000 顶点）：仅处理参与导出的可见网格
 TARGET_VERTS = 50000
@@ -134,7 +163,9 @@ for name, state in saved.items():
             if let Some(io_err) = e.downcast_ref::<std::io::Error>() {
                 if io_err.kind() == std::io::ErrorKind::NotFound {
                     eprintln!("[debug] export_to_glb: Blender not found in PATH");
-                    anyhow::bail!("Blender not found in PATH. Please install Blender or configure the path.")
+                    anyhow::bail!(
+                        "Blender not found in PATH. Please install Blender or configure the path."
+                    )
                 }
             }
             eprintln!("[debug] export_to_glb: failed to run Blender: {}", e);
@@ -154,7 +185,13 @@ for name, state in saved.items():
             if let Ok(entries) = std::fs::read_dir(output_dir) {
                 for e in entries.flatten() {
                     let name = e.file_name().to_string_lossy().to_string();
-                    if name.starts_with(&format!("{}.glb.v", output_name)) && name != version_marker.file_name().unwrap_or_default().to_string_lossy() {
+                    if name.starts_with(&format!("{}.glb.v", output_name))
+                        && name
+                            != version_marker
+                                .file_name()
+                                .unwrap_or_default()
+                                .to_string_lossy()
+                    {
                         let _ = std::fs::remove_file(e.path());
                     }
                 }
@@ -164,13 +201,27 @@ for name, state in saved.items():
         }
         st if st.success() => {
             let stderr = String::from_utf8_lossy(&stderr);
-            eprintln!("[debug] export_to_glb: Blender exited 0 but GLB not found, stderr: {}", stderr.trim().chars().take(300).collect::<String>());
-            anyhow::bail!("Blender GLB export produced no output for {:?}: {}", blend_path, stderr.trim().chars().take(200).collect::<String>())
+            eprintln!(
+                "[debug] export_to_glb: Blender exited 0 but GLB not found, stderr: {}",
+                stderr.trim().chars().take(300).collect::<String>()
+            );
+            anyhow::bail!(
+                "Blender GLB export produced no output for {:?}: {}",
+                blend_path,
+                stderr.trim().chars().take(200).collect::<String>()
+            )
         }
         _ => {
             let stderr = String::from_utf8_lossy(&stderr);
-            eprintln!("[debug] export_to_glb: Blender failed: {}", stderr.trim().chars().take(200).collect::<String>());
-            anyhow::bail!("Blender GLB export failed for {:?}: {}", blend_path, stderr.trim())
+            eprintln!(
+                "[debug] export_to_glb: Blender failed: {}",
+                stderr.trim().chars().take(200).collect::<String>()
+            );
+            anyhow::bail!(
+                "Blender GLB export failed for {:?}: {}",
+                blend_path,
+                stderr.trim()
+            )
         }
     }
 }
@@ -183,22 +234,35 @@ pub fn clean_old_glb_previews(project_root: &Path, dir: &Path, max: usize) -> Re
         return Ok(());
     }
     // timeline.json 引用的 preview 相对路径集合（previews_glb/xxx.glb）
-    let referenced: std::collections::HashSet<String> = crate::timeline::read_timeline(
-        &crate::timeline::timeline_cache_path(project_root),
-    )
-    .map(|t| {
-        t.entries
-            .iter()
-            .filter_map(|e| {
-                let p = e.preview.trim_start_matches("./");
-                (p.starts_with("previews_glb/") && p.ends_with(".glb")).then(|| p.to_string())
+    let referenced: std::collections::HashSet<String> =
+        crate::timeline::read_timeline(&crate::timeline::timeline_cache_path(project_root))
+            .map(|t| {
+                let mut refs: std::collections::HashSet<String> = t
+                    .entries
+                    .iter()
+                    .filter_map(|e| {
+                        let p = e.preview.trim_start_matches("./");
+                        (p.starts_with("previews_glb/") && p.ends_with(".glb"))
+                            .then(|| p.to_string())
+                    })
+                    .collect();
+                for e in &t.entries {
+                    for p in &e.previews {
+                        let rel = p.path.trim_start_matches("./");
+                        if rel.starts_with("previews_glb/") && rel.ends_with(".glb") {
+                            refs.insert(rel.to_string());
+                        }
+                    }
+                }
+                refs
             })
-            .collect()
-    })
-    .unwrap_or_else(|e| {
-        eprintln!("[debug] clean_old_glb_previews: read timeline failed: {}", e);
-        std::collections::HashSet::new()
-    });
+            .unwrap_or_else(|e| {
+                eprintln!(
+                    "[debug] clean_old_glb_previews: read timeline failed: {}",
+                    e
+                );
+                std::collections::HashSet::new()
+            });
 
     let mut entries: Vec<_> = std::fs::read_dir(dir)?
         .flatten()
@@ -218,7 +282,11 @@ pub fn clean_old_glb_previews(project_root: &Path, dir: &Path, max: usize) -> Re
             .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
     });
     let to_remove = entries.len() - max;
-    eprintln!("[debug] clean_old_glb_previews: {} orphans, removing {}", entries.len(), to_remove);
+    eprintln!(
+        "[debug] clean_old_glb_previews: {} orphans, removing {}",
+        entries.len(),
+        to_remove
+    );
     for entry in entries.iter().take(to_remove) {
         std::fs::remove_file(entry.path())?;
     }
@@ -264,8 +332,14 @@ mod tests {
         .unwrap();
         // max=1：只删最旧孤儿（引用文件即使超限也保留）
         clean_old_glb_previews(&root, &root.join("previews_glb"), 1).unwrap();
-        assert!(root.join("previews_glb/ref_old.glb").exists(), "被引用文件应保留");
-        assert!(root.join("previews_glb/ref_new.glb").exists(), "被引用文件应保留");
+        assert!(
+            root.join("previews_glb/ref_old.glb").exists(),
+            "被引用文件应保留"
+        );
+        assert!(
+            root.join("previews_glb/ref_new.glb").exists(),
+            "被引用文件应保留"
+        );
         let orphans_left: Vec<_> = std::fs::read_dir(root.join("previews_glb"))
             .unwrap()
             .flatten()

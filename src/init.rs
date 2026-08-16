@@ -1,4 +1,4 @@
-﻿use crate::config::{self, MetaConfig};
+use crate::config::{self, MetaConfig};
 use crate::detect;
 use anyhow::{Context, Result};
 use std::path::Path;
@@ -14,8 +14,9 @@ pub fn init_project(project_root: &Path) -> Result<()> {
             // 补建所有初始化预设文件（re-init fills gaps）：
             // .lore 缺失（手动删除/旧工程）→ 离线纯本地建仓（不连服务器）
             if !crate::lore_backend::repo_exists(project_root) {
-                crate::lore_backend::create_repo(project_root)
-                    .with_context(|| format!("failed to create lore repository at {:?}", project_root))?;
+                crate::lore_backend::create_repo(project_root).with_context(|| {
+                    format!("failed to create lore repository at {:?}", project_root)
+                })?;
             }
             // web/ 结构 + timeline.json + index.html 缺失补建
             ensure_web_structure(&meta.web_root)?;
@@ -40,7 +41,9 @@ pub fn init_project(project_root: &Path) -> Result<()> {
 /// 进程被杀/中断会残留；lore 原生忽略它们但占磁盘）。递归 walk，只删 ~loretemp 后缀。
 fn clean_loretemp_orphans(project_root: &Path) {
     fn walk(dir: &Path) {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -90,10 +93,7 @@ fn perform_init(project_root: &Path) -> Result<()> {
     config::write_meta(&meta_path, &meta)
         .with_context(|| format!("failed to write meta config to {:?}", meta_path))?;
 
-    eprintln!(
-        "Keinestamp initialized at {:?}",
-        project_root
-    );
+    eprintln!("Keinestamp initialized at {:?}", project_root);
 
     Ok(())
 }
@@ -113,7 +113,8 @@ fn ensure_loreignore(project_root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn ensure_web_structure(web_root: &Path) -> Result<()> {    if !web_root.exists() {
+fn ensure_web_structure(web_root: &Path) -> Result<()> {
+    if !web_root.exists() {
         std::fs::create_dir_all(web_root)?;
     }
 
@@ -165,7 +166,8 @@ mod tests {
     use super::*;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("keinestamp_init_{}_{}", name, std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_init_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -182,8 +184,14 @@ mod tests {
 
         init_project(&dir)?;
 
-        assert!(!dir.join("model.blend.~loretemp").exists(), "顶层临时文件清理");
-        assert!(!dir.join(".keinestamp").join("x.~loretemp").exists(), "子目录临时文件清理");
+        assert!(
+            !dir.join("model.blend.~loretemp").exists(),
+            "顶层临时文件清理"
+        );
+        assert!(
+            !dir.join(".keinestamp").join("x.~loretemp").exists(),
+            "子目录临时文件清理"
+        );
         assert!(dir.join("keep.txt").exists(), "正常文件保留");
 
         std::fs::remove_dir_all(&dir)?;
@@ -201,12 +209,28 @@ mod tests {
         assert!(config::meta_path(&dir).exists());
         assert!(dir.join(".lore").exists(), "init 应创建 lore 仓库");
         assert!(crate::lore_backend::repo_exists(&dir));
-        assert!(!dir.join(".gitattributes").exists(), "不应生成 .gitattributes（无 LFS）");
+        assert!(
+            !dir.join(".gitattributes").exists(),
+            "不应生成 .gitattributes（无 LFS）"
+        );
         assert!(!dir.join(".git").exists(), "不应创建 git 仓库");
         assert!(dir.join(".keinestamp").join("web").exists());
-        assert!(!dir.join("web/.git").exists(), "web 产物并入主仓库，不应有独立 git 仓库");
-        assert!(dir.join(".keinestamp").join("web").join("timeline.json").exists());
-        assert!(dir.join(".keinestamp").join("web").join("index.html").exists());
+        assert!(
+            !dir.join("web/.git").exists(),
+            "web 产物并入主仓库，不应有独立 git 仓库"
+        );
+        assert!(
+            dir.join(".keinestamp")
+                .join("web")
+                .join("timeline.json")
+                .exists()
+        );
+        assert!(
+            dir.join(".keinestamp")
+                .join("web")
+                .join("index.html")
+                .exists()
+        );
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -235,14 +259,16 @@ mod tests {
         init_project(&dir)?;
         let meta_after_first = config::read_meta(&config::meta_path(&dir))?;
 
-        let index_before = std::fs::read_to_string(dir.join(".keinestamp").join("web").join("index.html"))?;
+        let index_before =
+            std::fs::read_to_string(dir.join(".keinestamp").join("web").join("index.html"))?;
 
         init_project(&dir)?;
 
         let meta_after_second = config::read_meta(&config::meta_path(&dir))?;
         assert_eq!(meta_after_first.init_time, meta_after_second.init_time);
 
-        let index_after = std::fs::read_to_string(dir.join(".keinestamp").join("web").join("index.html"))?;
+        let index_after =
+            std::fs::read_to_string(dir.join(".keinestamp").join("web").join("index.html"))?;
         assert_eq!(index_before, index_after);
 
         std::fs::remove_dir_all(&dir)?;

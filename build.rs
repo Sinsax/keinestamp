@@ -35,15 +35,27 @@ fn platform_assets() -> Vec<Asset> {
     #[cfg(target_os = "windows")]
     {
         vec![
-            Asset { name: "lore-v0.8.6-x86_64-pc-windows-msvc.zip", sha256: "092f0d06dcb84a514dec4a2a87a8a854963feb951d640d8100ce3e42acd68d67" },
-            Asset { name: "loreserver-v0.8.6-x86_64-pc-windows-msvc.zip", sha256: "4251e1419875c08485e1d316a1a0c5724e29e2c1a4d952beeb6bf3344926c75e" },
+            Asset {
+                name: "lore-v0.8.6-x86_64-pc-windows-msvc.zip",
+                sha256: "092f0d06dcb84a514dec4a2a87a8a854963feb951d640d8100ce3e42acd68d67",
+            },
+            Asset {
+                name: "loreserver-v0.8.6-x86_64-pc-windows-msvc.zip",
+                sha256: "4251e1419875c08485e1d316a1a0c5724e29e2c1a4d952beeb6bf3344926c75e",
+            },
         ]
     }
     #[cfg(target_os = "linux")]
     {
         vec![
-            Asset { name: "lore-v0.8.6-x86_64-unknown-linux-gnu.tar.gz", sha256: "a7aaeb32a15f6674a328e19096c48dcab5b29b283ba51d37abdadedd930812ad" },
-            Asset { name: "loreserver-v0.8.6-x86_64-unknown-linux-gnu.tar.gz", sha256: "f0de84c6175a476f157754f57316be0346105be502c93fabb65bb908eab0e1e1" },
+            Asset {
+                name: "lore-v0.8.6-x86_64-unknown-linux-gnu.tar.gz",
+                sha256: "a7aaeb32a15f6674a328e19096c48dcab5b29b283ba51d37abdadedd930812ad",
+            },
+            Asset {
+                name: "loreserver-v0.8.6-x86_64-unknown-linux-gnu.tar.gz",
+                sha256: "f0de84c6175a476f157754f57316be0346105be502c93fabb65bb908eab0e1e1",
+            },
         ]
     }
     #[cfg(not(any(target_os = "windows", target_os = "linux")))]
@@ -61,8 +73,16 @@ fn main() {
                 .join("resources")
                 .join("lore-bin")
         });
-    let lore_name = if cfg!(target_os = "windows") { "lore.exe" } else { "lore" };
-    let loreserver_name = if cfg!(target_os = "windows") { "loreserver.exe" } else { "loreserver" };
+    let lore_name = if cfg!(target_os = "windows") {
+        "lore.exe"
+    } else {
+        "lore"
+    };
+    let loreserver_name = if cfg!(target_os = "windows") {
+        "loreserver.exe"
+    } else {
+        "loreserver"
+    };
     let lore_path = out_dir.join(lore_name);
     let loreserver_path = out_dir.join(loreserver_name);
     let version_file = out_dir.join("version.txt");
@@ -87,7 +107,11 @@ fn main() {
     }
 
     // 缺失 → 下载（失败/校验失败 → panic，构建失败）
-    println!("cargo:warning=下载 Lore v{} 捆绑到 {} ...", LORE_VERSION, out_dir.display());
+    println!(
+        "cargo:warning=下载 Lore v{} 捆绑到 {} ...",
+        LORE_VERSION,
+        out_dir.display()
+    );
     std::fs::create_dir_all(&out_dir).expect("创建捆绑目录失败");
     let tmp = std::env::temp_dir().join(format!("keinestamp_lore_bundle_{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&tmp);
@@ -107,9 +131,8 @@ fn main() {
         } else {
             bin.to_string()
         };
-        let src = find_file(&tmp, &exe_name).unwrap_or_else(|| {
-            panic!("解压产物中未找到 {}", exe_name)
-        });
+        let src =
+            find_file(&tmp, &exe_name).unwrap_or_else(|| panic!("解压产物中未找到 {}", exe_name));
         let dst = out_dir.join(&exe_name);
         std::fs::copy(&src, &dst).expect("复制捆绑二进制失败");
     }
@@ -136,16 +159,26 @@ fn copy_to_profile_dir(out_dir: &Path) {
         .and_then(|p| p.parent())
         .and_then(|p| p.parent())
     else {
-        println!("cargo:warning=无法推导 profile 目录（{}），跳过拷贝", out_path.display());
+        println!(
+            "cargo:warning=无法推导 profile 目录（{}），跳过拷贝",
+            out_path.display()
+        );
         return;
     };
     let dest = profile.join("lore-bin");
     let _ = std::fs::remove_dir_all(&dest);
     if let Err(e) = copy_dir(out_dir, &dest) {
-        println!("cargo:warning=拷贝 lore-bin 到 {} 失败: {}", dest.display(), e);
+        println!(
+            "cargo:warning=拷贝 lore-bin 到 {} 失败: {}",
+            dest.display(),
+            e
+        );
         return;
     }
-    println!("cargo:warning=Lore 捆绑已拷贝到 exe 同目录: {}", dest.display());
+    println!(
+        "cargo:warning=Lore 捆绑已拷贝到 exe 同目录: {}",
+        dest.display()
+    );
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -164,7 +197,10 @@ fn copy_dir(src: &Path, dst: &Path) -> std::io::Result<()> {
 }
 
 fn emit_env(out_dir: &Path) {
-    println!("cargo:rustc-env=KEINESTAMP_BUNDLED_LORE_DIR={}", out_dir.display());
+    println!(
+        "cargo:rustc-env=KEINESTAMP_BUNDLED_LORE_DIR={}",
+        out_dir.display()
+    );
 }
 
 /// 获取资产压缩包：本地归档目录（离线）→ 自定义 base → 官方 GitHub → 加速代理（回退+重试）。
@@ -227,7 +263,10 @@ fn download_retry(url: &str, dest: &Path) -> Result<(), String> {
             Ok(()) => return Ok(()),
             Err(e) => {
                 last_err = e;
-                println!("cargo:warning=下载失败（第 {}/3 次）{}: {}", attempt, url, last_err);
+                println!(
+                    "cargo:warning=下载失败（第 {}/3 次）{}: {}",
+                    attempt, url, last_err
+                );
                 if attempt < 3 {
                     std::thread::sleep(std::time::Duration::from_secs(2 * attempt));
                 }
@@ -256,9 +295,14 @@ fn download_once(url: &str, dest: &Path) -> Result<(), String> {
 
 fn verify_sha256(path: &Path, expected: &str, name: &str) {
     use sha2::Digest;
-    let data = std::fs::read(path).unwrap_or_else(|e| panic!("读取 {} 失败: {}", path.display(), e));
+    let data =
+        std::fs::read(path).unwrap_or_else(|e| panic!("读取 {} 失败: {}", path.display(), e));
     let digest = hex::encode(sha2::Sha256::digest(&data));
-    assert_eq!(digest, expected, "sha256 校验失败（可能被篡改或下载不完整）: {}", name);
+    assert_eq!(
+        digest, expected,
+        "sha256 校验失败（可能被篡改或下载不完整）: {}",
+        name
+    );
 }
 
 fn extract(path: &Path, dest: &Path, name: &str) {
@@ -272,10 +316,14 @@ fn extract(path: &Path, dest: &Path, name: &str) {
 }
 
 fn extract_zip(path: &Path, dest: &Path) {
-    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("打开 {} 失败: {}", path.display(), e));
-    let mut archive = zip::ZipArchive::new(file).unwrap_or_else(|e| panic!("解析 zip {} 失败: {}", path.display(), e));
+    let file =
+        std::fs::File::open(path).unwrap_or_else(|e| panic!("打开 {} 失败: {}", path.display(), e));
+    let mut archive = zip::ZipArchive::new(file)
+        .unwrap_or_else(|e| panic!("解析 zip {} 失败: {}", path.display(), e));
     for i in 0..archive.len() {
-        let mut entry = archive.by_index(i).unwrap_or_else(|e| panic!("读取 zip 条目失败: {}", e));
+        let mut entry = archive
+            .by_index(i)
+            .unwrap_or_else(|e| panic!("读取 zip 条目失败: {}", e));
         let rel = entry.name().trim_start_matches('/');
         if rel.is_empty() {
             continue;
@@ -294,10 +342,12 @@ fn extract_zip(path: &Path, dest: &Path) {
 }
 
 fn extract_targz(path: &Path, dest: &Path) {
-    let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("打开 {} 失败: {}", path.display(), e));
+    let file =
+        std::fs::File::open(path).unwrap_or_else(|e| panic!("打开 {} 失败: {}", path.display(), e));
     let gz = flate2::read::GzDecoder::new(file);
     let mut ar = tar::Archive::new(gz);
-    ar.unpack(dest).unwrap_or_else(|e| panic!("解压 tar.gz 失败: {}", e));
+    ar.unpack(dest)
+        .unwrap_or_else(|e| panic!("解压 tar.gz 失败: {}", e));
 }
 
 fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {

@@ -96,7 +96,11 @@ pub fn get_blender_path() -> Option<PathBuf> {
 
 pub fn set_blender_path(path: &str) {
     let mut cfg = AppConfig::load();
-    cfg.blender_path = if path.is_empty() { None } else { Some(path.to_string()) };
+    cfg.blender_path = if path.is_empty() {
+        None
+    } else {
+        Some(path.to_string())
+    };
     cfg.save();
 }
 
@@ -104,7 +108,12 @@ pub fn get_blender_versions() -> Vec<String> {
     let cfg = AppConfig::load();
     cfg.blender_versions
         .as_deref()
-        .map(|s| s.split(',').map(|v| v.trim().to_string()).filter(|v| !v.is_empty()).collect())
+        .map(|s| {
+            s.split(',')
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -131,7 +140,11 @@ pub fn get_deploy_server_url() -> Option<String> {
 
 pub fn set_deploy_server_url(url: &str) {
     let mut cfg = AppConfig::load();
-    cfg.deploy_server_url = if url.is_empty() { None } else { Some(url.to_string()) };
+    cfg.deploy_server_url = if url.is_empty() {
+        None
+    } else {
+        Some(url.to_string())
+    };
     cfg.save();
 }
 
@@ -141,7 +154,11 @@ pub fn get_deploy_token() -> Option<String> {
 
 pub fn set_deploy_token(token: &str) {
     let mut cfg = AppConfig::load();
-    cfg.deploy_token = if token.is_empty() { None } else { Some(token.to_string()) };
+    cfg.deploy_token = if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    };
     cfg.save();
 }
 
@@ -158,7 +175,11 @@ pub fn get_lore_server_url() -> String {
 
 pub fn set_lore_server_url(url: &str) {
     let mut cfg = AppConfig::load();
-    cfg.lore_server_url = if url.trim().is_empty() { None } else { Some(url.trim().to_string()) };
+    cfg.lore_server_url = if url.trim().is_empty() {
+        None
+    } else {
+        Some(url.trim().to_string())
+    };
     cfg.save();
 }
 
@@ -250,36 +271,55 @@ mod tests {
 
     #[test]
     fn test_load_save_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_app_config_test_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_app_config_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
-        let cfg = AppConfig { blender_path: Some("/path/to/blender".to_string()), blender_version: None, blender_versions: None, deploy_server_url: None, deploy_token: None, lore_server_url: Some("lore://127.0.0.1:41337".to_string()), auto_connect: false, close_to_tray: Some(true), auto_restore_project: false, lore_identity: None, deploy_enabled: false, lore_enabled: false };
+        let cfg = AppConfig {
+            blender_path: Some("/path/to/blender".to_string()),
+            blender_version: None,
+            blender_versions: None,
+            deploy_server_url: None,
+            deploy_token: None,
+            lore_server_url: Some("lore://127.0.0.1:41337".to_string()),
+            auto_connect: false,
+            close_to_tray: Some(true),
+            auto_restore_project: false,
+            lore_identity: None,
+            deploy_enabled: false,
+            lore_enabled: false,
+        };
         cfg.save_to(&path);
 
         let loaded = AppConfig::load_from(&path);
-assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
-    assert_eq!(loaded.blender_version, None);
-    assert_eq!(loaded.blender_versions, None);
-    assert_eq!(loaded.deploy_server_url, None);
-    assert_eq!(loaded.deploy_token, None);
-    assert_eq!(loaded.lore_server_url, Some("lore://127.0.0.1:41337".to_string()));
-    assert_eq!(loaded.close_to_tray, Some(true));
+        assert_eq!(loaded.blender_path, Some("/path/to/blender".to_string()));
+        assert_eq!(loaded.blender_version, None);
+        assert_eq!(loaded.blender_versions, None);
+        assert_eq!(loaded.deploy_server_url, None);
+        assert_eq!(loaded.deploy_token, None);
+        assert_eq!(
+            loaded.lore_server_url,
+            Some("lore://127.0.0.1:41337".to_string())
+        );
+        assert_eq!(loaded.close_to_tray, Some(true));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
     fn test_load_missing_file() {
-        let loaded = AppConfig::load_from(std::path::Path::new("/nonexistent/path/app-config.toml"));
-assert_eq!(loaded.blender_path, None);
-    assert_eq!(loaded.blender_version, None);
-    assert_eq!(loaded.blender_versions, None);
+        let loaded =
+            AppConfig::load_from(std::path::Path::new("/nonexistent/path/app-config.toml"));
+        assert_eq!(loaded.blender_path, None);
+        assert_eq!(loaded.blender_version, None);
+        assert_eq!(loaded.blender_versions, None);
     }
 
     #[test]
     fn test_set_blender_path() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_app_set_test_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_app_set_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
@@ -295,7 +335,8 @@ assert_eq!(loaded.blender_path, None);
 
     #[test]
     fn test_lore_identity_roundtrip() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_app_id_test_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_app_id_test_{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("app-config.toml");
 
@@ -304,7 +345,10 @@ assert_eq!(loaded.blender_path, None);
         cfg.save_to(&path);
         let loaded = AppConfig::load_from(&path);
         assert_eq!(
-            loaded.lore_identity.filter(|s| !s.trim().is_empty()).unwrap_or_else(|| "keinestamp@local".to_string()),
+            loaded
+                .lore_identity
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or_else(|| "keinestamp@local".to_string()),
             "keinestamp@local"
         );
         // 设置后持久化

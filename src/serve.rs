@@ -1,7 +1,7 @@
 use crate::three_assets;
 use anyhow::{Context, Result};
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::Read;
 use std::net::IpAddr;
 use std::path::{Path, PathBuf};
@@ -38,10 +38,15 @@ fn log_error(tag: &str, msg: &str) {
 }
 
 static TRUST_PROXY: OnceLock<bool> = OnceLock::new();
+static SITE_NAME: OnceLock<String> = OnceLock::new();
+static WEB_ROOT: OnceLock<PathBuf> = OnceLock::new();
 static UPLOAD_SEQ: AtomicUsize = AtomicUsize::new(0);
 
 fn request_ip(request: &tiny_http::Request) -> IpAddr {
-    let fallback = request.remote_addr().map(|sa| sa.ip()).unwrap_or(IpAddr::from([127, 0, 0, 1]));
+    let fallback = request
+        .remote_addr()
+        .map(|sa| sa.ip())
+        .unwrap_or(IpAddr::from([127, 0, 0, 1]));
     fallback
 }
 
@@ -49,7 +54,11 @@ fn request_ip(request: &tiny_http::Request) -> IpAddr {
 // 默认关闭——直接暴露时 X-Forwarded-For 可伪造，切勿开启。
 fn request_ip_trusted(request: &tiny_http::Request) -> IpAddr {
     if *TRUST_PROXY.get().unwrap_or(&false) {
-        if let Some(h) = request.headers().iter().find(|h| h.field.equiv("X-Forwarded-For")) {
+        if let Some(h) = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("X-Forwarded-For"))
+        {
             if let Some(first) = h.value.as_str().split(',').next() {
                 if let Ok(ip) = first.trim().parse::<IpAddr>() {
                     return ip;
@@ -67,7 +76,11 @@ fn request_ip_trusted(request: &tiny_http::Request) -> IpAddr {
 // 局域网 HTTP 直连不带 Secure（保持登录体验）。
 fn request_is_https(request: &tiny_http::Request) -> bool {
     if *TRUST_PROXY.get().unwrap_or(&false) {
-        if let Some(h) = request.headers().iter().find(|h| h.field.equiv("X-Forwarded-Proto")) {
+        if let Some(h) = request
+            .headers()
+            .iter()
+            .find(|h| h.field.equiv("X-Forwarded-Proto"))
+        {
             if let Some(first) = h.value.as_str().split(',').next() {
                 if first.trim().eq_ignore_ascii_case("https") {
                     return true;
@@ -94,12 +107,19 @@ pub struct ServeConfig {
     /// 备份服务器开关：serve 启动时探测 41339 health，离线则拉起 loreserver（持久化 store，跟随 serve 生命周期）
     #[serde(default)]
     pub enable_loreserver: bool,
+    /// 站点名称：首页大标题默认 Keinestamp，可自定义
+    #[serde(default)]
+    pub site_name: Option<String>,
 }
 
 // 默认只监听本机：请使用 Caddy 反代对外提供服务；
 // 仅局域网直接连接时，请改成 0.0.0.0（明文 HTTP，风险自负）。
-fn default_host() -> String { "127.0.0.1".to_string() }
-fn default_port() -> u16 { 7799 }
+fn default_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_port() -> u16 {
+    7799
+}
 
 pub fn load_config(path: &Path) -> Result<ServeConfig> {
     let content = std::fs::read_to_string(path)
@@ -156,7 +176,9 @@ impl RateLimiter {
         map.retain(|_, tracker| {
             if let Some(blocked_until) = tracker.blocked_until {
                 now < blocked_until
-            } else if now.duration_since(tracker.window_start) > Duration::from_secs(AUTH_WINDOW_SECS) {
+            } else if now.duration_since(tracker.window_start)
+                > Duration::from_secs(AUTH_WINDOW_SECS)
+            {
                 false
             } else {
                 true
@@ -231,10 +253,16 @@ fn check_deploy_auth(
         return AuthResult::RateLimited;
     }
 
-    let auth_header = request.headers().iter().find(|h| h.field.equiv("Authorization"));
+    let auth_header = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"));
     let auth_value = match auth_header {
         Some(h) => h.value.as_str(),
-        None => { rate_limiter.record_failure(&ip); return AuthResult::Unauthorized; }
+        None => {
+            rate_limiter.record_failure(&ip);
+            return AuthResult::Unauthorized;
+        }
     };
 
     if auth_value.starts_with("Bearer ") {
@@ -281,13 +309,21 @@ fn check_browser_static_auth(
         return AuthResult::RateLimited;
     }
 
-    let auth_header = request.headers().iter().find(|h| h.field.equiv("Authorization"));
+    let auth_header = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("Authorization"));
 
     if let Some(h) = auth_header {
         let value = h.value.as_str();
         if value.starts_with("Bearer ") {
             let token = value.trim_start_matches("Bearer ");
-            if project_tokens.read().unwrap().get(project_name).map_or(false, |t| t == token) {
+            if project_tokens
+                .read()
+                .unwrap()
+                .get(project_name)
+                .map_or(false, |t| t == token)
+            {
                 rate_limiter.record_success(&ip);
                 return AuthResult::Authenticated;
             }
@@ -296,7 +332,12 @@ fn check_browser_static_auth(
     }
 
     if let Some(cookie_token) = get_cookie(request, "keinestamp_token") {
-        if project_tokens.read().unwrap().get(project_name).map_or(false, |t| t == cookie_token) {
+        if project_tokens
+            .read()
+            .unwrap()
+            .get(project_name)
+            .map_or(false, |t| t == cookie_token)
+        {
             rate_limiter.record_success(&ip);
             return AuthResult::Authenticated;
         }
@@ -309,7 +350,8 @@ fn check_browser_static_auth(
 // --- Login page ---
 
 fn login_page_html(project_name: &str) -> String {
-    format!(r##"<!DOCTYPE html>
+    format!(
+        r##"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -362,7 +404,10 @@ button:hover{{background:var(--accent-hover)}}
 }})();
 </script>
 </body>
-</html>"##, project = project_name, favicon = crate::three_assets::logo_favicon_b64())
+</html>"##,
+        project = project_name,
+        favicon = crate::three_assets::logo_favicon_b64()
+    )
 }
 
 fn serve_login_page(request: tiny_http::Request, project_name: &str) -> Result<()> {
@@ -380,9 +425,41 @@ fn handle_index(request: tiny_http::Request) -> Result<()> {
 }
 
 fn index_page_html() -> String {
+    let site_name = SITE_NAME
+        .get()
+        .cloned()
+        .unwrap_or_else(|| "Keinestamp".to_string());
     INDEX_HTML_TEMPLATE
         .replace("{favicon}", crate::three_assets::logo_favicon_b64())
-        .replace("{greenfavicon}", crate::three_assets::logo_green_favicon_b64())
+        .replace(
+            "{greenfavicon}",
+            crate::three_assets::logo_green_favicon_b64(),
+        )
+        .replace("{site_name}", &site_name)
+        .replace("{projects}", &render_project_list())
+}
+
+fn render_project_list() -> String {
+    let Some(root) = WEB_ROOT.get() else {
+        return String::new();
+    };
+    let mut items = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(root) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() && path.join("index.html").exists() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                items.push(format!(
+                    r##"<a class="proj-item" href="/{}/">{}</a>"##,
+                    name, name
+                ));
+            }
+        }
+    }
+    if items.is_empty() {
+        return String::new();
+    }
+    format!("<div class=\"proj-grid\">{}</div>", items.join(""))
 }
 
 const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
@@ -499,6 +576,21 @@ h1 {
   line-height: 1;
 }
 .hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; max-width: 36ch; }
+.projects-section { max-width: 960px; margin: 0 auto; padding: 20px 24px; }
+.projects-section h2 { font-size: 18px; margin: 0 0 12px; color: var(--text); }
+.proj-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.proj-item {
+  display: inline-block;
+  padding: 8px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 14px;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
+}
+.proj-item:hover { border-color: var(--accent); color: var(--accent); }
 .hero-code {
   display: inline-block;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -727,9 +819,9 @@ html[data-moon="full"] .bm-logo {
 
 <main class="hero">
   <div class="hero-text">
-    <div class="eyebrow">Blender · Lore · Timeline <span class="dot">●</span></div>
-    <h1>Keinestamp</h1>
-    <p class="hero-sub">Blender Lore Progress Board</p>
+    <div class="eyebrow">Lore · Timeline <span class="dot">●</span></div>
+    <h1>{site_name}</h1>
+    <p class="hero-sub">Lore Progress Board</p>
     <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok">✓ 已记录</span><span class="cursor"></span></code>
   </div>
   <div class="hero-art">
@@ -754,6 +846,11 @@ html[data-moon="full"] .bm-logo {
     <div class="ha-tag"><span id="moonName">月相</span></div>
   </div>
 </main>
+
+<div class="projects-section">
+  <h2>项目</h2>
+  {projects}
+</div>
 
 <div class="stage">
   <div class="cf-geo">
@@ -781,7 +878,7 @@ html[data-moon="full"] .bm-logo {
   </div>
 </div>
 
-<footer>Keinestamp · Blender Lore Progress Board · Lore v0.8.6 · © 2026</footer>
+<footer>Keinestamp · Lore Progress Board · Lore v0.8.6 · © 2026</footer>
 
 <script>
   (function () {
@@ -925,6 +1022,47 @@ fn save_versions(web_root: &Path, versions: &HashMap<String, u64>) {
     }
 }
 
+fn manifests_root(web_root: &Path) -> PathBuf {
+    web_root.join(".manifests")
+}
+
+fn manifest_path(web_root: &Path, project_name: &str) -> PathBuf {
+    manifests_root(web_root).join(format!("{}.json", project_name))
+}
+
+fn load_manifest(web_root: &Path, project_name: &str) -> Option<Vec<crate::push::DeployFile>> {
+    std::fs::read_to_string(manifest_path(web_root, project_name))
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+}
+
+fn save_manifest(web_root: &Path, project_name: &str, manifest: &[crate::push::DeployFile]) {
+    if let Ok(json) = serde_json::to_string(manifest) {
+        let dir = manifests_root(web_root);
+        let _ = std::fs::create_dir_all(&dir);
+        let path = manifest_path(web_root, project_name);
+        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
+        if std::fs::write(&tmp, &json).is_ok() {
+            let _ = std::fs::rename(&tmp, &path);
+        }
+    }
+}
+
+fn handle_manifest(request: tiny_http::Request, web_root: &Path, project_name: &str) -> Result<()> {
+    match load_manifest(web_root, project_name) {
+        Some(manifest) => {
+            let body = serde_json::to_string(&manifest)?;
+            let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
+            request.respond(Response::from_string(body).with_header(hdr))?;
+        }
+        None => {
+            let response = Response::from_string("no manifest").with_status_code(404);
+            request.respond(response)?;
+        }
+    }
+    Ok(())
+}
+
 fn projects_file(web_root: &Path) -> PathBuf {
     web_root
         .parent()
@@ -932,14 +1070,18 @@ fn projects_file(web_root: &Path) -> PathBuf {
         .unwrap_or_else(|| web_root.join(".keinestamp-projects.json"))
 }
 
-fn load_projects(
-    web_root: &Path,
-) -> (HashMap<String, String>, HashMap<String, String>) {
+fn load_projects(web_root: &Path) -> (HashMap<String, String>, HashMap<String, String>) {
     let path = projects_file(web_root);
     let content = match std::fs::read_to_string(&path) {
         Ok(c) => c,
         Err(e) => {
-            log_error("PROJECTS", &format!("failed to read {:?}: {} — starting with empty project registry", path, e));
+            log_error(
+                "PROJECTS",
+                &format!(
+                    "failed to read {:?}: {} — starting with empty project registry",
+                    path, e
+                ),
+            );
             return (HashMap::new(), HashMap::new());
         }
     };
@@ -959,18 +1101,22 @@ fn load_projects(
             (tokens, ids)
         }
         Err(e) => {
-            log_error("PROJECTS", &format!("corrupt projects file {:?}: {} — starting with empty project registry", path, e));
+            log_error(
+                "PROJECTS",
+                &format!(
+                    "corrupt projects file {:?}: {} — starting with empty project registry",
+                    path, e
+                ),
+            );
             (HashMap::new(), HashMap::new())
         }
     }
 }
 
-fn save_projects(
-    web_root: &Path,
-    tokens: &HashMap<String, String>,
-    ids: &HashMap<String, String>,
-) {
-    if let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "tokens": tokens, "ids": ids })) {
+fn save_projects(web_root: &Path, tokens: &HashMap<String, String>, ids: &HashMap<String, String>) {
+    if let Ok(json) =
+        serde_json::to_string_pretty(&serde_json::json!({ "tokens": tokens, "ids": ids }))
+    {
         let path = projects_file(web_root);
         let tmp = path.with_extension(format!("tmp{}", std::process::id()));
         if std::fs::write(&tmp, &json).is_ok() {
@@ -980,10 +1126,16 @@ fn save_projects(
                 let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
             }
             if std::fs::rename(&tmp, &path).is_err() {
-                log_error("PROJECTS", &format!("failed to save projects file {:?}", path));
+                log_error(
+                    "PROJECTS",
+                    &format!("failed to save projects file {:?}", path),
+                );
             }
         } else {
-            log_error("PROJECTS", &format!("failed to write projects file {:?}", path));
+            log_error(
+                "PROJECTS",
+                &format!("failed to write projects file {:?}", path),
+            );
         }
     }
 }
@@ -1025,6 +1177,26 @@ fn percent_decode(s: &str) -> String {
     out
 }
 
+/// 正确解码 URL 路径中的 UTF-8 百分号编码（用于静态文件路径）。
+/// 例如 `%E5%B9%B4` → `年`。
+fn percent_decode_path(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut decoded: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                decoded.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 fn handle_login_post(
     mut request: tiny_http::Request,
     project_name: &str,
@@ -1063,31 +1235,64 @@ fn handle_login_post(
         .split('&')
         .find_map(|pair| {
             let mut parts = pair.splitn(2, '=');
-            if parts.next()? == "token" { Some(parts.next().unwrap_or("")) } else { None }
+            if parts.next()? == "token" {
+                Some(parts.next().unwrap_or(""))
+            } else {
+                None
+            }
         })
         .unwrap_or("");
     let decoded = percent_decode(token);
 
-    let is_valid = project_tokens.read().unwrap().get(project_name).map_or(false, |t| t == &decoded);
+    let is_valid = project_tokens
+        .read()
+        .unwrap()
+        .get(project_name)
+        .map_or(false, |t| t == &decoded);
 
     if is_valid {
-        log_info("LOGIN", &format!("{} project={} → success", ip, project_name));
+        log_info(
+            "LOGIN",
+            &format!("{} project={} → success", ip, project_name),
+        );
         rate_limiter.record_success(&ip);
         // 动态 Secure：HTTPS 来源（反代 X-Forwarded-Proto=https 或 TLS 直连）加 Secure，
         // HTTP 直连（局域网自用）不加——公网堵 301 前明文盲区，局域网保持登录体验
-        let secure = if request_is_https(&request) { "; Secure" } else { "" };
-        let set_cookie = format!("keinestamp_token={}; Path=/{}/; HttpOnly; SameSite=Lax{}", decoded, project_name, secure);
+        let secure = if request_is_https(&request) {
+            "; Secure"
+        } else {
+            ""
+        };
+        let set_cookie = format!(
+            "keinestamp_token={}; Path=/{}/; HttpOnly; SameSite=Lax{}",
+            decoded, project_name, secure
+        );
         let redirect = Response::from_string("")
             .with_status_code(302)
-            .with_header(Header::from_bytes(&b"Location"[..], format!("/{}/", project_name).as_bytes().to_vec()).unwrap())
+            .with_header(
+                Header::from_bytes(
+                    &b"Location"[..],
+                    format!("/{}/", project_name).as_bytes().to_vec(),
+                )
+                .unwrap(),
+            )
             .with_header(Header::from_bytes(&b"Set-Cookie"[..], set_cookie.as_bytes()).unwrap());
         request.respond(redirect)?;
     } else {
-        log_warn("LOGIN", &format!("{} project={} → failed", ip, project_name));
+        log_warn(
+            "LOGIN",
+            &format!("{} project={} → failed", ip, project_name),
+        );
         rate_limiter.record_failure(&ip);
-        let redirect = Response::from_string("")
-            .with_status_code(302)
-            .with_header(Header::from_bytes(&b"Location"[..], format!("/{}/login?error=1", project_name).as_bytes().to_vec()).unwrap());
+        let redirect = Response::from_string("").with_status_code(302).with_header(
+            Header::from_bytes(
+                &b"Location"[..],
+                format!("/{}/login?error=1", project_name)
+                    .as_bytes()
+                    .to_vec(),
+            )
+            .unwrap(),
+        );
         request.respond(redirect)?;
     }
     Ok(())
@@ -1101,10 +1306,14 @@ pub fn generate_token() -> String {
 }
 
 /// Auto-generate `serve.toml` with random tokens when none exists
-pub fn auto_generate_config(path: &Path, port: u16, host: &str, web_root: &Path) -> Result<ServeConfig> {
+pub fn auto_generate_config(
+    path: &Path,
+    port: u16,
+    host: &str,
+    web_root: &Path,
+) -> Result<ServeConfig> {
     let dt = generate_token();
-    let canonical_root = std::fs::canonicalize(web_root)
-        .unwrap_or_else(|_| web_root.to_path_buf());
+    let canonical_root = std::fs::canonicalize(web_root).unwrap_or_else(|_| web_root.to_path_buf());
     let config_toml = format!(
         r#"host = "{}"
 port = {}
@@ -1113,7 +1322,9 @@ web_root = "{}"
 # 备份服务器：true = serve 启动时拉起 loreserver（持久化 store，跟随 serve 生命周期）
 enable_loreserver = false
 "#,
-        host, port, dt,
+        host,
+        port,
+        dt,
         canonical_root.to_string_lossy().replace('\\', "\\\\")
     );
     std::fs::write(&path, &config_toml)
@@ -1121,11 +1332,23 @@ enable_loreserver = false
     let config = load_config(path)?;
     let path_str = path.display().to_string();
     let root_str = canonical_root.display().to_string();
-    log_info("SETUP", &format!("First run — auto-generated serve.toml at {:?}", path_str));
+    log_info(
+        "SETUP",
+        &format!("First run — auto-generated serve.toml at {:?}", path_str),
+    );
     log_info("SETUP", &format!("Deploy Token (for app): {}", dt));
-    log_info("SETUP", &format!("Web URL: http://{}:{}/<项目名>", host, port));
-    log_info("SETUP", &format!("Deploy directory: {} (per project)", root_str));
-    log_info("SETUP", "Access tokens are set per-project via GUI and stored on the server during deploy.");
+    log_info(
+        "SETUP",
+        &format!("Web URL: http://{}:{}/<项目名>", host, port),
+    );
+    log_info(
+        "SETUP",
+        &format!("Deploy directory: {} (per project)", root_str),
+    );
+    log_info(
+        "SETUP",
+        "Access tokens are set per-project via GUI and stored on the server during deploy.",
+    );
     Ok(config)
 }
 
@@ -1145,7 +1368,11 @@ fn loreserver_store_dir() -> std::path::PathBuf {
 fn loreserver_bin() -> Option<std::path::PathBuf> {
     let bin = crate::lore_backend::lore_bin();
     let dir = std::path::Path::new(&bin).parent()?;
-    let name = if cfg!(target_os = "windows") { "loreserver.exe" } else { "loreserver" };
+    let name = if cfg!(target_os = "windows") {
+        "loreserver.exe"
+    } else {
+        "loreserver"
+    };
     let p = dir.join(name);
     p.exists().then_some(p)
 }
@@ -1310,6 +1537,12 @@ pub fn start(config: ServeConfig) -> Result<()> {
     // 前置依赖检测：Lore v0.8.6 缺失/版本不符 → 拒绝启动
     crate::lore_backend::check_lore_env().context("Lore 前置依赖检查失败")?;
     let _ = TRUST_PROXY.set(config.trust_proxy);
+    let _ = SITE_NAME.set(
+        config
+            .site_name
+            .clone()
+            .unwrap_or_else(|| "Keinestamp".to_string()),
+    );
     // 拉起 loreserver（跟随 serve 生命周期：退出时 kill 本进程拉起的实例；外部已在线不杀）
     let mut loreserver_child: Option<std::process::Child> = None;
     if config.enable_loreserver {
@@ -1323,19 +1556,32 @@ pub fn start(config: ServeConfig) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("failed to start server on {}: {}", addr, e))?;
 
     let web_root = config.web_root.clone();
+    let _ = WEB_ROOT.set(web_root.clone());
     let deploy_token = config.deploy_token.clone();
 
     let three_dir = web_root.join("_three");
     if let Err(e) = three_assets::ensure_threejs(&three_dir) {
-        log_error("STARTUP", &format!("failed to generate shared three.js: {}", e));
+        log_error(
+            "STARTUP",
+            &format!("failed to generate shared three.js: {}", e),
+        );
     } else {
         log_info("STARTUP", "shared three.js assets ready");
     }
 
-    log_info("STARTUP", &format!("Keinestamp serve listening on http://{}", addr));
+    log_info(
+        "STARTUP",
+        &format!("Keinestamp serve listening on http://{}", addr),
+    );
     log_warn("STARTUP", "HTTP mode — data is sent in plaintext.");
-    log_warn("STARTUP", "For production, put behind Caddy/nginx with HTTPS.");
-    log_info("STARTUP", &format!("  {} (deploy token)", web_root.display()));
+    log_warn(
+        "STARTUP",
+        "For production, put behind Caddy/nginx with HTTPS.",
+    );
+    log_info(
+        "STARTUP",
+        &format!("  {} (deploy token)", web_root.display()),
+    );
 
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
@@ -1345,14 +1591,16 @@ pub fn start(config: ServeConfig) -> Result<()> {
     let (tokens_loaded, ids_loaded) = load_projects(&web_root);
     let project_tokens: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(tokens_loaded));
     let project_ids: Arc<RwLock<HashMap<String, String>>> = Arc::new(RwLock::new(ids_loaded));
-    let web_versions: Arc<RwLock<HashMap<String, u64>>> = Arc::new(RwLock::new(load_versions(&web_root)));
+    let web_versions: Arc<RwLock<HashMap<String, u64>>> =
+        Arc::new(RwLock::new(load_versions(&web_root)));
     let deploy_limiter = Arc::new(RateLimiter::new());
     let browser_limiter = Arc::new(RateLimiter::new());
 
     let active_requests = Arc::new(AtomicUsize::new(0));
     for request in server.incoming_requests() {
         if active_requests.load(Ordering::Relaxed) >= MAX_CONCURRENT_REQUESTS {
-            let _ = request.respond(Response::from_string("503 Too Many Requests").with_status_code(503));
+            let _ = request
+                .respond(Response::from_string("503 Too Many Requests").with_status_code(503));
             continue;
         }
         active_requests.fetch_add(1, Ordering::Relaxed);
@@ -1370,7 +1618,9 @@ pub fn start(config: ServeConfig) -> Result<()> {
         let req_ip = request_ip_trusted(&request);
         std::thread::spawn(move || {
             let _guard = SlotGuard(active);
-            let _ = handle_request(request, url, method, req_ip, dt, pt, pi, wv, wr, lu, rl, brl);
+            let _ = handle_request(
+                request, url, method, req_ip, dt, pt, pi, wv, wr, lu, rl, brl,
+            );
         });
     }
 
@@ -1399,144 +1649,204 @@ fn handle_request(
     rl: Arc<RateLimiter>,
     brl: Arc<RateLimiter>,
 ) -> Result<()> {
+    // /health
+    if url.split('?').next() == Some("/health") && method == Method::Get {
+        let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
+        match auth {
+            AuthResult::Authenticated => {
+                if let Err(e) = handle_health(request, &lu) {
+                    log_error("HEALTH", &format!("{} {}", req_ip, e));
+                }
+            }
+            AuthResult::RateLimited => {
+                log_warn("AUTH", &format!("{} rate limited on /health", req_ip));
+                let _ = request
+                    .respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+            }
+            AuthResult::Unauthorized => {
+                log_warn("AUTH", &format!("{} unauthorized on /health", req_ip));
+                let _ = request.respond(unauthorized_response());
+            }
+        }
+        return Ok(());
+    }
 
-        // /health
-        if url.split('?').next() == Some("/health") && method == Method::Get {
-            let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
-            match auth {
-                AuthResult::Authenticated => {
-                    if let Err(e) = handle_health(request, &lu) {
-                        log_error("HEALTH", &format!("{} {}", req_ip, e));
+    // /upload
+    if url == "/upload" && method == Method::Post {
+        let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
+        match auth {
+            AuthResult::Authenticated => {
+                if let Err(e) = handle_upload(request, &web_root, &lu, &pt, &pi, &wv) {
+                    log_error("DEPLOY", &format!("{} {}", req_ip, e));
+                }
+            }
+            AuthResult::RateLimited => {
+                log_warn("AUTH", &format!("{} rate limited on /upload", req_ip));
+                let _ = request
+                    .respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+            }
+            AuthResult::Unauthorized => {
+                log_warn("AUTH", &format!("{} unauthorized on /upload", req_ip));
+                let _ = request.respond(unauthorized_response());
+            }
+        }
+        return Ok(());
+    }
+
+    // Root homepage
+    if (url == "/" || url.is_empty()) && method == Method::Get {
+        if let Err(e) = handle_index(request) {
+            log_error("INDEX", &format!("{} {}", req_ip, e));
+        }
+        return Ok(());
+    }
+
+    // Browser routes
+    let trimmed = url.trim_start_matches('/');
+    let slash_pos = trimmed.find('/');
+    let (project_name, rest) = match slash_pos {
+        Some(pos) => (&trimmed[..pos], &trimmed[pos..]),
+        None => (trimmed, "/"),
+    };
+
+    if project_name.is_empty()
+        || !project_name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
+        return Ok(());
+    }
+
+    if !web_root.join(project_name).is_dir() {
+        let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
+        return Ok(());
+    }
+
+    let route_path = if rest.is_empty() { "/" } else { rest };
+
+    if route_path == "/rollback" && method == Method::Post {
+        let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
+        match auth {
+            AuthResult::Authenticated => {
+                if let Err(e) = handle_rollback(request, &web_root, project_name) {
+                    log_error("ROLLBACK", &format!("{} {}", req_ip, e));
+                }
+            }
+            AuthResult::RateLimited => {
+                log_warn("AUTH", &format!("{} rate limited on rollback", req_ip));
+                let _ = request
+                    .respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+            }
+            AuthResult::Unauthorized => {
+                log_warn("AUTH", &format!("{} unauthorized on rollback", req_ip));
+                let _ = request.respond(unauthorized_response());
+            }
+        }
+        return Ok(());
+    }
+
+    if route_path == "/version" && method == Method::Get {
+        let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
+        match auth {
+            AuthResult::Authenticated => {
+                if let Err(e) = handle_version(request, project_name, &wv) {
+                    log_error("VERSION", &format!("{} {}", req_ip, e));
+                }
+            }
+            AuthResult::RateLimited => {
+                log_warn("AUTH", &format!("{} rate limited on /version", req_ip));
+                let _ = request
+                    .respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+            }
+            AuthResult::Unauthorized => {
+                log_warn("AUTH", &format!("{} unauthorized on /version", req_ip));
+                let _ = request.respond(unauthorized_response());
+            }
+        }
+        return Ok(());
+    }
+
+    if route_path == "/manifest" && method == Method::Get {
+        let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
+        match auth {
+            AuthResult::Authenticated => {
+                if let Err(e) = handle_manifest(request, &web_root, project_name) {
+                    log_error("MANIFEST", &format!("{} {}", req_ip, e));
+                }
+            }
+            AuthResult::RateLimited => {
+                log_warn("AUTH", &format!("{} rate limited on /manifest", req_ip));
+                let _ = request
+                    .respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+            }
+            AuthResult::Unauthorized => {
+                log_warn("AUTH", &format!("{} unauthorized on /manifest", req_ip));
+                let _ = request.respond(unauthorized_response());
+            }
+        }
+        return Ok(());
+    }
+
+    if route_path == "/login" && method == Method::Get {
+        if let Err(e) = serve_login_page(request, project_name) {
+            log_error("LOGIN", &format!("{} serve_login_page: {}", req_ip, e));
+        }
+    } else if route_path == "/login" && method == Method::Post {
+        if let Err(e) = handle_login_post(request, project_name, &pt, &brl) {
+            log_error("LOGIN", &format!("{} handle_login_post: {}", req_ip, e));
+        }
+    } else {
+        let auth = check_browser_static_auth(&request, &brl, project_name, &pt);
+        match auth {
+            AuthResult::Authenticated => {
+                if let Err(e) = handle_static(request, &web_root, project_name) {
+                    log_error("ACCESS", &format!("{} handle_static: {}", req_ip, e));
+                }
+            }
+            AuthResult::RateLimited => {
+                log_warn(
+                    "AUTH",
+                    &format!("{} rate limited on project '{}'", req_ip, project_name),
+                );
+                let _ = request
+                    .respond(Response::from_string("429 Too Many Requests").with_status_code(429));
+            }
+            AuthResult::Unauthorized => {
+                let is_browser = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("Accept"))
+                    .map(|h| h.value.as_str().contains("text/html"))
+                    .unwrap_or(false);
+                if is_browser && method == Method::Get {
+                    log_info(
+                        "AUTH",
+                        &format!(
+                            "{} unauthorized → login page (project='{}')",
+                            req_ip, project_name
+                        ),
+                    );
+                    if let Err(e) = serve_login_page(request, project_name) {
+                        log_error("LOGIN", &format!("{} serve_login_page: {}", req_ip, e));
                     }
-                }
-                AuthResult::RateLimited => {
-                    log_warn("AUTH", &format!("{} rate limited on /health", req_ip));
-                    let _ = request.respond(Response::from_string("429 Too Many Requests").with_status_code(429));
-                }
-                AuthResult::Unauthorized => {
-                    log_warn("AUTH", &format!("{} unauthorized on /health", req_ip));
+                } else {
+                    log_warn(
+                        "AUTH",
+                        &format!("{} unauthorized on project '{}'", req_ip, project_name),
+                    );
                     let _ = request.respond(unauthorized_response());
                 }
             }
-            return Ok(());
         }
-
-        // /upload
-        if url == "/upload" && method == Method::Post {
-            let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
-            match auth {
-                AuthResult::Authenticated => {
-                    if let Err(e) = handle_upload(request, &web_root, &lu, &pt, &pi, &wv) {
-                        log_error("DEPLOY", &format!("{} {}", req_ip, e));
-                    }
-                }
-                AuthResult::RateLimited => {
-                    log_warn("AUTH", &format!("{} rate limited on /upload", req_ip));
-                    let _ = request.respond(Response::from_string("429 Too Many Requests").with_status_code(429));
-                }
-                AuthResult::Unauthorized => {
-                    log_warn("AUTH", &format!("{} unauthorized on /upload", req_ip));
-                    let _ = request.respond(unauthorized_response());
-                }
-            }
-            return Ok(());
-        }
-
-        // Root homepage
-        if (url == "/" || url.is_empty()) && method == Method::Get {
-            if let Err(e) = handle_index(request) {
-                log_error("INDEX", &format!("{} {}", req_ip, e));
-            }
-            return Ok(());
-        }
-
-        // Browser routes
-        let trimmed = url.trim_start_matches('/');
-        let slash_pos = trimmed.find('/');
-        let (project_name, rest) = match slash_pos {
-            Some(pos) => (&trimmed[..pos], &trimmed[pos..]),
-            None => (trimmed, "/"),
-        };
-
-        if project_name.is_empty() || !project_name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
-            let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
-            return Ok(());
-        }
-
-        if !web_root.join(project_name).is_dir() {
-            let _ = request.respond(Response::from_string("404 Not Found").with_status_code(404));
-            return Ok(());
-        }
-
-        let route_path = if rest.is_empty() { "/" } else { rest };
-
-        if route_path == "/version" && method == Method::Get {
-            let auth = check_deploy_auth(&request, dt.as_deref(), &rl);
-            match auth {
-                AuthResult::Authenticated => {
-                    if let Err(e) = handle_version(request, project_name, &wv) {
-                        log_error("VERSION", &format!("{} {}", req_ip, e));
-                    }
-                }
-                AuthResult::RateLimited => {
-                    log_warn("AUTH", &format!("{} rate limited on /version", req_ip));
-                    let _ = request.respond(Response::from_string("429 Too Many Requests").with_status_code(429));
-                }
-                AuthResult::Unauthorized => {
-                    log_warn("AUTH", &format!("{} unauthorized on /version", req_ip));
-                    let _ = request.respond(unauthorized_response());
-                }
-            }
-            return Ok(());
-        }
-
-        if route_path == "/login" && method == Method::Get {
-            if let Err(e) = serve_login_page(request, project_name) {
-                log_error("LOGIN", &format!("{} serve_login_page: {}", req_ip, e));
-            }
-        } else if route_path == "/login" && method == Method::Post {
-            if let Err(e) = handle_login_post(request, project_name, &pt, &brl) {
-                log_error("LOGIN", &format!("{} handle_login_post: {}", req_ip, e));
-            }
-        } else {
-            let auth = check_browser_static_auth(&request, &brl, project_name, &pt);
-            match auth {
-                AuthResult::Authenticated => {
-                    if let Err(e) = handle_static(request, &web_root, project_name) {
-                        log_error("ACCESS", &format!("{} handle_static: {}", req_ip, e));
-                    }
-                }
-                AuthResult::RateLimited => {
-                    log_warn("AUTH", &format!("{} rate limited on project '{}'", req_ip, project_name));
-                    let _ = request.respond(Response::from_string("429 Too Many Requests").with_status_code(429));
-                }
-                AuthResult::Unauthorized => {
-                    let is_browser = request.headers().iter()
-                        .find(|h| h.field.equiv("Accept"))
-                        .map(|h| h.value.as_str().contains("text/html"))
-                        .unwrap_or(false);
-                    if is_browser && method == Method::Get {
-                        log_info("AUTH", &format!("{} unauthorized → login page (project='{}')", req_ip, project_name));
-                        if let Err(e) = serve_login_page(request, project_name) {
-                            log_error("LOGIN", &format!("{} serve_login_page: {}", req_ip, e));
-                        }
-                    } else {
-                        log_warn("AUTH", &format!("{} unauthorized on project '{}'", req_ip, project_name));
-                        let _ = request.respond(unauthorized_response());
-                    }
-                }
-            }
-        }
+    }
 
     Ok(())
 }
 
 // --- Request handlers ---
 
-fn handle_health(
-    request: tiny_http::Request,
-    last_update: &AtomicU64,
-) -> Result<()> {
+fn handle_health(request: tiny_http::Request, last_update: &AtomicU64) -> Result<()> {
     let ip = request_ip_trusted(&request);
     let ts = last_update.load(Ordering::Relaxed);
     let body = format!(r#"{{"status":"ok","lastUpdate":{}}}"#, ts);
@@ -1544,6 +1854,80 @@ fn handle_health(
     let response = Response::from_string(body).with_header(hdr);
     log_info("HEALTH", &format!("{} → 200", ip));
     request.respond(response)?;
+    Ok(())
+}
+
+fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let ty = entry.file_type()?;
+        let target = dst.join(entry.file_name());
+        if ty.is_dir() {
+            copy_dir_all(&entry.path(), &target)?;
+        } else if ty.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_patch_dir(patch: &Path, target: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(patch)? {
+        let entry = entry?;
+        let src = entry.path();
+        let dst = target.join(entry.file_name());
+        if src.is_dir() {
+            apply_patch_dir(&src, &dst)?;
+        } else if src.is_file() {
+            if let Some(parent) = dst.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
+}
+
+fn collect_all_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_all_files(&path, out)?;
+        } else if path.is_file() {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn remove_empty_dirs(dir: &Path) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            remove_empty_dirs(&path)?;
+            let _ = std::fs::remove_dir(&path);
+        }
+    }
+    Ok(())
+}
+
+fn apply_manifest_deletions(dir: &Path, manifest: &[crate::push::DeployFile]) -> Result<()> {
+    let keep: HashSet<&str> = manifest.iter().map(|f| f.path.as_str()).collect();
+    let mut files = Vec::new();
+    collect_all_files(dir, &mut files)?;
+    for path in files {
+        let Ok(rel) = path.strip_prefix(dir) else {
+            continue;
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if !keep.contains(rel_str.as_str()) {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
+    remove_empty_dirs(dir)?;
     Ok(())
 }
 
@@ -1567,7 +1951,9 @@ fn handle_upload(
             request.respond(response)?;
             return Ok(());
         }
-        let n = reader.read(&mut chunk).context("failed to read upload body")?;
+        let n = reader
+            .read(&mut chunk)
+            .context("failed to read upload body")?;
         if n == 0 {
             break;
         }
@@ -1579,7 +1965,10 @@ fn handle_upload(
     let size = body.len();
 
     if size >= MAX_UPLOAD_SIZE {
-        log_warn("DEPLOY", &format!("{} payload too large ({} bytes)", ip, size));
+        log_warn(
+            "DEPLOY",
+            &format!("{} payload too large ({} bytes)", ip, size),
+        );
         let response = Response::from_string("payload too large").with_status_code(413);
         request.respond(response)?;
         return Ok(());
@@ -1592,7 +1981,9 @@ fn handle_upload(
         return Ok(());
     }
 
-    let project_name_raw = request.headers().iter()
+    let project_name_raw = request
+        .headers()
+        .iter()
         .find(|h| h.field.equiv("X-Project-Name"))
         .map(|h| h.value.as_str())
         .filter(|v| !v.is_empty())
@@ -1607,14 +1998,19 @@ fn handle_upload(
     }
 
     if project_name.starts_with('_') {
-        log_warn("DEPLOY", &format!("{} reserved project name '{}'", ip, project_name));
+        log_warn(
+            "DEPLOY",
+            &format!("{} reserved project name '{}'", ip, project_name),
+        );
         let response = Response::from_string("reserved project name").with_status_code(400);
         request.respond(response)?;
         return Ok(());
     }
 
     // Conflict check: verify project_id matches
-    let project_id = request.headers().iter()
+    let project_id = request
+        .headers()
+        .iter()
         .find(|h| h.field.equiv("X-Project-Id"))
         .map(|h| h.value.as_str())
         .unwrap_or("");
@@ -1622,32 +2018,54 @@ fn handle_upload(
         let ids = project_ids.read().unwrap();
         if let Some(stored_id) = ids.get(&project_name) {
             if stored_id != project_id {
-                log_warn("DEPLOY", &format!("{} project='{}' conflict: project_id mismatch", ip, project_name));
-                let response = Response::from_string("409 Conflict: project_id mismatch").with_status_code(409);
+                log_warn(
+                    "DEPLOY",
+                    &format!(
+                        "{} project='{}' conflict: project_id mismatch",
+                        ip, project_name
+                    ),
+                );
+                let response = Response::from_string("409 Conflict: project_id mismatch")
+                    .with_status_code(409);
                 request.respond(response)?;
                 return Ok(());
             }
         } else if web_root.join(&project_name).is_dir() {
             log_warn(
                 "DEPLOY",
-                &format!("{} project='{}' exists but has no recorded identity — refusing takeover", ip, project_name),
+                &format!(
+                    "{} project='{}' exists but has no recorded identity — refusing takeover",
+                    ip, project_name
+                ),
             );
-            let response = Response::from_string("403 Forbidden: existing project has no identity").with_status_code(403);
+            let response = Response::from_string("403 Forbidden: existing project has no identity")
+                .with_status_code(403);
             request.respond(response)?;
             return Ok(());
         }
     }
     if !project_id.is_empty() {
-        project_ids.write().unwrap().insert(project_name.clone(), project_id.to_string());
+        project_ids
+            .write()
+            .unwrap()
+            .insert(project_name.clone(), project_id.to_string());
     }
 
-    if let Some(access_token) = request.headers().iter()
+    if let Some(access_token) = request
+        .headers()
+        .iter()
         .find(|h| h.field.equiv("X-Access-Token"))
         .map(|h| h.value.as_str())
         .filter(|v| !v.is_empty())
     {
-        project_tokens.write().unwrap().insert(project_name.clone(), access_token.to_string());
-        log_info("DEPLOY", &format!("{} project={} stored access_token", ip, project_name));
+        project_tokens
+            .write()
+            .unwrap()
+            .insert(project_name.clone(), access_token.to_string());
+        log_info(
+            "DEPLOY",
+            &format!("{} project={} stored access_token", ip, project_name),
+        );
     }
 
     {
@@ -1656,15 +2074,16 @@ fn handle_upload(
         save_projects(&web_root, &tokens, &ids);
     }
 
-    log_info("DEPLOY", &format!("{} project={} size={} bytes", ip, project_name, size));
+    log_info(
+        "DEPLOY",
+        &format!("{} project={} size={} bytes", ip, project_name, size),
+    );
 
     // Deploy into web_root/<project_name>/ for per-project isolation
     let deploy_dir = web_root.join(&project_name);
-    std::fs::create_dir_all(&deploy_dir).context("failed to create deploy dir")?;
+    let web_exists = deploy_dir.exists();
 
-    let tmp_parent = deploy_dir
-        .parent()
-        .unwrap_or(Path::new("."));
+    let tmp_parent = deploy_dir.parent().unwrap_or(Path::new("."));
     let seq = UPLOAD_SEQ.fetch_add(1, Ordering::Relaxed);
     let tmp_dir = tmp_parent.join(format!(".keinestamp-tmp.{}.{}", std::process::id(), seq));
     let bak_dir = tmp_parent.join(format!(".keinestamp-bak.{}.{}", std::process::id(), seq));
@@ -1692,7 +2111,9 @@ fn handle_upload(
         let entry_path = file.mangled_name();
         let dest = tmp_dir.join(&entry_path);
 
-        let canonical_tmp = tmp_dir.canonicalize().unwrap_or_else(|_| tmp_dir.to_path_buf());
+        let canonical_tmp = tmp_dir
+            .canonicalize()
+            .unwrap_or_else(|_| tmp_dir.to_path_buf());
         if let Some(parent) = dest.parent() {
             if let Ok(canonical_parent) = parent.canonicalize() {
                 if !canonical_parent.starts_with(&canonical_tmp) {
@@ -1715,15 +2136,35 @@ fn handle_upload(
             extracted_total += copied;
             if extracted_total > MAX_EXTRACT_SIZE {
                 let _ = std::fs::remove_dir_all(&tmp_dir);
-                log_warn("DEPLOY", &format!("{} extraction exceeds limit ({} bytes)", ip, extracted_total));
-                let response = Response::from_string("payload expands beyond limit").with_status_code(413);
+                log_warn(
+                    "DEPLOY",
+                    &format!(
+                        "{} extraction exceeds limit ({} bytes)",
+                        ip, extracted_total
+                    ),
+                );
+                let response =
+                    Response::from_string("payload expands beyond limit").with_status_code(413);
                 request.respond(response)?;
                 return Ok(());
             }
         }
     }
 
-    let web_exists = deploy_dir.exists();
+    // 增量部署：zip 内若带 `.keinestamp-manifest.json`，则按清单合并；否则全量替换
+    let incremental_manifest: Option<Vec<crate::push::DeployFile>> = {
+        let manifest_file = tmp_dir.join(crate::push::MANIFEST_ENTRY);
+        if manifest_file.is_file() {
+            let parsed = std::fs::read_to_string(&manifest_file)
+                .ok()
+                .and_then(|s| serde_json::from_str(&s).ok());
+            let _ = std::fs::remove_file(&manifest_file);
+            parsed
+        } else {
+            None
+        }
+    };
+
     if web_exists {
         let _ = std::fs::remove_dir_all(&bak_dir);
         if let Err(e) = std::fs::rename(&deploy_dir, &bak_dir) {
@@ -1735,18 +2176,69 @@ fn handle_upload(
         }
     }
 
-    if let Err(e) = std::fs::rename(&tmp_dir, &deploy_dir) {
-        if web_exists {
-            let _ = std::fs::rename(&bak_dir, &deploy_dir);
+    if let Some(manifest) = incremental_manifest {
+        // 增量：复制旧目录 → 应用 changed 文件 → 按新清单删除多余文件
+        if let Err(e) = std::fs::create_dir_all(&deploy_dir) {
+            if web_exists {
+                let _ = std::fs::rename(&bak_dir, &deploy_dir);
+            }
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            log_error("DEPLOY", &format!("{} {}", ip, e));
+            let response = Response::from_string("deploy failed").with_status_code(500);
+            request.respond(response)?;
+            return Ok(());
         }
+        let apply_result = (|| -> Result<()> {
+            if web_exists {
+                copy_dir_all(&bak_dir, &deploy_dir)?;
+            }
+            apply_patch_dir(&tmp_dir, &deploy_dir)?;
+            apply_manifest_deletions(&deploy_dir, &manifest)?;
+            Ok(())
+        })();
         let _ = std::fs::remove_dir_all(&tmp_dir);
-        log_error("DEPLOY", &format!("{} {}", ip, e));
-        let response = Response::from_string("deploy failed").with_status_code(500);
-        request.respond(response)?;
-        return Ok(());
+        if let Err(e) = apply_result {
+            let _ = std::fs::remove_dir_all(&deploy_dir);
+            if web_exists {
+                let _ = std::fs::rename(&bak_dir, &deploy_dir);
+            }
+            log_error("DEPLOY", &format!("{} {}", ip, e));
+            let response = Response::from_string("deploy failed").with_status_code(500);
+            request.respond(response)?;
+            return Ok(());
+        }
+        save_manifest(web_root, &project_name, &manifest);
+    } else {
+        if let Err(e) = std::fs::rename(&tmp_dir, &deploy_dir) {
+            if web_exists {
+                let _ = std::fs::rename(&bak_dir, &deploy_dir);
+            }
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            log_error("DEPLOY", &format!("{} {}", ip, e));
+            let response = Response::from_string("deploy failed").with_status_code(500);
+            request.respond(response)?;
+            return Ok(());
+        }
+        // 全量上传没有新清单：清掉旧清单，避免后续增量客户端基于过期状态判断
+        let _ = std::fs::remove_file(manifest_path(web_root, &project_name));
     }
 
-    let _ = std::fs::remove_dir_all(&bak_dir);
+    if web_exists {
+        // 部署历史：把旧版本保留到 .history/<project>/<timestamp>，支持后续回滚
+        let history_root = web_root.join(".history").join(&project_name);
+        if let Ok(()) = std::fs::create_dir_all(&history_root) {
+            let ts = SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+            let dest = history_root.join(ts.to_string());
+            let _ = std::fs::rename(&bak_dir, &dest);
+        } else {
+            let _ = std::fs::remove_dir_all(&bak_dir);
+        }
+    } else {
+        let _ = std::fs::remove_dir_all(&bak_dir);
+    }
 
     last_update.store(
         SystemTime::now()
@@ -1756,18 +2248,60 @@ fn handle_upload(
         Ordering::Relaxed,
     );
 
-    log_info("DEPLOY", &format!("{} project={} → 200 /{}", ip, project_name, project_name));
+    log_info(
+        "DEPLOY",
+        &format!("{} project={} → 200 /{}", ip, project_name, project_name),
+    );
 
-    let client_count = request.headers().iter()
+    let client_count = request
+        .headers()
+        .iter()
         .find(|h| h.field.equiv("X-Web-Count"))
         .and_then(|h| h.value.as_str().parse::<u64>().ok());
     if let Some(count) = client_count {
-        web_versions.write().unwrap().insert(project_name.clone(), count);
+        web_versions
+            .write()
+            .unwrap()
+            .insert(project_name.clone(), count);
         let snapshot = web_versions.read().unwrap().clone();
         save_versions(web_root, &snapshot);
     }
 
     let body = format!(r#"{{"status":"ok","prefix":"/{}"}}"#, project_name);
+    let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
+    let response = Response::from_string(body).with_header(hdr);
+    request.respond(response)?;
+    Ok(())
+}
+
+fn handle_rollback(request: tiny_http::Request, web_root: &Path, project_name: &str) -> Result<()> {
+    let history_root = web_root.join(".history").join(project_name);
+    let mut snapshots: Vec<PathBuf> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&history_root) {
+        for entry in rd.flatten() {
+            let p = entry.path();
+            if p.is_dir() {
+                snapshots.push(p);
+            }
+        }
+    }
+    snapshots.sort();
+
+    let Some(latest) = snapshots.last().cloned() else {
+        let response = Response::from_string("no history").with_status_code(404);
+        request.respond(response)?;
+        return Ok(());
+    };
+
+    let deploy_dir = web_root.join(project_name);
+    if deploy_dir.exists() {
+        std::fs::remove_dir_all(&deploy_dir)?;
+    }
+    std::fs::rename(&latest, &deploy_dir)?;
+    // 回滚后旧清单不再准确，删除以强制下一次全量部署
+    let _ = std::fs::remove_file(manifest_path(web_root, project_name));
+
+    let body = format!(r#"{{"status":"ok","rolled_back":"{}"}}"#, project_name);
     let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
     let response = Response::from_string(body).with_header(hdr);
     request.respond(response)?;
@@ -1799,11 +2333,13 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
     let raw_path = request.url().to_string();
     let path_no_query = raw_path.split('?').next().unwrap_or(&raw_path).to_string();
     let prefix_path = format!("/{}", project_name);
-    let without_prefix = path_no_query.strip_prefix(&prefix_path).unwrap_or(&path_no_query);
+    let without_prefix = path_no_query
+        .strip_prefix(&prefix_path)
+        .unwrap_or(&path_no_query);
     let clean_path = if without_prefix == "/" || without_prefix.is_empty() {
         "index.html".to_string()
     } else {
-        without_prefix.trim_start_matches('/').to_string()
+        percent_decode_path(without_prefix.trim_start_matches('/'))
     };
 
     let access_msg = format!("{} {} {} → ", ip, method, raw_path);
@@ -1849,7 +2385,8 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
             }
             Err(e) => {
                 log_error("ACCESS", &format!("{}500: {}", access_msg, e));
-                let response = Response::from_string("500 Internal Server Error").with_status_code(500);
+                let response =
+                    Response::from_string("500 Internal Server Error").with_status_code(500);
                 request.respond(response)?;
             }
         }
@@ -1859,14 +2396,19 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
             match std::fs::read(&fallback) {
                 Ok(content) => {
                     let mime = mime_type(&fallback);
-                    let hdr =
-                        Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
+                    let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
                     let response = Response::from_data(content).with_header(hdr);
-                    log_info("ACCESS", &format!("{}200 → index.html ({})", access_msg, mime));
+                    log_info(
+                        "ACCESS",
+                        &format!("{}200 → index.html ({})", access_msg, mime),
+                    );
                     request.respond(response)?;
                 }
                 Err(_) => {
-                    log_info("ACCESS", &format!("{}404 (fallback read error)", access_msg));
+                    log_info(
+                        "ACCESS",
+                        &format!("{}404 (fallback read error)", access_msg),
+                    );
                     let response = Response::from_string("404 Not Found").with_status_code(404);
                     request.respond(response)?;
                 }
@@ -1882,10 +2424,14 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
 }
 
 pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Result<()> {
-    let canonical_web = web_root.canonicalize().unwrap_or_else(|_| web_root.to_path_buf());
+    let canonical_web = web_root
+        .canonicalize()
+        .unwrap_or_else(|_| web_root.to_path_buf());
     for port in 47799u16..47810 {
         let addr = format!("127.0.0.1:{}", port);
-        let Ok(server) = Server::http(&addr) else { continue };
+        let Ok(server) = Server::http(&addr) else {
+            continue;
+        };
         let _ = port_tx.send(port);
         for request in server.incoming_requests() {
             let url = request.url().to_string();
@@ -1893,7 +2439,7 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
             let clean_path = if path_only == "/" || path_only.is_empty() {
                 "index.html".to_string()
             } else {
-                path_only.trim_start_matches('/').to_string()
+                percent_decode_path(path_only.trim_start_matches('/'))
             };
             if clean_path.starts_with('.') || clean_path.contains("/.") {
                 let _ = request.respond(Response::from_string("404").with_status_code(404));
@@ -1910,7 +2456,8 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
                 match std::fs::read(&file_path) {
                     Ok(content) => {
                         let mime = mime_type(&file_path);
-                        let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
+                        let hdr =
+                            Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
                         let response = Response::from_data(content).with_header(hdr);
                         let _ = request.respond(response);
                     }
@@ -1924,12 +2471,14 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
                     match std::fs::read(&fallback) {
                         Ok(content) => {
                             let mime = mime_type(&fallback);
-                            let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
+                            let hdr =
+                                Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
                             let response = Response::from_data(content).with_header(hdr);
                             let _ = request.respond(response);
                         }
                         Err(_) => {
-                            let _ = request.respond(Response::from_string("500").with_status_code(500));
+                            let _ =
+                                request.respond(Response::from_string("500").with_status_code(500));
                         }
                     }
                 } else {
@@ -1958,6 +2507,16 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
             "C:/Users/x/AppData/Roaming/Keinestamp/lore-server-store/immutable | C:/Users/x/AppData/Roaming/Keinestamp/lore-server-store/mutable"
         );
         assert!(auth.contains("无认证"));
+    }
+
+    #[test]
+    fn percent_decode_path_decodes_utf8_chinese() {
+        assert_eq!(
+            percent_decode_path("previews_image/%E5%B9%B4.png"),
+            "previews_image/年.png"
+        );
+        assert_eq!(percent_decode_path("a%20b.png"), "a b.png");
+        assert_eq!(percent_decode_path("plain.png"), "plain.png");
     }
 
     #[test]
@@ -2018,10 +2577,81 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
     }
 
     #[test]
+    fn manifest_roundtrip_persists_deploy_files() {
+        let dir = std::env::temp_dir().join(format!("ks_manifest_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let web_root = dir.join("web");
+        std::fs::create_dir_all(&web_root).unwrap();
+        let manifest = vec![
+            crate::push::DeployFile {
+                path: "index.html".to_string(),
+                size: 10,
+                hash: "abc".to_string(),
+            },
+            crate::push::DeployFile {
+                path: "previews_glb/a.glb".to_string(),
+                size: 20,
+                hash: "def".to_string(),
+            },
+        ];
+        save_manifest(&web_root, "proj", &manifest);
+        let loaded = load_manifest(&web_root, "proj").unwrap();
+        assert_eq!(loaded, manifest);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn incremental_merge_applies_patch_and_deletes_removed_files() {
+        let dir = std::env::temp_dir().join(format!("ks_incr_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let deploy = dir.join("deploy");
+        let patch = dir.join("patch");
+        std::fs::create_dir_all(&deploy).unwrap();
+        std::fs::create_dir_all(&patch).unwrap();
+        std::fs::write(deploy.join("old.txt"), "old").unwrap();
+        std::fs::write(deploy.join("remove.txt"), "remove").unwrap();
+        std::fs::create_dir_all(deploy.join("emptydir")).unwrap();
+        std::fs::write(patch.join("new.txt"), "new").unwrap();
+        std::fs::create_dir_all(patch.join("sub")).unwrap();
+        std::fs::write(patch.join("sub/nested.txt"), "nested").unwrap();
+
+        apply_patch_dir(&patch, &deploy).unwrap();
+        let manifest = vec![
+            crate::push::DeployFile {
+                path: "old.txt".to_string(),
+                size: 3,
+                hash: "old".to_string(),
+            },
+            crate::push::DeployFile {
+                path: "new.txt".to_string(),
+                size: 3,
+                hash: "new".to_string(),
+            },
+            crate::push::DeployFile {
+                path: "sub/nested.txt".to_string(),
+                size: 6,
+                hash: "nested".to_string(),
+            },
+        ];
+        apply_manifest_deletions(&deploy, &manifest).unwrap();
+
+        assert!(deploy.join("old.txt").exists());
+        assert!(deploy.join("new.txt").exists());
+        assert!(deploy.join("sub/nested.txt").exists());
+        assert!(!deploy.join("remove.txt").exists());
+        assert!(
+            !deploy.join("emptydir").exists(),
+            "empty dirs should be cleaned"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn index_page_has_brand_and_features() {
         let html = index_page_html();
         assert!(html.contains("Keinestamp"));
-        assert!(html.contains("Blender Lore Progress Board"));
+        assert!(html.contains("Lore Progress Board"));
         assert!(html.contains("data-theme"));
         assert!(html.contains("keinestamp_web_theme"));
         assert!(html.contains("data:image/png;base64,"), "favicon embedded");
@@ -2065,7 +2695,10 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
 
     #[test]
     fn versions_load_missing_is_empty() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_versions_missing_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "keinestamp_versions_missing_{}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         assert!(load_versions(&dir).is_empty());
         std::fs::remove_dir_all(&dir).unwrap();
@@ -2073,15 +2706,19 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
 
     #[test]
     fn test_load_config() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("keinestamp_test_serve_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_test_serve_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
         let config_path = dir.join("serve.toml");
-        std::fs::write(&config_path, r#"
+        std::fs::write(
+            &config_path,
+            r#"
 host = "127.0.0.1"
 port = 8888
 deploy_token = "abc123"
 web_root = "web-root"
-"#)?;
+"#,
+        )?;
         let config = load_config(&config_path)?;
         assert_eq!(config.host, "127.0.0.1");
         assert_eq!(config.port, 8888);
@@ -2094,7 +2731,10 @@ web_root = "web-root"
         let abs_str = abs_path.to_string_lossy().replace('\\', "\\\\");
         std::fs::write(
             &config_path,
-            format!("host = \"127.0.0.1\"\nport = 8888\ndeploy_token = \"abc123\"\nweb_root = \"{}\"\n", abs_str),
+            format!(
+                "host = \"127.0.0.1\"\nport = 8888\ndeploy_token = \"abc123\"\nweb_root = \"{}\"\n",
+                abs_str
+            ),
         )?;
         let config = load_config(&config_path)?;
         assert_eq!(config.web_root, abs_path);
@@ -2104,12 +2744,19 @@ web_root = "web-root"
 
     #[test]
     fn test_load_config_no_token_fails() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_test_serve_notok_{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!(
+            "keinestamp_test_serve_notok_{}",
+            std::process::id()
+        ));
         std::fs::create_dir_all(&dir).unwrap();
         let config_path = dir.join("serve.toml");
-        std::fs::write(&config_path, r#"
+        std::fs::write(
+            &config_path,
+            r#"
 web_root = "/tmp/web"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
         let result = load_config(&config_path);
         assert!(result.is_err());
         std::fs::remove_dir_all(&dir).unwrap();

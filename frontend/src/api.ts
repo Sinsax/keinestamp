@@ -9,8 +9,8 @@ export async function initProject(path: string): Promise<MetaConfig> {
   return invoke<MetaConfig>('init_project', { path })
 }
 
-export async function record(path: string, message: string, tag?: string | null, noPreview?: boolean, files?: string[] | null, previewFiles?: string[] | null): Promise<string> {
-  return invoke<string>('record', { path, message, tag: tag ?? null, noPreview: noPreview ?? false, files: files ?? null, previewFiles: previewFiles ?? null })
+export async function record(path: string, message: string, tag?: string | null, tagCategory?: string | null, tags?: string[] | null, noPreview?: boolean, files?: string[] | null, previewFiles?: string[] | null): Promise<string> {
+  return invoke<string>('record', { path, message, tag: tag ?? null, tagCategory: tagCategory ?? null, tags: tags ?? null, noPreview: noPreview ?? false, files: files ?? null, previewFiles: previewFiles ?? null })
 }
 
 export async function deploy(path: string): Promise<void> {
@@ -77,6 +77,25 @@ export async function getTimeline(path: string): Promise<Timeline> {
   return invoke<Timeline>('get_timeline', { path })
 }
 
+export interface TagGroup {
+  id: string
+  label: string
+  tags: string[]
+}
+
+export async function getTagGroups(path: string): Promise<TagGroup[]> {
+  return invoke<TagGroup[]>('get_tag_groups', { path })
+}
+
+export interface FileDiff {
+  file: string
+  diff: string
+}
+
+export async function compareEntries(path: string, entryA: string, entryB: string): Promise<FileDiff[]> {
+  return invoke<FileDiff[]>('compare_entries', { path, entryA, entryB })
+}
+
 export async function getRecent(): Promise<RecentEntry[]> {
   return invoke<RecentEntry[]>('get_recent')
 }
@@ -133,6 +152,10 @@ export async function setEntryMilestone(path: string, entryId: string, milestone
 
 export async function setEntryPreview(path: string, entryId: string, enabled: boolean): Promise<void> {
   return invoke<void>('set_entry_preview', { path, entryId, enabled })
+}
+
+export async function setEntryPreviewFile(path: string, entryId: string, previewPath: string, enabled: boolean): Promise<void> {
+  return invoke<void>('set_entry_preview_file', { path, entryId, previewPath, enabled })
 }
 
 export async function downloadBlender(version?: string | null): Promise<string> {

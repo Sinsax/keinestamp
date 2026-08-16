@@ -1,9 +1,29 @@
+export const TAG_CATEGORY_LABELS: Record<string, string> = {
+  modeling: '建模流程',
+  painting: '绘画流程',
+  video: '视频流程',
+}
+
+export function tagCategoryLabel(category?: string | null): string {
+  return (category && TAG_CATEGORY_LABELS[category]) || category || ''
+}
+
 export const TAG_COLORS: Record<string, string> = {
   '建模': '#3d6fa8',
   'UV拆分': '#3e6b52',
   '绑定': '#7a5fa8',
   '贴图': '#a8722e',
   '修复': '#c03535',
+  '草图': '#8a6d3b',
+  '线稿': '#4e5f8a',
+  '上色': '#a84a6e',
+  '细化': '#3b7a6e',
+  '完稿': '#5d8a3b',
+  '剪辑': '#b0543a',
+  '调色': '#6e4a8a',
+  '特效': '#2e7a8a',
+  '字幕': '#4a6a8a',
+  '导出': '#8a6d3b',
 }
 export const FALLBACK_COLORS = ['#3d6fa8', '#3e6b52', '#7a5fa8', '#a8722e', '#c03535', '#4e8a8a']
 

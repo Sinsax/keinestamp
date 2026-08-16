@@ -9,6 +9,17 @@ export interface MetaConfig {
   site_locked: boolean
 }
 
+export interface PreviewFile {
+  /** 源文件路径（相对项目根） */
+  file: string
+  /** 预览产物相对路径（相对 web_root，如 previews_glb/abc.glb） */
+  path: string
+  /** 预览类型：glb / image / video */
+  type: string
+  /** 单个预览开关 */
+  enabled?: boolean
+}
+
 export interface TimelineEntry {
   id: string
   timestamp: string
@@ -17,9 +28,19 @@ export interface TimelineEntry {
   files: string[]
   file_status: string[]
   preview: string
+  /** 预览类型：glb / image / video / 空字符串。旧数据为空时可按 preview 后缀推断 */
+  preview_type?: string
+  /** 一条记录内的多个预览文件；旧数据为空时按 preview/preview_type 兼容 */
+  previews?: PreviewFile[]
+  /** 预览失败诊断信息（例如某个文件为什么没有生成预览） */
+  preview_errors?: string[]
   tag?: string | null
+  /** 多标签：同一记录可多选多个二级标签 */
+  tags?: string[]
+  /** 流程分类：modeling / painting / video（可选） */
+  tag_category?: string | null
   milestone?: boolean
-  /** 3D 预览开关（关闭后不渲染该记录预览；GLB 保留，重新开启恢复）。后端字段为 snake_case */
+  /** 记录级预览总开关（关闭后该记录所有预览不渲染；文件保留）。后端字段为 snake_case */
   preview_enabled?: boolean
   superseded?: boolean
 }

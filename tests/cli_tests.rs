@@ -45,9 +45,15 @@ fn test_init_creates_structure() {
     assert!(dir.join(".keinestamp/.keinestamp.toml").exists());
     assert!(dir.join(".lore").exists(), "init 应创建 lore 仓库");
     assert!(!dir.join(".git").exists(), "不应创建 git 仓库");
-    assert!(!dir.join(".gitattributes").exists(), "不应生成 .gitattributes（无 LFS）");
+    assert!(
+        !dir.join(".gitattributes").exists(),
+        "不应生成 .gitattributes（无 LFS）"
+    );
     assert!(dir.join(".keinestamp").join("web").exists());
-    assert!(!dir.join("web/.git").exists(), "web 产物并入主仓库，不应有独立 git 仓库");
+    assert!(
+        !dir.join("web/.git").exists(),
+        "web 产物并入主仓库，不应有独立 git 仓库"
+    );
     assert!(dir.join(".keinestamp/web/timeline.json").exists());
     assert!(dir.join(".keinestamp/web/index.html").exists());
     std::fs::remove_dir_all(&dir).unwrap();
@@ -71,10 +77,21 @@ fn test_init_then_commit_and_log() {
 
     let (out, ok) = run(&["log", &dir.to_string_lossy(), "--count", "5"]);
     assert!(ok, "log failed: {}", out);
-    assert!(out.contains("first commit"), "log 应包含 first commit: {}", out);
-    assert!(out.contains("second commit"), "log 应包含 second commit: {}", out);
+    assert!(
+        out.contains("first commit"),
+        "log 应包含 first commit: {}",
+        out
+    );
+    assert!(
+        out.contains("second commit"),
+        "log 应包含 second commit: {}",
+        out
+    );
     assert!(out.contains("(1 文件)"), "log 应显示文件数: {}", out);
-    assert_eq!(out.matches("first commit").count() + out.matches("second commit").count(), 2);
+    assert_eq!(
+        out.matches("first commit").count() + out.matches("second commit").count(),
+        2
+    );
 
     let timeline_path = dir.join(".keinestamp").join("web").join("timeline.json");
     let timeline = keinestamp::timeline::read_timeline(&timeline_path).unwrap();
@@ -96,15 +113,27 @@ fn test_init_then_status() {
     // .loreignore 自身未提交前显示为 untracked，与 git 的 .gitignore 语义一致，首次 record 时进历史）
     let (out, ok) = run(&["status", &dir.to_string_lossy()]);
     assert!(ok, "status failed: {}", out);
-    assert!(out.contains("工作区干净") || out.contains(".loreignore"), "init 后应干净或仅剩 .loreignore: {}", out);
-    assert!(!out.contains(".keinestamp"), "init 后不应列出 .keinestamp/: {}", out);
+    assert!(
+        out.contains("工作区干净") || out.contains(".loreignore"),
+        "init 后应干净或仅剩 .loreignore: {}",
+        out
+    );
+    assert!(
+        !out.contains(".keinestamp"),
+        "init 后不应列出 .keinestamp/: {}",
+        out
+    );
 
     std::fs::write(dir.join("a.txt"), b"x").unwrap();
     let (out, ok) = run(&["status", &dir.to_string_lossy()]);
     assert!(ok, "status failed: {}", out);
     assert!(out.contains("a.txt"), "status 应列出新文件: {}", out);
     assert!(!out.contains("web/"), "status 不应列出隐藏的 web/: {}", out);
-    assert!(!out.contains(".keinestamp.toml"), "status 不应列出隐藏的 .keinestamp.toml: {}", out);
+    assert!(
+        !out.contains(".keinestamp.toml"),
+        "status 不应列出隐藏的 .keinestamp.toml: {}",
+        out
+    );
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -162,18 +191,34 @@ fn test_cli_rollback_and_restore() {
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "third"]);
     assert!(ok, "third record failed: {}", out);
 
-    let timeline = keinestamp::timeline::read_timeline(&dir.join(".keinestamp").join("web").join("timeline.json")).unwrap();
+    let timeline = keinestamp::timeline::read_timeline(
+        &dir.join(".keinestamp").join("web").join("timeline.json"),
+    )
+    .unwrap();
     let second_id = timeline.entries.get(1).unwrap().id.clone();
 
-    let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &second_id[..7]]);
+    let (out, ok) = run(&[
+        "rollback",
+        &dir.to_string_lossy(),
+        "--entry",
+        &second_id[..7],
+    ]);
     assert!(ok, "rollback failed: {}", out);
     assert!(out.contains("已回退"), "应提示已回退: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退到 second 应为 second 状态");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v2",
+        "回退到 second 应为 second 状态"
+    );
 
     let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
     assert!(ok, "restore failed: {}", out);
     assert!(out.contains("已恢复"), "应提示已恢复: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v3", "恢复应回到回退前状态");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v3",
+        "恢复应回到回退前状态"
+    );
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -202,7 +247,11 @@ fn test_cli_rollback_then_record_supersedes_after() {
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
     assert!(ok, "rollback failed: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退到 B 应为 B 状态");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v2",
+        "回退到 B 应为 B 状态"
+    );
 
     std::fs::write(dir.join("test.blend"), b"v4").unwrap();
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "D"]);
@@ -210,15 +259,32 @@ fn test_cli_rollback_then_record_supersedes_after() {
 
     // 回退到 B 后记录 D：B 及更早保留，C 被顶替出主线（entries 旧→新，最新在尾部）
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
-    let messages: Vec<&str> = timeline.entries.iter().map(|e| e.message.as_str()).collect();
-    assert_eq!(messages, vec!["A", "B", "C", "D"], "C 应被顶替（时间序插入）: {:?}", messages);
+    let messages: Vec<&str> = timeline
+        .entries
+        .iter()
+        .map(|e| e.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["A", "B", "C", "D"],
+        "C 应被顶替（时间序插入）: {:?}",
+        messages
+    );
 
     let (out, ok) = run(&["log", &dir.to_string_lossy(), "--count", "10"]);
     assert!(ok, "log failed: {}", out);
     assert!(out.contains("A"), "log 应包含 A: {}", out);
     assert!(out.contains("D"), "log 应包含 D: {}", out);
-    assert!(!out.contains("B"), "log 不应再有 B（被顶替出主线）: {}", out);
-    assert!(!out.contains("C"), "log 不应再有 C（被顶替出主线）: {}", out);
+    assert!(
+        !out.contains("B"),
+        "log 不应再有 B（被顶替出主线）: {}",
+        out
+    );
+    assert!(
+        !out.contains("C"),
+        "log 不应再有 C（被顶替出主线）: {}",
+        out
+    );
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -246,7 +312,11 @@ fn test_cli_rollback_first_entry_supersedes() {
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
     assert!(ok, "rollback B failed: {}", out);
     assert!(out.contains("已回退"), "应提示已回退: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "B 改动检出为未提交（工作区 = v2）");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v2",
+        "B 改动检出为未提交（工作区 = v2）"
+    );
 
     std::fs::write(dir.join("test.blend"), b"v3").unwrap();
     let (out, ok) = run(&["record", &dir.to_string_lossy(), "-m", "C"]);
@@ -254,8 +324,17 @@ fn test_cli_rollback_first_entry_supersedes() {
 
     // B 被顶替出主线，但保留在时间线（superseded，时间序插入 A 与 C 之间）
     let timeline = keinestamp::timeline::read_timeline(&tl_path).unwrap();
-    let messages: Vec<&str> = timeline.entries.iter().map(|e| e.message.as_str()).collect();
-    assert_eq!(messages, vec!["A", "B", "C"], "B 应被顶替（时间序插入）: {:?}", messages);
+    let messages: Vec<&str> = timeline
+        .entries
+        .iter()
+        .map(|e| e.message.as_str())
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["A", "B", "C"],
+        "B 应被顶替（时间序插入）: {:?}",
+        messages
+    );
     let b_entry = timeline.entries.iter().find(|e| e.message == "B").unwrap();
     assert!(b_entry.superseded, "B 应为 superseded");
 
@@ -288,19 +367,35 @@ fn test_cli_rollback_while_in_rollback_auto_restores() {
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
     assert!(ok, "rollback B failed: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 B：B 改动检出（工作区 = v2）");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v2",
+        "回退 B：B 改动检出（工作区 = v2）"
+    );
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &c_id[..7]]);
     assert!(ok, "回退状态下再回退 C 应自动恢复后回退: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v3", "回退 C：C 改动检出（工作区 = v3）");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v3",
+        "回退 C：C 改动检出（工作区 = v3）"
+    );
 
     let st = keinestamp::lore_project::rollback_state(&dir).unwrap();
     assert!(st.active, "应处于回退状态");
-    assert_eq!(st.revision.as_deref(), Some(timeline.entries[1].id.as_str()), "回退点（HEAD）应为 B");
+    assert_eq!(
+        st.revision.as_deref(),
+        Some(timeline.entries[1].id.as_str()),
+        "回退点（HEAD）应为 B"
+    );
 
     let (out, ok) = run(&["restore", &dir.to_string_lossy()]);
     assert!(ok, "restore failed: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v3", "恢复应回到回退前（C 内容）");
+    assert_eq!(
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v3",
+        "恢复应回到回退前（C 内容）"
+    );
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -328,10 +423,22 @@ fn test_cli_rollback_with_untracked() {
 
     let (out, ok) = run(&["rollback", &dir.to_string_lossy(), "--entry", &b_id[..7]]);
     assert!(ok, "回退应成功（untracked 备份移出工作区）: {}", out);
-    assert_eq!(std::fs::read(dir.join("test.blend")).unwrap(), b"v2", "回退 B：B 改动检出（工作区 = v2）");
-    assert!(!dir.join("untracked.txt").exists(), "untracked 应移出工作区");
     assert_eq!(
-        std::fs::read(dir.join(".keinestamp").join("rollback-backup").join("untracked.txt")).unwrap(),
+        std::fs::read(dir.join("test.blend")).unwrap(),
+        b"v2",
+        "回退 B：B 改动检出（工作区 = v2）"
+    );
+    assert!(
+        !dir.join("untracked.txt").exists(),
+        "untracked 应移出工作区"
+    );
+    assert_eq!(
+        std::fs::read(
+            dir.join(".keinestamp")
+                .join("rollback-backup")
+                .join("untracked.txt")
+        )
+        .unwrap(),
         b"user file",
         "untracked 应备份在 rollback-backup"
     );
@@ -360,10 +467,7 @@ fn test_export_with_real_hash() {
     let timeline_path = dir.join(".keinestamp").join("web").join("timeline.json");
     let content = std::fs::read_to_string(&timeline_path).unwrap();
     let timeline: serde_json::Value = serde_json::from_str(&content).unwrap();
-    let first_id = timeline["entries"][0]["id"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let first_id = timeline["entries"][0]["id"].as_str().unwrap().to_string();
 
     let export_dir = dir.join("snapshot");
     let (out, ok) = run(&[
@@ -379,7 +483,10 @@ fn test_export_with_real_hash() {
     assert!(export_dir.join("snapshot.json").exists());
     assert!(export_dir.join("README.txt").exists());
     assert!(export_dir.join("files/model.blend").exists());
-    assert_eq!(std::fs::read(export_dir.join("files/model.blend")).unwrap(), b"blend data");
+    assert_eq!(
+        std::fs::read(export_dir.join("files/model.blend")).unwrap(),
+        b"blend data"
+    );
 
     std::fs::remove_dir_all(&dir).unwrap();
 }
@@ -388,6 +495,7 @@ fn test_export_with_real_hash() {
 fn html_gen_contains_daynight_theme() {
     let dir = tmp_dir("theme");
     let timeline = keinestamp::timeline::Timeline {
+        version: 1,
         project: "ThemeTest".to_string(),
         entries: vec![keinestamp::timeline::TimelineEntry {
             id: "abc123def456".to_string(),
@@ -397,6 +505,12 @@ fn html_gen_contains_daynight_theme() {
             files: vec!["char.blend".to_string()],
             file_status: vec![],
             preview: "previews/abc123.png".to_string(),
+            preview_type: String::new(),
+            preview_enabled: true,
+            previews: Vec::new(),
+            preview_errors: Vec::new(),
+            tag_category: None,
+            tags: Vec::new(),
             tag: Some("建模".to_string()),
             milestone: false,
             superseded: false,
@@ -409,13 +523,25 @@ fn html_gen_contains_daynight_theme() {
     keinestamp::html_gen::generate_index_html(&dir, &dir, &timeline, "ThemeTest").unwrap();
 
     let html = std::fs::read_to_string(dir.join("index.html")).unwrap();
-    assert!(html.contains(r#"[data-theme="night"]"#), "missing night palette selector");
-    assert!(html.contains("keinestamp_web_theme"), "missing theme storage key");
+    assert!(
+        html.contains(r#"[data-theme="night"]"#),
+        "missing night palette selector"
+    );
+    assert!(
+        html.contains("keinestamp_web_theme"),
+        "missing theme storage key"
+    );
     assert!(html.contains("theme-toggle"), "missing toggle button id");
     assert!(html.contains("color-mix"), "missing color-mix badge styles");
     assert!(html.contains("--bg: #151719"), "night palette drifted");
-    assert!(html.contains("localStorage.getItem('keinestamp_web_theme')"), "missing pre-read script");
-    assert!(!html.contains("class=\"brand\""), "web logo should be removed");
+    assert!(
+        html.contains("localStorage.getItem('keinestamp_web_theme')"),
+        "missing pre-read script"
+    );
+    assert!(
+        !html.contains("class=\"brand\""),
+        "web logo should be removed"
+    );
     assert!(html.contains("shadow-hover"), "missing hover shadow token");
     assert!(html.contains("--tint-soft"), "missing tint tokens");
 

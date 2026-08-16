@@ -1,45 +1,85 @@
 <script lang="ts">
+  import type { TagGroup } from '../api'
+
   let {
     onConfirm,
     onCancel,
     lastTag = '',
+    lastTags = [] as string[],
+    lastTagCategory = '',
+    tagGroups = [] as TagGroup[],
     busy = false,
     progress = '',
     hasPreviewMarked = false,
   }: {
-    onConfirm: (msg: string, tag: string | null, noPreview: boolean) => Promise<boolean>
+    onConfirm: (msg: string, tag: string | null, tagCategory: string | null, tags: string[], noPreview: boolean) => Promise<boolean>
     onCancel: () => void
     lastTag?: string
+    lastTags?: string[]
+    lastTagCategory?: string
+    tagGroups?: TagGroup[]
     busy?: boolean
     progress?: string
-    /** 本次选择文件中是否有标记 3D 预览的 .blend（无标记则不显示 3D 预览选框） */
+    /** 本次选择文件中是否有标记预览的文件（无标记则不显示预览选框） */
     hasPreviewMarked?: boolean
   } = $props()
 
-  const TAG_PRESETS = ['建模', 'UV拆分', '绑定', '贴图', '修复']
+  const DEFAULT_TAG_GROUPS: TagGroup[] = [
+    { id: 'modeling', label: '建模流程', tags: ['建模', 'UV拆分', '绑定', '贴图', '修复'] },
+    { id: 'painting', label: '绘画流程', tags: ['草图', '线稿', '上色', '细化', '完稿'] },
+    { id: 'video', label: '视频流程', tags: ['剪辑', '调色', '特效', '字幕', '导出'] },
+  ]
+  const TAG_GROUPS = $derived(tagGroups.length > 0 ? tagGroups : DEFAULT_TAG_GROUPS)
 
   let message = $state('')
-  let tag = $state('')
+  let category = $state('')
+  let selectedTags = $state<string[]>([])
   let customTag = $state('')
   let useCustom = $state(false)
   let previewEnabled = $state(true)
 
+  const currentTags = $derived(TAG_GROUPS.find((g) => g.id === category)?.tags ?? [])
+
+  function effectiveTags(): string[] {
+    if (useCustom) {
+      const t = customTag.trim()
+      return t ? [t] : []
+    }
+    return selectedTags
+  }
+
   function effectiveTag(): string | null {
-    if (!tag && !useCustom) return null
-    if (useCustom) return customTag.trim() || null
-    return tag || null
+    const tags = effectiveTags()
+    return tags.length > 0 ? tags[0] : null
+  }
+
+  function effectiveCategory(): string | null {
+    return effectiveTags().length > 0 ? category : null
   }
 
   async function handleConfirm() {
     if (busy || !message.trim()) return
-    const ok = await onConfirm(message.trim(), effectiveTag(), !previewEnabled)
+    const ok = await onConfirm(message.trim(), effectiveTag(), effectiveCategory(), effectiveTags(), !previewEnabled)
     if (ok) onCancel()
   }
 
   $effect(() => {
-    if (lastTag) {
-      if (TAG_PRESETS.includes(lastTag)) {
-        tag = lastTag
+    const hasLast = lastTag || (lastTags && lastTags.length > 0)
+    // 文件类型建议只作为提示，不再自动选中流程/标签，避免“勾了 png 就被迫选绘画流程”
+    if (!hasLast) return
+    if (lastTagCategory) {
+      const known = TAG_GROUPS.some((g) => g.id === lastTagCategory)
+      if (known) category = lastTagCategory
+    }
+    if (lastTags && lastTags.length > 0) {
+      const group = TAG_GROUPS.find((g) => g.id === lastTagCategory) ?? TAG_GROUPS[0]
+      selectedTags = lastTags.filter((t) => group.tags.includes(t))
+      useCustom = false
+    } else if (lastTag) {
+      const group = TAG_GROUPS.find((g) => g.id === lastTagCategory) ?? TAG_GROUPS[0]
+      if (group.tags.includes(lastTag)) {
+        selectedTags = [lastTag]
+        useCustom = false
       } else {
         customTag = lastTag
         useCustom = true
@@ -47,17 +87,24 @@
     }
   })
 
+  function selectCategory(id: string) {
+    category = id
+    if (!useCustom) {
+      selectedTags = selectedTags.filter((t) => currentTags.includes(t))
+    }
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) handleConfirm()
     if (e.key === 'Escape' && !busy) onCancel()
   }
 
-  function selectPreset(p: string) {
-    if (tag === p) {
-      tag = ''
+  function toggleTag(p: string) {
+    useCustom = false
+    if (selectedTags.includes(p)) {
+      selectedTags = selectedTags.filter((t) => t !== p)
     } else {
-      tag = p
-      useCustom = false
+      selectedTags = [...selectedTags, p]
     }
   }
 </script>
@@ -78,19 +125,31 @@
       ></textarea>
     </div>
     <div class="field">
+      <span class="cat-label">流程分类（可选）</span>
+      <div class="cat-row">
+        {#each TAG_GROUPS as g}
+          <button
+            class="cat-btn"
+            class:active={category === g.id}
+            onclick={() => selectCategory(g.id)}
+          >{g.label}</button>
+        {/each}
+      </div>
+    </div>
+    <div class="field">
       <label for="cd-tag">标签（可选）</label>
       <div class="tag-row">
-        {#each TAG_PRESETS as p}
+        {#each currentTags as p}
           <button
             class="tag-btn"
-            class:active={tag === p && !useCustom}
-            onclick={() => selectPreset(p)}
+            class:active={selectedTags.includes(p) && !useCustom}
+            onclick={() => toggleTag(p)}
           >{p}</button>
         {/each}
         <button
           class="tag-btn custom-btn"
           class:active={useCustom}
-          onclick={() => { useCustom = true; tag = ''; }}
+          onclick={() => { useCustom = true; selectedTags = []; }}
         >自定义</button>
       </div>
       {#if useCustom}
@@ -105,7 +164,7 @@
     </div>
     {#if hasPreviewMarked}
       <div class="field row-field">
-        <label for="cd-preview">3D 预览</label>
+        <label for="cd-preview">生成预览</label>
         <input id="cd-preview" type="checkbox" bind:checked={previewEnabled} />
       </div>
     {/if}
@@ -124,6 +183,39 @@
   }
   .field textarea {
     resize: none;
+  }
+  .cat-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  .cat-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+  .cat-btn {
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s var(--ease);
+  }
+  .cat-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .cat-btn.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: var(--accent);
+    font-weight: 600;
   }
   .tag-row {
     display: flex;

@@ -101,10 +101,7 @@ pub fn resolve_site_name(meta: &MetaConfig) -> String {
     if !sanitized.is_empty() {
         return sanitized;
     }
-    let suffix = meta
-        .project_id
-        .as_deref()
-        .unwrap_or_default();
+    let suffix = meta.project_id.as_deref().unwrap_or_default();
     format!("project{}", &suffix[..8.min(suffix.len())])
 }
 
@@ -136,12 +133,16 @@ pub fn read_meta(path: &Path) -> Result<MetaConfig> {
         .with_context(|| format!("failed to parse config file {:?}", path))?;
     if config.project_root.as_os_str().is_empty() {
         // 配置文件位于 <root>/.keinestamp/.keinestamp.toml：从父目录再上一级得项目根
-        let mut parent = path.parent().context("config path has no parent")?.to_path_buf();
-        if parent.file_name().map(|s| s == ".keinestamp").unwrap_or(false) {
-            parent = parent
-                .parent()
-                .map(|p| p.to_path_buf())
-                .unwrap_or(parent);
+        let mut parent = path
+            .parent()
+            .context("config path has no parent")?
+            .to_path_buf();
+        if parent
+            .file_name()
+            .map(|s| s == ".keinestamp")
+            .unwrap_or(false)
+        {
+            parent = parent.parent().map(|p| p.to_path_buf()).unwrap_or(parent);
         }
         config.project_root = parent;
     }
@@ -195,7 +196,11 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("keinestamp_oldsite_{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".keinestamp")).unwrap();
         let path = meta_path(&dir);
-        std::fs::write(&path, "version = \"0.1.0\"\ninit_time = \"2026-01-01T00:00:00Z\"\n").unwrap();
+        std::fs::write(
+            &path,
+            "version = \"0.1.0\"\ninit_time = \"2026-01-01T00:00:00Z\"\n",
+        )
+        .unwrap();
         let meta = read_meta(&path).unwrap();
         assert_eq!(meta.site_name, None);
         assert!(!meta.site_locked);
@@ -213,7 +218,8 @@ mod tests {
 
     #[test]
     fn test_write_and_read_meta() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("keinestamp_test_config_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_test_config_{}", std::process::id()));
         std::fs::create_dir_all(&dir)?;
 
         let path = meta_path(&dir);
@@ -235,7 +241,8 @@ mod tests {
 
     #[test]
     fn test_read_meta_corrupt() {
-        let dir = std::env::temp_dir().join(format!("keinestamp_test_corrupt_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_test_corrupt_{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".keinestamp")).unwrap();
 
         let path = meta_path(&dir);
@@ -298,7 +305,8 @@ mod tests {
 
     #[test]
     fn test_backward_compat_old_fields() -> Result<()> {
-        let dir = std::env::temp_dir().join(format!("keinestamp_test_compat_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_test_compat_{}", std::process::id()));
         std::fs::create_dir_all(dir.join(".keinestamp"))?;
 
         let path = meta_path(&dir);

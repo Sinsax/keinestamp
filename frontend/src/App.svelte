@@ -47,7 +47,12 @@ interface BlenderDownloadProgress {
   let selectedEntryId = $state('')
   let statusOutput = $state('')
   let statusError = $state(false)
-let statusErrorMsg = $state('')
+  let statusErrorMsg = $state('')
+  // status 轮询去重：10s 定时器可能叠加（上一次 lore status 被大项目/锁拖慢时），
+  // 只允许一个后台轮询在途；手动刷新（handleRecord 等 await refreshStatus）不受影响。
+  let statusPollInFlight = false
+  // 最新一次请求胜出：慢的旧响应不得覆盖新响应
+  let statusReqSeq = 0
   let trackedFiles = $state<string[]>([])
   let emptyDirs = $state<string[]>([])
   let statusText = $state('Ready')
@@ -64,8 +69,9 @@ let statusErrorMsg = $state('')
   let siteLocked = $state(false)
   let deployStatus = $state<{ local: number; remote: number | null } | null>(null)
   let commitSelection = $state<string[] | null>(null)
-  // 3D 预览标记：变更面板右键 .blend 标记；记录时只对这些文件生成 GLB（记录完成后清空）
+  // 预览标记：变更面板右键可预览文件标记；记录时只对这些文件生成预览（记录完成后清空）
   let previewMarked = $state<Set<string>>(new Set())
+  let tagGroups = $state<api.TagGroup[]>([])
 
   function togglePreviewMark(path: string) {
     const next = new Set(previewMarked)
@@ -73,7 +79,7 @@ let statusErrorMsg = $state('')
     else next.add(path)
     previewMarked = next
   }
-  // 本次提交范围中是否有标记预览的文件（决定记录弹窗是否显示 3D 预览选框）
+  // 本次提交范围中是否有标记预览的文件（决定记录弹窗是否显示预览选框）
   const hasPreviewMarked = $derived(
     [...previewMarked].some((f) => isPreviewable(f) && (commitSelection === null || commitSelection.includes(f)))
   )
@@ -84,8 +90,25 @@ const rollbackDeletedFiles = $derived(rollbackState.deleted_files)
 const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   let rollbackBusy = $state(false)
   let pendingReinit = $state<string | null>(null)
-  // 统一确认弹窗：回退丢弃 / 恢复丢弃（丢弃=执行，留下=取消不操作）
-  let pendingConfirm = $state<{ kind: 'rollback' | 'restore'; entry?: TimelineEntry; title: string; message: string } | null>(null)
+  // 统一确认弹窗：回退丢弃 / 恢复丢弃 / 回退空记录（丢弃=执行，留下=取消不操作）
+  let pendingConfirm = $state<
+    | { kind: 'rollback' | 'restore'; entry?: TimelineEntry; title: string; message: string }
+    | {
+        kind: 'empty_record'
+        title: string
+        message: string
+        data: {
+          msg: string
+          tag: string | null
+          tagCategory: string | null
+          tags: string[]
+          noPreview: boolean
+          files: string[] | null
+          previewFiles: string[]
+        }
+      }
+    | null
+  >(null)
   // 取消更改（git restore）：M 覆盖工作区修改有数据丢失风险 → 弹确认框
   let pendingDiscard = $state<{ file: string } | null>(null)
   let deploying = $state(false)
@@ -140,6 +163,18 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     e.preventDefault()
   }
 
+  function handleGlobalKeydown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null
+    if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+    if (e.ctrlKey && e.key.toLowerCase() === 'r') {
+      e.preventDefault()
+      if (activePath && projectType === 'initialized') refreshStatus()
+    } else if (e.ctrlKey && e.key === 'Enter') {
+      e.preventDefault()
+      if (activePath && projectType === 'initialized' && !recording && !showCommit) openCommit()
+    }
+  }
+
   function pushToast(msg: string, type: string = 'info') {
     if (type === 'error') console.log(`[debug] toast error:`, msg)
     const id = ++toastId
@@ -177,19 +212,30 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function refreshStatus() {
     if (projectType !== 'initialized') return
     const path = activePath
+    const req = ++statusReqSeq
     try {
       const s = await api.status(path)
-      if (path !== activePath) return
+      if (path !== activePath || req !== statusReqSeq) return
       statusOutput = s.output
       statusError = false
       statusErrorMsg = ''
     } catch (e: any) {
-      if (path === activePath) {
+      if (path === activePath && req === statusReqSeq) {
         statusOutput = ''
         statusError = true
         statusErrorMsg = String(e)
         console.error('[refreshStatus] error:', e)
       }
+    }
+  }
+
+  async function pollStatus() {
+    if (statusPollInFlight) return
+    statusPollInFlight = true
+    try {
+      await refreshStatus()
+    } finally {
+      statusPollInFlight = false
     }
   }
 
@@ -255,8 +301,9 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       projectType = pt
       if (pt === 'initialized') {
         const t2 = performance.now()
-        const [timeline, cfg, autoConn] = await Promise.all([api.getTimeline(path), api.readConfig(path), api.getAutoConnect()])
+        const [timeline, cfg, autoConn, groups] = await Promise.all([api.getTimeline(path), api.readConfig(path), api.getAutoConnect(), api.getTagGroups(path)])
         if (seq !== loadSeq) return
+        tagGroups = groups
         entries = timeline.entries.toReversed()
         accessToken = cfg.access_token || ''
         siteName = cfg.site_name || ''
@@ -348,28 +395,24 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     busyText = ''
   }
 
-  async function handleRecord(msg: string, tag: string | null, noPreview: boolean = false): Promise<boolean> {
+  function openCommit() {
+    // 不再根据文件类型自动预选流程/标签——用户应自由选择
+    showCommit = true
+  }
+
+  async function handleRecord(msg: string, tag: string | null, tagCategory: string | null = null, tags: string[] = [], noPreview: boolean = false): Promise<boolean> {
     if (recording) return false
-    recording = true
-    let unlisten: (() => void) | undefined
-    try {
-      statusText = '记录中...'
-      unlisten = await listen<CommitProgress>('commit-progress', (event) => {
-        statusText = event.payload.message
-        commitProgressMsg = event.payload.message
-      })
-      const sel = commitSelection
-      let files: string[] | null = null
-      if (sel !== null) {
-        await refreshStatus()
-        const fresh = parseStatus(statusOutput)
-        const freshSet = new Set(fresh.map((f) => f.path))
-        // 目录路径不提交（后端 stage 目录 = 目录下全部文件）：勾选 UI 的目录残留会全提
-        files = sel.filter((f) => !f.endsWith('/') && freshSet.has(f))
-        if (files.length === 0) {
-          pushToast('所选文件已无变更', 'info')
-          return false
-        }
+    const sel = commitSelection
+    let files: string[] | null = null
+    let isEmptyRecord = false
+    if (sel !== null) {
+      await refreshStatus()
+      const fresh = parseStatus(statusOutput)
+      const freshSet = new Set(fresh.map((f) => f.path))
+      // 目录路径不提交（后端 stage 目录 = 目录下全部文件）：勾选 UI 的目录残留会全提
+      files = sel.filter((f) => !f.endsWith('/') && freshSet.has(f))
+      isEmptyRecord = files.length === 0
+      if (files.length > 0) {
         try {
           const info = await api.getIgnoreInfo(activePath)
           const ignoredSet = new Set(info.ignored)
@@ -390,16 +433,77 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
           /* ignore info unavailable — fall back to raw selection */
         }
       }
-      // 预览标记：仅标记的可预览文件生成预览（空数组 = 不生成；后端按提交文件交集过滤）
-      const previewFiles = [...previewMarked].filter((f) => isPreviewable(f))
-      const hash = await api.record(activePath, msg, tag, noPreview, files, previewFiles)
+    } else {
+      await refreshStatus()
+      const fresh = parseStatus(statusOutput)
+      // 默认“全选”不自动包含已删除文件：删除必须显式勾选才会提交
+      files = fresh
+        .filter((f) => !f.path.endsWith('/') && f.x !== 'D')
+        .map((f) => f.path)
+      isEmptyRecord = files.length === 0
+    }
+    // 预览标记：仅标记的可预览文件生成预览（空数组 = 不生成；后端按提交文件交集过滤）
+    const previewFiles = [...previewMarked].filter((f) => isPreviewable(f))
+
+    // 空记录 / 纯里程碑：没有实际文件变更，先弹确认（避免误触生成空提交）
+    if (isEmptyRecord && !rollbackState.rollback_point) {
+      pendingConfirm = {
+        kind: 'empty_record',
+        title: '确认空记录？',
+        message:
+          '当前没有选择任何文件变更，将创建一条空记录 / 纯里程碑记录。\n' +
+          '是否继续？',
+        data: { msg, tag, tagCategory, tags, noPreview, files, previewFiles },
+      }
+      return false
+    }
+
+    // 回退状态下任何提交都会顶替时间线，先弹警告确认
+    if (rollbackState.rollback_point) {
+      pendingConfirm = {
+        kind: 'empty_record',
+        title: '确认回退状态记录？',
+        message:
+          '当前处于回退状态，提交将基于过去的版本创建新记录，并顶替当前时间线结构。\n' +
+          '这可能会影响时间线，请确认是否继续？',
+        data: { msg, tag, tagCategory, tags, noPreview, files, previewFiles },
+      }
+      return false
+    }
+
+    return performRecord(msg, tag, tagCategory, tags, noPreview, files, previewFiles)
+  }
+
+  async function performRecord(
+    msg: string,
+    tag: string | null,
+    tagCategory: string | null,
+    tags: string[],
+    noPreview: boolean,
+    files: string[] | null,
+    previewFiles: string[],
+  ): Promise<boolean> {
+    if (recording) return false
+    recording = true
+    let unlisten: (() => void) | undefined
+    try {
+      statusText = '记录中...'
+      unlisten = await listen<CommitProgress>('commit-progress', (event) => {
+        statusText = event.payload.message
+        commitProgressMsg = event.payload.message
+      })
+      const sel = commitSelection
+      const hash = await api.record(activePath, msg, tag, tagCategory, tags, noPreview, files, previewFiles)
       pushToast(`已记录 ${hash}`, 'success')
       previewMarked = new Set()
-      await loadProject(activePath)
       if (sel !== null && files) {
         const committed = new Set(files)
         commitSelection = sel.filter((f) => !committed.has(f))
       }
+      // 立即结束“记录中”状态并关闭弹窗，再后台刷新项目数据；
+      // 否则大项目 full walk（loadTrackedFiles）会一直显示“记录中”/看起来卡住
+      statusText = '已记录'
+      setTimeout(() => { void loadProject(activePath) }, 0)
       return true
     } catch (e: any) {
       pushToast(`记录失败: ${e}`, 'error')
@@ -410,6 +514,15 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       commitProgressMsg = ''
       if (unlisten) unlisten()
     }
+  }
+
+  function confirmRollbackRecord() {
+    const p = pendingConfirm
+    if (!p || p.kind !== 'empty_record') return
+    const { msg, tag, tagCategory, tags, noPreview, files, previewFiles } = p.data
+    pendingConfirm = null
+    showCommit = false
+    void performRecord(msg, tag, tagCategory, tags, noPreview, files, previewFiles)
   }
 
   async function handleDeploy() {
@@ -533,13 +646,13 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     busyText = '回退中...'
     try {
       await api.rollback(activePath, entry.id)
-      // 等 UI 全部刷新完成（loadProject 内含 status/变更面板/回退状态 await）→
-      // 清遮罩 + toast 与 UI 变化同时呈现；回退后默认全部取消选择（用户手动勾选要提交的）
-      await loadProject(activePath)
+      // 命令完成即清遮罩 + toast；loadProject 后台刷新（大项目 full walk/status 可能较慢，
+      // 不应让“回退中”遮罩一直等待）。回退后默认全部取消选择（用户手动勾选要提交的）
       commitSelection = []
       busyText = ''
       rollbackBusy = false
       pushToast(`已回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本，可修改后记录）`, 'success')
+      setTimeout(() => { void loadProject(activePath) }, 0)
       return
     } catch (e: any) {
       const msg = String(e)
@@ -568,11 +681,12 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     busyText = '回退中...（丢弃中间更改）'
     try {
       await api.rollback(activePath, entry.id, true)
-      await loadProject(activePath)
+      // 命令完成即清遮罩 + toast；loadProject 后台刷新
       commitSelection = []
       busyText = ''
       rollbackBusy = false
       pushToast(`已丢弃回退期间的更改并回退到记录 ${entry.id.slice(0, 7)} 之前`, 'success')
+      setTimeout(() => { void loadProject(activePath) }, 0)
       return
     } catch (e: any) {
       pushToast(`回退失败: ${e}`, 'error')
@@ -603,11 +717,12 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     busyText = '恢复中...'
     try {
       await api.restoreRollback(activePath, confirm)
-      // 等 UI 全部刷新完成 → 清遮罩 + toast 与 UI 变化同时呈现（恢复后保持默认全选）
-      await loadProject(activePath)
+      // 命令完成即清遮罩 + toast；loadProject 后台刷新（恢复后保持默认全选）。
+      // 之前这里 await loadProject，若 restore 后的 status/full walk 较慢会导致 GUI 一直“恢复中”
       busyText = ''
       rollbackBusy = false
       pushToast('已恢复回退前的状态', 'success')
+      setTimeout(() => { void loadProject(activePath) }, 0)
       return
     } catch (e: any) {
       const msg = String(e)
@@ -678,10 +793,12 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     resolvingConflict = true
     try {
       await api.resolveRollbackConflicts(activePath, choices.map((c) => [c[0], c[1]]))
-      pushToast('冲突已解决，已恢复回退前的状态', 'success')
+      // 命令完成即关闭冲突弹窗/清 busy；loadProject 后台刷新，避免大项目刷新让弹窗一直“恢复中”
       conflictFiles = null
-      await loadProject(activePath)
-      await refreshRollbackState()
+      resolvingConflict = false
+      pushToast('冲突已解决，已恢复回退前的状态', 'success')
+      setTimeout(() => { void loadProject(activePath).then(() => refreshRollbackState()) }, 0)
+      return
     } catch (e: any) {
       pushToast(`完成恢复失败: ${e}`, 'error')
     }
@@ -816,22 +933,32 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
         pushToast('Blender 下载失败', 'error')
       }
     })
-    const timer = setInterval(() => {
+    const refreshProjectPoll = () => {
       if (activePath && projectType === 'initialized') {
-        refreshStatus()
+        pollStatus()
         loadTrackedFiles(activePath)
         refreshRollbackState()
       }
-    }, 10000)
+    }
+    // 不再因 document.hidden 跳过轮询：用户在资源管理器删除文件时窗口往往在后台，
+    // 若暂停轮询，变更区会长时间不更新。用 pollStatus 去重防叠加即可。
+    const timer = setInterval(refreshProjectPoll, 10000)
+    const refreshWhenVisible = () => {
+      if (!document.hidden) refreshProjectPoll()
+    }
+    window.addEventListener('focus', refreshWhenVisible)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
       clearInterval(timer)
+      window.removeEventListener('focus', refreshWhenVisible)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
       closeAskUnlisten.then((f) => f())
       blenderDlUnlisten.then((f) => f())
     }
   })
 </script>
 
-<svelte:window oncontextmenu={globalContextMenu} />
+<svelte:window oncontextmenu={globalContextMenu} onkeydown={handleGlobalKeydown} />
 
 <div class="app-layout">
   <TitleBar />
@@ -884,6 +1011,13 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
           </span>
         {/if}
       </div>
+
+      {#if rollbackState.rollback_point}
+        <div class="rollback-banner">
+          <span>⚠️ 当前处于回退状态，提交将顶替时间线结构</span>
+          <button onclick={handleRestore} disabled={rollbackBusy}>恢复</button>
+        </div>
+      {/if}
 
       <div class="content-body">
         <div class="content-area">
@@ -939,7 +1073,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
 <ActionBar
   {projectType}
-  onRecord={() => showCommit = true}
+  onRecord={openCommit}
   onRestore={handleRestore}
   onDeploy={handleDeploy}
   onBackup={handleBackup}
@@ -965,7 +1099,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 </div>
 
 {#if showCommit}
-  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} busy={recording} progress={commitProgressMsg} {hasPreviewMarked} />
+  <CommitDialog onConfirm={handleRecord} onCancel={() => showCommit = false} lastTag={entries[0]?.tag || ''} lastTags={entries[0]?.tags || []} lastTagCategory={entries[0]?.tag_category || ''} busy={recording} progress={commitProgressMsg} {hasPreviewMarked} {tagGroups} />
 {/if}
 
 {#if conflictFiles}
@@ -985,6 +1119,16 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       okLabel="丢弃并跳转"
       cancelLabel="留下"
       onConfirm={confirmDiscardRollback}
+      onCancel={() => (pendingConfirm = null)}
+    />
+  {:else if pendingConfirm.kind === 'empty_record'}
+    <ConfirmDialog
+      title={pendingConfirm.title}
+      message={pendingConfirm.message}
+      okLabel="确认记录"
+      cancelLabel="取消"
+      danger
+      onConfirm={confirmRollbackRecord}
       onCancel={() => (pendingConfirm = null)}
     />
   {:else}
@@ -1087,6 +1231,31 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 <Toast {toasts} />
 
 <style>
+  .rollback-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 14px;
+    background: color-mix(in srgb, var(--warning) 18%, var(--surface));
+    border-bottom: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    color: var(--text);
+    font-size: 13px;
+  }
+  .rollback-banner button {
+    flex-shrink: 0;
+    padding: 4px 14px;
+    font-size: 12px;
+    font-weight: 600;
+    border-radius: 6px;
+    border: 1px solid var(--warning);
+    background: transparent;
+    color: var(--warning);
+    cursor: pointer;
+  }
+  .rollback-banner button:hover {
+    background: var(--warning-soft);
+  }
   .content-body {
     display: flex;
     flex: 1;

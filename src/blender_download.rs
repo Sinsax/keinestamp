@@ -1,4 +1,4 @@
-﻿use anyhow::Result;
+use anyhow::Result;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -17,15 +17,9 @@ const DOWNLOAD_MIRRORS: &[&str] = &[
 ];
 
 const KNOWN_VERSIONS: &[&str] = &[
-    "5.1.2", "5.1.1", "5.1.0",
-    "5.0.1", "5.0.0",
-    "4.5.0",
-    "4.4.3", "4.4.2", "4.4.1", "4.4.0",
-    "4.3.0",
-    "4.2.8", "4.2.7", "4.2.6", "4.2.5", "4.2.4", "4.2.3", "4.2.2", "4.2.1", "4.2.0",
-    "4.1.1", "4.1.0",
-    "4.0.2", "4.0.1", "4.0.0",
-    "3.6.20", "3.6.19", "3.6.18",
+    "5.1.2", "5.1.1", "5.1.0", "5.0.1", "5.0.0", "4.5.0", "4.4.3", "4.4.2", "4.4.1", "4.4.0",
+    "4.3.0", "4.2.8", "4.2.7", "4.2.6", "4.2.5", "4.2.4", "4.2.3", "4.2.2", "4.2.1", "4.2.0",
+    "4.1.1", "4.1.0", "4.0.2", "4.0.1", "4.0.0", "3.6.20", "3.6.19", "3.6.18",
 ];
 
 const VERSION_FETCH_LIMIT: usize = 12;
@@ -101,7 +95,10 @@ fn delete_blender_version_at(dir: &Path, version: &str) -> Result<()> {
         anyhow::bail!("未安装该 Blender 版本: {}", version);
     }
     if installed.len() <= 1 {
-        anyhow::bail!("至少保留一个 Blender 版本（当前仅 {}）", installed.join(", "));
+        anyhow::bail!(
+            "至少保留一个 Blender 版本（当前仅 {}）",
+            installed.join(", ")
+        );
     }
     let target = find_installed_blender_dir(dir, version)
         .ok_or_else(|| anyhow::anyhow!("未找到 Blender {} 的安装目录", version))?;
@@ -122,14 +119,24 @@ pub fn fetch_blender_versions() -> Result<Vec<String>> {
         eprintln!("[debug] fetch_blender_versions: trying {}", mirror);
         match fetch_versions_from(mirror) {
             Ok(versions) if !versions.is_empty() => {
-                eprintln!("[debug] fetch_blender_versions: got {} versions from {}", versions.len(), mirror);
+                eprintln!(
+                    "[debug] fetch_blender_versions: got {} versions from {}",
+                    versions.len(),
+                    mirror
+                );
                 return Ok(versions);
             }
             Ok(_) => {
-                eprintln!("[debug] fetch_blender_versions: mirror {} returned empty", mirror);
+                eprintln!(
+                    "[debug] fetch_blender_versions: mirror {} returned empty",
+                    mirror
+                );
             }
             Err(e) => {
-                eprintln!("[debug] fetch_blender_versions: mirror {} failed: {}", mirror, e);
+                eprintln!(
+                    "[debug] fetch_blender_versions: mirror {} failed: {}",
+                    mirror, e
+                );
             }
         }
     }
@@ -179,7 +186,11 @@ fn parse_installer_versions(html: &str, suffix: &str) -> Vec<String> {
 }
 
 fn fetch_versions_from(base_url: &str) -> Result<Vec<String>> {
-    let url = if base_url.ends_with('/') { base_url.to_string() } else { format!("{}/", base_url) };
+    let url = if base_url.ends_with('/') {
+        base_url.to_string()
+    } else {
+        format!("{}/", base_url)
+    };
     let html = fetch_url(&url, INDEX_TIMEOUT_SECS)?;
 
     let dirs = parse_version_dirs(&html);
@@ -194,13 +205,16 @@ fn fetch_versions_from(base_url: &str) -> Result<Vec<String>> {
 
     let mut versions = Vec::new();
     for chunk in dirs.chunks(8) {
-        let handles: Vec<_> = chunk.iter().map(|ver| {
-            let sub_url = format!("{}/Blender{}/", url.trim_end_matches('/'), ver);
-            std::thread::spawn(move || {
-                let sub_html = fetch_url(&sub_url, SUBPAGE_TIMEOUT_SECS).ok()?;
-                Some(parse_installer_versions(&sub_html, suffix))
+        let handles: Vec<_> = chunk
+            .iter()
+            .map(|ver| {
+                let sub_url = format!("{}/Blender{}/", url.trim_end_matches('/'), ver);
+                std::thread::spawn(move || {
+                    let sub_html = fetch_url(&sub_url, SUBPAGE_TIMEOUT_SECS).ok()?;
+                    Some(parse_installer_versions(&sub_html, suffix))
+                })
             })
-        }).collect();
+            .collect();
         for handle in handles {
             if let Ok(Some(found)) = handle.join() {
                 versions.extend(found);
@@ -209,7 +223,11 @@ fn fetch_versions_from(base_url: &str) -> Result<Vec<String>> {
     }
 
     if versions.is_empty() {
-        anyhow::bail!("no installer files found under {} ({} version dirs)", url, dirs.len());
+        anyhow::bail!(
+            "no installer files found under {} ({} version dirs)",
+            url,
+            dirs.len()
+        );
     }
 
     versions.sort_by(|a, b| {
@@ -261,9 +279,11 @@ pub fn download_blender_with_progress(
     };
 
     let app_dir = blender_install_dir();
-    eprintln!("[debug] download_blender: install_dir={}", app_dir.display());
-    std::fs::create_dir_all(&app_dir)
-        .map_err(|e| anyhow::anyhow!("创建目录失败: {}", e))?;
+    eprintln!(
+        "[debug] download_blender: install_dir={}",
+        app_dir.display()
+    );
+    std::fs::create_dir_all(&app_dir).map_err(|e| anyhow::anyhow!("创建目录失败: {}", e))?;
 
     let mut last_err = None;
     for mirror_base in DOWNLOAD_MIRRORS {
@@ -282,9 +302,15 @@ pub fn download_blender_with_progress(
         match streaming_download(&url, &archive_path, on_progress) {
             Ok(()) => {
                 if !archive_path.exists() {
-                    eprintln!("[debug] download_blender: archive not found after download from {}", url);
+                    eprintln!(
+                        "[debug] download_blender: archive not found after download from {}",
+                        url
+                    );
                     let _ = std::fs::remove_file(&archive_path);
-                    last_err = Some(anyhow::anyhow!("下载完成但未找到文件: {}", archive_path.to_string_lossy()));
+                    last_err = Some(anyhow::anyhow!(
+                        "下载完成但未找到文件: {}",
+                        archive_path.to_string_lossy()
+                    ));
                     continue;
                 }
                 return extract_blender(&app_dir, &archive_path, on_progress, ver);
@@ -380,7 +406,10 @@ fn extract_blender(
     })?;
 
     crate::app_config::set_blender_path(&blender_exe.to_string_lossy());
-    eprintln!("[debug] extract_blender: blender installed at {:?}", blender_exe);
+    eprintln!(
+        "[debug] extract_blender: blender installed at {:?}",
+        blender_exe
+    );
 
     on_progress(DownloadProgress {
         phase: "done".into(),
@@ -407,11 +436,14 @@ fn streaming_download(
         .header("Content-Length")
         .and_then(|s| s.parse().ok())
         .unwrap_or(0);
-    eprintln!("[debug] streaming_download: total_size={} bytes", total_size);
+    eprintln!(
+        "[debug] streaming_download: total_size={} bytes",
+        total_size
+    );
 
     let mut reader = resp.into_reader();
-    let mut file = std::fs::File::create(dest)
-        .map_err(|e| anyhow::anyhow!("创建文件失败: {}", e))?;
+    let mut file =
+        std::fs::File::create(dest).map_err(|e| anyhow::anyhow!("创建文件失败: {}", e))?;
 
     let mut buf = vec![0u8; 65536];
     let mut downloaded: u64 = 0;
@@ -442,7 +474,11 @@ fn streaming_download(
             }
         } else {
             let mb = downloaded as f64 / 1_048_576.0;
-            let pct_downloaded = if downloaded > 0 { (downloaded % 1_048_576 == 0) as i32 * 5 } else { 0 };
+            let pct_downloaded = if downloaded > 0 {
+                (downloaded % 1_048_576 == 0) as i32 * 5
+            } else {
+                0
+            };
             if downloaded % 1_048_576 < 65536 {
                 on_progress(DownloadProgress {
                     phase: "downloading".into(),
@@ -470,11 +506,7 @@ fn find_file(dir: &Path, name: &str) -> Option<PathBuf> {
                 if let Some(found) = find_file(&path, name) {
                     return Some(found);
                 }
-            } else if path
-                .file_name()
-                .map(|n| n == name)
-                .unwrap_or(false)
-            {
+            } else if path.file_name().map(|n| n == name).unwrap_or(false) {
                 return Some(path);
             }
         }
@@ -496,7 +528,10 @@ pub fn find_bundled_blender() -> Option<PathBuf> {
         "blender"
     };
     let install_dir = blender_install_dir();
-    eprintln!("[debug] find_bundled_blender: searching install_dir={}", install_dir.display());
+    eprintln!(
+        "[debug] find_bundled_blender: searching install_dir={}",
+        install_dir.display()
+    );
     let found = find_file(&install_dir, blender_name);
     if found.is_some() {
         eprintln!("[debug] find_bundled_blender: found at {:?}", found);
@@ -509,7 +544,10 @@ pub fn find_bundled_blender() -> Option<PathBuf> {
 pub fn ensure_blender() -> Result<PathBuf> {
     eprintln!("[debug] ensure_blender: starting");
     if let Some(path) = find_bundled_blender() {
-        eprintln!("[debug] ensure_blender: found existing blender at {:?}", path);
+        eprintln!(
+            "[debug] ensure_blender: found existing blender at {:?}",
+            path
+        );
         return Ok(path);
     }
 
@@ -549,7 +587,11 @@ pub fn set_current_blender_version(version: &str) -> Result<()> {
 }
 
 fn set_current_blender_version_at(dir: &Path, version: &str) -> Result<()> {
-    let exe_name = if cfg!(target_os = "windows") { "blender.exe" } else { "blender" };
+    let exe_name = if cfg!(target_os = "windows") {
+        "blender.exe"
+    } else {
+        "blender"
+    };
     let install_dir = find_installed_blender_dir(dir, version)
         .ok_or_else(|| anyhow::anyhow!("未安装该 Blender 版本: {}", version))?;
     let exe = install_dir.join(exe_name);
@@ -610,11 +652,17 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::create_dir_all(dir.join("blender-4.2.0-windows-x64")).unwrap();
         std::fs::create_dir_all(dir.join("blender-4.3.0-windows-x64")).unwrap();
-        assert_eq!(list_installed_versions_from(&dir), vec!["4.2.0".to_string(), "4.3.0".to_string()]);
+        assert_eq!(
+            list_installed_versions_from(&dir),
+            vec!["4.2.0".to_string(), "4.3.0".to_string()]
+        );
 
         // 删 4.2 → 剩 4.3
         delete_blender_version_at(&dir, "4.2.0").unwrap();
-        assert_eq!(list_installed_versions_from(&dir), vec!["4.3.0".to_string()]);
+        assert_eq!(
+            list_installed_versions_from(&dir),
+            vec!["4.3.0".to_string()]
+        );
         // 唯一版本拒绝删除（最少保留一个）
         let err = delete_blender_version_at(&dir, "4.3.0").unwrap_err();
         assert!(err.to_string().contains("至少保留一个"), "err: {err}");
@@ -627,14 +675,21 @@ mod tests {
     #[test]
     fn test_parse_blender_version_from_path() {
         assert_eq!(
-            parse_blender_version_from_path(Path::new(r"C:\Users\x\AppData\Roaming\Keinestamp\blender\blender-4.2.0-windows-x64\blender.exe")),
+            parse_blender_version_from_path(Path::new(
+                r"C:\Users\x\AppData\Roaming\Keinestamp\blender\blender-4.2.0-windows-x64\blender.exe"
+            )),
             Some("4.2.0".to_string())
         );
         assert_eq!(
-            parse_blender_version_from_path(Path::new(r"/home/x/.config/keinestamp/blender/blender-5.1.2-windows-x64/blender")),
+            parse_blender_version_from_path(Path::new(
+                r"/home/x/.config/keinestamp/blender/blender-5.1.2-windows-x64/blender"
+            )),
             Some("5.1.2".to_string())
         );
-        assert_eq!(parse_blender_version_from_path(Path::new("C:\\tools\\blender.exe")), None);
+        assert_eq!(
+            parse_blender_version_from_path(Path::new("C:\\tools\\blender.exe")),
+            None
+        );
         assert_eq!(parse_blender_version_from_path(Path::new("")), None);
     }
 
@@ -658,18 +713,39 @@ mod tests {
 
     #[test]
     fn test_version_to_major_minor() {
-        assert_eq!({
-            let parts: Vec<&str> = "5.1.2".split('.').collect();
-            if parts.len() >= 2 { format!("{}.{}", parts[0], parts[1]) } else { "5.1.2".to_string() }
-        }, "5.1");
-        assert_eq!({
-            let parts: Vec<&str> = "4.4.0".split('.').collect();
-            if parts.len() >= 2 { format!("{}.{}", parts[0], parts[1]) } else { "4.4.0".to_string() }
-        }, "4.4");
-        assert_eq!({
-            let parts: Vec<&str> = "3.0".split('.').collect();
-            if parts.len() >= 2 { format!("{}.{}", parts[0], parts[1]) } else { "3.0".to_string() }
-        }, "3.0");
+        assert_eq!(
+            {
+                let parts: Vec<&str> = "5.1.2".split('.').collect();
+                if parts.len() >= 2 {
+                    format!("{}.{}", parts[0], parts[1])
+                } else {
+                    "5.1.2".to_string()
+                }
+            },
+            "5.1"
+        );
+        assert_eq!(
+            {
+                let parts: Vec<&str> = "4.4.0".split('.').collect();
+                if parts.len() >= 2 {
+                    format!("{}.{}", parts[0], parts[1])
+                } else {
+                    "4.4.0".to_string()
+                }
+            },
+            "4.4"
+        );
+        assert_eq!(
+            {
+                let parts: Vec<&str> = "3.0".split('.').collect();
+                if parts.len() >= 2 {
+                    format!("{}.{}", parts[0], parts[1])
+                } else {
+                    "3.0".to_string()
+                }
+            },
+            "3.0"
+        );
     }
 
     #[test]
@@ -684,7 +760,10 @@ mod tests {
             "https://download.blender.org/release/Blender{}/{}",
             major_minor, filename
         );
-        assert_eq!(url, "https://download.blender.org/release/Blender5.1/blender-5.1.2-windows-x64.zip");
+        assert_eq!(
+            url,
+            "https://download.blender.org/release/Blender5.1/blender-5.1.2-windows-x64.zip"
+        );
     }
 
     #[test]
@@ -694,7 +773,11 @@ mod tests {
         assert_eq!(versions[0], DEFAULT_BLENDER_VERSION);
         for v in &versions {
             let parts: Vec<&str> = v.split('.').collect();
-            assert!(parts.len() >= 2, "version {} should have at least 2 parts", v);
+            assert!(
+                parts.len() >= 2,
+                "version {} should have at least 2 parts",
+                v
+            );
         }
     }
 }

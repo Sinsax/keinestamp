@@ -1,8 +1,9 @@
 <script lang="ts">
   import DirTree from './DirTree.svelte'
-  import type { TimelineEntry } from '../types'
-  import { setEntryMilestone, setEntryPreview, updateConfig } from '../api'
-  import { tagColor } from './tags'
+  import type { PreviewFile, TimelineEntry } from '../types'
+  import { setEntryMilestone, setEntryPreview, setEntryPreviewFile, updateConfig, compareEntries, type FileDiff } from '../api'
+  import { previewTypeOf } from './preview'
+  import { tagCategoryLabel, tagColor } from './tags'
 
   let {
     entries,
@@ -56,6 +57,69 @@
 
   let previewBusy = $state('')
 
+  function previewLabel(entry: TimelineEntry): string {
+    if (entry.previews && entry.previews.length > 0) {
+      return previewLabelForKind(entry.previews[0].type)
+    }
+    const t = entry.preview_type || ''
+    if (t === 'image') return 'Image'
+    if (t === 'video') return 'Video'
+    const p = (entry.preview || '').toLowerCase()
+    if ([
+      '.png', '.jpg', '.jpeg', '.webp', '.tga', '.exr', '.psd', '.kra', '.sai', '.clip',
+    ].some((e) => p.endsWith(e))) return 'Image'
+    if (['.mp4', '.mov', '.webm', '.prproj', '.aep', '.drp'].some((e) => p.endsWith(e))) return 'Video'
+    return 'Model'
+  }
+
+  function previewLabelForKind(kind: string): string {
+    if (kind === 'image') return 'Image'
+    if (kind === 'video') return 'Video'
+    return 'Model'
+  }
+
+  function inferLegacyPreviewKind(entry: TimelineEntry): string {
+    const p = (entry.preview || '').replace(/^\.\//, '').toLowerCase()
+    if (p.startsWith('previews_video/')) return 'video'
+    if (p.startsWith('previews_image/')) return 'image'
+    if (p.startsWith('previews_glb/')) return 'glb'
+    for (const f of entry.files) {
+      const k = previewTypeOf(f)
+      if (k === 'video') return 'video'
+    }
+    for (const f of entry.files) {
+      const k = previewTypeOf(f)
+      if (k === 'image') return 'image'
+    }
+    return previewTypeOf(entry.preview)
+  }
+
+  function previewsOf(entry: TimelineEntry): PreviewFile[] {
+    if (entry.previews && entry.previews.length > 0) {
+      return entry.previews
+    }
+    if (entry.preview) {
+      const kind = entry.preview_type || inferLegacyPreviewKind(entry)
+      return [{
+        file: entry.files[0] || '',
+        path: entry.preview,
+        type: kind,
+        enabled: entry.preview_enabled !== false,
+      }]
+    }
+    return []
+  }
+
+  async function togglePreviewFile(entry: TimelineEntry, preview: PreviewFile) {
+    if (!activePath || previewBusy) return
+    previewBusy = entry.id + ':' + preview.path
+    try {
+      await setEntryPreviewFile(activePath, entry.id, preview.path, preview.enabled === false)
+      await onPreviewChange()
+    } catch { /* ignore */ }
+    previewBusy = ''
+  }
+
   async function togglePreview(entry: TimelineEntry) {
     if (!activePath || previewBusy || !entry.preview) return
     previewBusy = entry.id
@@ -68,6 +132,7 @@
   }
 
   let ctxMenu = $state<{ x: number; y: number; entry: TimelineEntry } | null>(null)
+  let compareResult = $state<{ title: string; diffs: FileDiff[] } | null>(null)
 
   function openCtx(e: MouseEvent, entry: TimelineEntry) {
     e.preventDefault()
@@ -89,6 +154,21 @@
     const m = ctxMenu
     closeCtx()
     if (m) onRollback(m.entry)
+  }
+
+  async function ctxCompare() {
+    const m = ctxMenu
+    closeCtx()
+    if (!m || !activePath) return
+    const idx = entries.findIndex((e) => e.id === m.entry.id)
+    const other = entries[idx + 1]
+    if (!other) return
+    try {
+      const diffs = await compareEntries(activePath, m.entry.id, other.id)
+      compareResult = { title: `${m.entry.message} ↔ ${other.message}`, diffs }
+    } catch (e) {
+      console.error('compare failed', e)
+    }
   }
 
   function ctxTogglePreview() {
@@ -163,6 +243,8 @@
   }
 
   let expandedSections = $state<Record<string, Record<string, boolean>>>({})
+  let searchText = $state('')
+  let filterCategory = $state('')
 
   function hasSection(entryId: string, section: string): boolean {
     const e = entries.find(x => x.id === entryId)
@@ -197,10 +279,24 @@
     groupColor: string
   }
 
+  let filteredEntries = $derived(
+    entries.filter((e) => {
+      const q = searchText.trim().toLowerCase()
+      if (q) {
+        const hay = [e.message, e.tag || '', ...(e.tags || []), e.tag_category || '', ...e.files]
+          .join(' ')
+          .toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      if (filterCategory && e.tag_category !== filterCategory) return false
+      return true
+    }),
+  )
+
   let grouped = $derived.by(() => {
     const result: GroupedEntry[] = []
     let lastTag: string | null | undefined = undefined
-    for (const entry of entries) {
+    for (const entry of filteredEntries) {
       if (entry.superseded) {
         // 被顶替记录：不参与 tag 分组，折叠组由模板按连续段渲染
         result.push({ entry, showGroup: false, groupLabel: '', groupColor: '' })
@@ -221,16 +317,25 @@
 
   // 被顶替记录折叠组（默认折叠）
   let supersededOpen = $state(false)
-  const supersededCount = $derived(entries.filter((e) => e.superseded).length)
+  const supersededCount = $derived(filteredEntries.filter((e) => e.superseded).length)
 </script>
 
 <div class="entries">
   <div class="entries-scroll">
-    {#if entries.length === 0}
+    <div class="entries-toolbar">
+      <input type="search" placeholder="搜索记录 / 标签 / 文件..." bind:value={searchText} />
+      <select bind:value={filterCategory}>
+        <option value="">全部流程</option>
+        <option value="modeling">建模流程</option>
+        <option value="painting">绘画流程</option>
+        <option value="video">视频流程</option>
+      </select>
+    </div>
+    {#if filteredEntries.length === 0}
       <div class="empty-state">
         <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>
-        <div>暂无记录</div>
-        <div style="font-size:12px">使用记录按钮记录进度</div>
+        <div>{entries.length === 0 ? '暂无记录' : '没有匹配的记录'}</div>
+        <div style="font-size:12px">{entries.length === 0 ? '使用记录按钮记录进度' : '尝试调整搜索或筛选条件'}</div>
       </div>
     {:else}
       {#each grouped as g, i (g.entry.id)}
@@ -279,18 +384,48 @@
               <span
                 class="preview-badge"
                 class:active={entry.preview_enabled !== false}
-                title={entry.preview_enabled === false ? '3D 预览已关闭（右键记录可开启）' : '该记录有 3D 预览（右键记录可关闭）'}
-              >3D</span>
+                title={entry.preview_enabled === false ? '预览已关闭（右键记录可开启）' : '该记录有预览（右键记录可关闭）'}
+              >{previewLabel(entry)}</span>
+            {/if}
+            {#if entry.preview_errors && entry.preview_errors.length > 0}
+              <span class="preview-error-badge" title={entry.preview_errors.join('\n')}>⚠ 预览失败</span>
             {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
           </span>
         </div>
         <div class="msg">
           {entry.message}
-          {#if entryTag}
+          {#if entry.tag_category}
+            <span class="tag-category-badge">{tagCategoryLabel(entry.tag_category)}</span>
+          {/if}
+          {#if entry.tags && entry.tags.length > 0}
+            {#each entry.tags as t}
+              <span class="tag-badge" style="--tag-c:{tagColor(t)}">{t}</span>
+            {/each}
+          {:else if entryTag}
             <span class="tag-badge" style="--tag-c:{tagColor(entryTag)}">{entryTag}</span>
           {/if}
         </div>
+
+        <!-- Section 0: Details -->
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'details'); }}>
+          <span class="arr">{hasSection(entry.id, 'details') ? '▾' : '▸'}</span>
+          <span>详情</span>
+        </div>
+        {#if hasSection(entry.id, 'details')}
+          <div class="section-body details-body">
+            <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">{entry.id}</span></div>
+            <div class="detail-row"><span class="detail-label">时间</span><span class="detail-value">{entry.timestamp}</span></div>
+            <div class="detail-row"><span class="detail-label">流程</span><span class="detail-value">{tagCategoryLabel(entry.tag_category) || '未分类'}</span></div>
+            <div class="detail-row"><span class="detail-label">标签</span><span class="detail-value">{(entry.tags && entry.tags.length > 0 ? entry.tags.join(', ') : entryTag) || '无'}</span></div>
+            <div class="detail-row"><span class="detail-label">文件</span><span class="detail-value">{entry.files.length} 个</span></div>
+            <div class="detail-row"><span class="detail-label">预览</span><span class="detail-value">{previewsOf(entry).length} 个</span></div>
+            {#if entry.preview_errors && entry.preview_errors.length > 0}
+              <div class="detail-row"><span class="detail-label">预览错误</span><span class="detail-value">{entry.preview_errors.length} 个</span></div>
+            {/if}
+          </div>
+        {/if}
 
         <!-- Section 1: File Changes -->
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -309,22 +444,92 @@
             {/each}
           </div>
         {/if}
+
+        {#if previewsOf(entry).length > 0}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'previews'); }}>
+            <span class="arr">{hasSection(entry.id, 'previews') ? '▾' : '▸'}</span>
+            <span>预览（{previewsOf(entry).length}）</span>
+          </div>
+          {#if hasSection(entry.id, 'previews')}
+            <div class="section-body preview-list">
+              {#each previewsOf(entry) as p}
+                <div class="preview-row">
+                  <span class="preview-type-badge">{previewLabelForKind(p.type)}</span>
+                  <span class="preview-file" title={p.file}>{p.file}</span>
+                  <button
+                    class="preview-toggle"
+                    class:active={p.enabled !== false}
+                    onclick={(e) => { e.stopPropagation(); togglePreviewFile(entry, p) }}
+                    disabled={previewBusy === entry.id + ':' + p.path}
+                  >
+                    {p.enabled === false ? '关' : '开'}
+                  </button>
+                </div>
+              {/each}
+            </div>
+          {/if}
+        {/if}
+
+        {#if entry.preview_errors && entry.preview_errors.length > 0}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'previewErrors'); }}>
+            <span class="arr">{hasSection(entry.id, 'previewErrors') ? '▾' : '▸'}</span>
+            <span>预览错误（{entry.preview_errors.length}）</span>
+          </div>
+          {#if hasSection(entry.id, 'previewErrors')}
+            <div class="section-body preview-error-list">
+              {#each entry.preview_errors as err}
+                <div class="preview-error-line" title={err}>{err}</div>
+              {/each}
+            </div>
+          {/if}
+        {/if}
       </div>
       {/if}
     {/each}
     {/if}
   </div>
   {#if ctxMenu}
+    {@const menu = ctxMenu}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
-    <div class="ctx-menu" style="left:{ctxMenu.x}px;top:{ctxMenu.y}px">
+    <div class="ctx-menu" style="left:{menu.x}px;top:{menu.y}px">
       <button class="ctx-item" onclick={ctxExport}>导出</button>
-      {#if ctxMenu.entry.preview}
-        <button class="ctx-item" onclick={ctxTogglePreview} disabled={previewBusy === ctxMenu.entry.id}>
-          {ctxMenu.entry.preview_enabled === false ? '开启 3D 预览' : '关闭 3D 预览'}
+      <button
+        class="ctx-item"
+        onclick={ctxCompare}
+        disabled={entries.findIndex((e) => e.id === menu.entry.id) < 0 || entries.findIndex((e) => e.id === menu.entry.id) + 1 >= entries.length}
+      >对比上一记录</button>
+      {#if menu.entry.preview}
+        <button class="ctx-item" onclick={ctxTogglePreview} disabled={previewBusy === menu.entry.id}>
+          {menu.entry.preview_enabled === false ? '开启全部预览' : '关闭全部预览'}
         </button>
       {/if}
       <button class="ctx-item" onclick={ctxRollback} disabled={ctxRollbackDisabled} title={rollbackPoint ? '该记录为当前回退点，不可回退' : ''}>回退</button>
+    </div>
+  {/if}
+
+  {#if compareResult}
+    <div class="compare-overlay" role="button" tabindex="-1" onclick={() => (compareResult = null)} onkeydown={(e) => { if (e.key === 'Escape' || e.key === 'Enter') compareResult = null }}>
+      <div class="compare-panel" role="presentation" onclick={(e) => e.stopPropagation()}>
+        <div class="compare-head">
+          <span class="compare-title">{compareResult.title}</span>
+          <button onclick={() => (compareResult = null)}>×</button>
+        </div>
+        <div class="compare-body">
+          {#if compareResult.diffs.length === 0}
+            <div class="compare-empty">无差异</div>
+          {:else}
+            {#each compareResult.diffs as d}
+              <div class="compare-file">
+                <div class="compare-file-name">{d.file}</div>
+                <pre>{d.diff}</pre>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
     </div>
   {/if}
   <div class="entries-footer">
@@ -411,6 +616,93 @@
 </div>
 
 <style>
+  .entries-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 6px;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 5;
+  }
+  .entries-toolbar input,
+  .entries-toolbar select {
+    padding: 5px 8px;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg);
+    color: var(--text);
+  }
+  .entries-toolbar input {
+    flex: 1 1 auto;
+    min-width: 0;
+    width: auto;
+  }
+  .entries-toolbar select {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 45%;
+    width: auto;
+  }
+  .compare-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 999;
+    background: rgba(0, 0, 0, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+  .compare-panel {
+    width: min(900px, 92vw);
+    max-height: 86vh;
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .compare-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-weight: 600;
+  }
+  .compare-head button {
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    font-size: 20px;
+    cursor: pointer;
+  }
+  .compare-body {
+    flex: 1;
+    overflow: auto;
+    padding: 10px 14px;
+  }
+  .compare-file { margin-bottom: 14px; }
+  .compare-file-name { font-weight: 600; margin-bottom: 4px; }
+  .compare-file pre {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 11px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .compare-empty { color: var(--text-dim); padding: 20px; text-align: center; }
   .top-right {
     display: inline-flex;
     align-items: center;
@@ -485,6 +777,22 @@
     opacity: 0.55;
     text-decoration: line-through;
   }
+  .preview-error-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--danger) 12%, var(--surface));
+    border: 1px solid var(--danger);
+    color: var(--danger);
+    margin-right: 6px;
+    vertical-align: 1px;
+    user-select: none;
+    cursor: help;
+  }
   .superseded-header {
     display: flex;
     align-items: center;
@@ -554,7 +862,43 @@
   .section-header:hover { color: var(--accent); }
   .section-header .arr { font-size: 9px; width: 10px; flex-shrink: 0; }
   .section-body { padding: 4px 0 2px 15px; font-size: 12px; }
+  .details-body { display: flex; flex-direction: column; gap: 2px; }
+  .detail-row { display: flex; gap: 8px; }
+  .detail-label { flex: 0 0 40px; color: var(--text-dim); }
+  .detail-value { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--text); }
   .file-status-line { display: flex; align-items: center; gap: 6px; padding: 2px 0; font-family: var(--mono); font-size: 12px; }
+  .preview-list { display: flex; flex-direction: column; gap: 4px; }
+  .preview-row { display: flex; align-items: center; gap: 6px; padding: 2px 0; }
+  .preview-type-badge {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 22px; height: 18px; flex-shrink: 0;
+    font-size: 10px; font-weight: 700;
+    border-radius: 4px; background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text-dim);
+  }
+  .preview-file {
+    flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: var(--text); font-family: var(--mono); font-size: 12px;
+  }
+  .preview-toggle {
+    flex-shrink: 0;
+    padding: 1px 8px; font-size: 11px; font-weight: 600;
+    border-radius: 4px; border: 1px solid var(--border); background: var(--surface2);
+    color: var(--text-dim); cursor: pointer;
+  }
+  .preview-toggle.active { color: var(--success); border-color: var(--success); background: var(--success-soft); }
+  .preview-toggle:disabled { opacity: 0.4; cursor: default; }
+  .preview-error-list { display: flex; flex-direction: column; gap: 4px; }
+  .preview-error-line {
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--danger) 8%, var(--surface));
+    border: 1px solid color-mix(in srgb, var(--danger) 35%, var(--border));
+    color: var(--danger);
+    font-size: 11px;
+    font-family: var(--mono);
+    overflow-wrap: anywhere;
+  }
   .status-badge {
     width: 18px; height: 18px;
     display: inline-flex; align-items: center; justify-content: center;
@@ -600,6 +944,18 @@
     vertical-align: middle;
     color: color-mix(in srgb, var(--tag-c) 45%, var(--text));
     background: color-mix(in srgb, var(--tag-c) 14%, transparent);
+  }
+  .tag-category-badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-left: 6px;
+    vertical-align: middle;
+    color: var(--text-dim);
+    background: var(--surface2);
+    border: 1px solid var(--border);
   }
   .entries-footer {
     flex-shrink: 0;

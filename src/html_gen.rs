@@ -1,5 +1,5 @@
-use crate::timeline::Timeline;
 use crate::three_assets;
+use crate::timeline::Timeline;
 use anyhow::{Context, Result};
 use std::path::Path;
 
@@ -20,45 +20,117 @@ fn html_escape(s: &str) -> String {
         .replace('\'', "&#39;")
 }
 
+/// 取一条记录实际生效的预览列表：优先用多预览 `previews`，旧数据退化为单 `preview`。
+fn effective_previews(entry: &crate::timeline::TimelineEntry) -> Vec<crate::timeline::PreviewFile> {
+    if !entry.previews.is_empty() {
+        entry
+            .previews
+            .iter()
+            .filter(|p| p.enabled)
+            .cloned()
+            .collect()
+    } else if !entry.preview.is_empty() && entry.preview_enabled {
+        let kind = if entry.preview_type.is_empty() {
+            infer_preview_kind_from_entry(entry)
+        } else {
+            entry.preview_type.clone()
+        };
+        vec![crate::timeline::PreviewFile {
+            file: entry.files.first().cloned().unwrap_or_default(),
+            path: entry.preview.clone(),
+            kind,
+            enabled: true,
+        }]
+    } else {
+        Vec::new()
+    }
+}
+
+/// 旧数据没有 preview_type 时，从预览产物目录优先推断类型（视频封面是 .jpg 但目录是 previews_video）。
+fn infer_preview_kind_from_entry(entry: &crate::timeline::TimelineEntry) -> String {
+    let p = entry.preview.trim_start_matches("./");
+    if p.starts_with("previews_video/") {
+        return "video".to_string();
+    }
+    if p.starts_with("previews_image/") {
+        return "image".to_string();
+    }
+    if p.starts_with("previews_glb/") {
+        return "glb".to_string();
+    }
+    // 再按源文件扩展名推断
+    for file in &entry.files {
+        match crate::preview::PreviewConfig::default().kind_of(file) {
+            crate::preview::PreviewKind::Video => return "video".to_string(),
+            _ => {}
+        }
+    }
+    for file in &entry.files {
+        match crate::preview::PreviewConfig::default().kind_of(file) {
+            crate::preview::PreviewKind::Image => return "image".to_string(),
+            _ => {}
+        }
+    }
+    crate::preview::PreviewKind::from_preview_path(&entry.preview)
+        .as_str()
+        .to_string()
+}
+
 pub fn generate_index_html(
     web_root: &Path,
     _project_root: &Path,
     timeline: &Timeline,
     page_title: &str,
 ) -> Result<()> {
-    eprintln!("[debug] generate_index_html: web_root={:?}, {} entries", web_root, timeline.entries.len());
+    eprintln!(
+        "[debug] generate_index_html: web_root={:?}, {} entries",
+        web_root,
+        timeline.entries.len()
+    );
     let timeline_json = serde_json::to_string_pretty(timeline)?;
 
     let mut glb_map = std::collections::BTreeMap::new();
+    let mut media_map: std::collections::BTreeMap<String, Vec<serde_json::Value>> =
+        std::collections::BTreeMap::new();
     for entry in &timeline.entries {
-        // 3D 预览开关：关闭的条目不渲染预览（GLB 文件保留）
         if !entry.preview_enabled {
             continue;
         }
-        for file in &entry.files {
-            // 预览配置判定（阶段 1：仅 .blend → glb；后续类型加入默认映射即扩）
-            if crate::preview::PreviewConfig::default().kind_of(file) != crate::preview::PreviewKind::Glb {
+        for p in effective_previews(entry) {
+            let rel = p.path.trim_start_matches("./");
+            if !web_root.join(rel).exists() {
                 continue;
             }
-            let short_hash = &entry.id[..7.min(entry.id.len())];
-            let safe_name = file.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-            let glb_name = format!("{}_{}", short_hash, safe_name.replace(".blend", ""));
-            let glb_rel = format!("./previews_glb/{}.glb", glb_name);
-            let glb_path = web_root.join("previews_glb").join(format!("{}.glb", glb_name));
-            if glb_path.exists() {
-                glb_map.entry(entry.id.clone())
-                    .or_insert_with(Vec::new)
-                    .push(serde_json::json!({"file": file, "url": glb_rel}));
+            let url = format!("./{}", rel);
+            match p.kind.as_str() {
+                "glb" => {
+                    glb_map
+                        .entry(entry.id.clone())
+                        .or_insert_with(Vec::new)
+                        .push(serde_json::json!({"file": p.file, "url": url}));
+                }
+                "image" | "video" => {
+                    media_map
+                        .entry(entry.id.clone())
+                        .or_insert_with(Vec::new)
+                        .push(serde_json::json!({"file": p.file, "url": url, "type": p.kind}));
+                }
+                _ => {}
             }
         }
     }
     let glb_json = serde_json::to_string(&glb_map)?;
+    let media_json = serde_json::to_string(&media_map)?;
 
-    let mut calendar: std::collections::BTreeMap<String, Vec<String>> = std::collections::BTreeMap::new();
+    let mut calendar: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for entry in &timeline.entries {
         if let Some(date) = entry.timestamp.split('T').next() {
             if !date.is_empty() {
-                calendar.entry(date.to_string()).or_default().push(entry.id.clone());
+                calendar
+                    .entry(date.to_string())
+                    .or_default()
+                    .push(entry.id.clone());
             }
         }
     }
@@ -70,6 +142,7 @@ pub fn generate_index_html(
     let html = TEMPLATE
         .replace("{{TIMELINE_JSON}}", &json_safe(&timeline_json))
         .replace("{{GLB_JSON}}", &json_safe(&glb_json))
+        .replace("{{PREVIEW_JSON}}", &json_safe(&media_json))
         .replace("{{CALENDAR_JSON}}", &json_safe(&calendar_json))
         .replace("{{PAGE_TITLE}}", &html_escape(page_title))
         .replace("{{FAVICON_B64}}", crate::three_assets::logo_favicon_b64());
@@ -80,8 +153,6 @@ pub fn generate_index_html(
 
     Ok(())
 }
-
-
 
 const TEMPLATE: &str = r##"<!DOCTYPE html>
 <html lang="zh-CN">
@@ -232,13 +303,28 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 .theme-btn:hover { background: var(--surface3); border-color: var(--accent); color: var(--accent); }
 .model-placeholder { font-size: 11px; color: #6c7086; padding: 8px; text-align: center; background: #181825; border-radius: 6px; }
 .model-box { width: 100%; aspect-ratio: 1 / 1; border-radius: 6px; overflow: hidden; background: #1a1a2e; position: relative; }
+.preview-box { width: 100%; border-radius: 6px; overflow: hidden; background: var(--surface2); }
+.preview-box img { display: block; width: 100%; height: auto; max-height: 480px; object-fit: contain; background: var(--surface2); }
+.preview-error-line { padding: 4px 6px; border-radius: 4px; background: color-mix(in srgb, var(--error) 8%, var(--surface)); border: 1px solid color-mix(in srgb, var(--error) 35%, var(--border)); color: var(--error); font-size: 12px; font-family: monospace; overflow-wrap: anywhere; }
+.media-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; padding: 4px 0; }
+.media-card { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: var(--surface); cursor: zoom-in; transition: border-color 0.15s var(--ease), transform 0.15s var(--ease); }
+.media-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.media-thumb { aspect-ratio: 4 / 3; background: var(--surface2); overflow: hidden; }
+.media-thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.media-meta { display: flex; align-items: center; gap: 6px; padding: 6px 8px; font-size: 11px; }
+.media-label { flex-shrink: 0; font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--accent-soft); color: var(--accent); }
+.media-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); }
+.image-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; background: rgba(0,0,0,0.86); display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; }
+.image-overlay-bar { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: rgba(0,0,0,0.5); color: #fff; font-size: 13px; }
+.image-overlay-close { background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.4); color: #fff; border-radius: 6px; padding: 4px 12px; cursor: pointer; font-size: 16px; }
+.image-overlay img { max-width: 92vw; max-height: 88vh; object-fit: contain; border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,0.5); }
 .model-toolbar { position: absolute; top: 0; left: 0; right: 0; display: flex; flex-direction: column; gap: 5px; padding: 6px 8px; background: rgba(17,17,27,0.82); z-index: 10; font-size: 11px; }
 .model-toolbar-row { display: flex; align-items: center; gap: 4px; }
 .model-toolbar-row .sep { width: 1px; height: 16px; background: #45475a; margin: 0 4px; flex-shrink: 0; }
 .mbtn { padding: 3px 8px; background: rgba(69,71,90,0.5); border: 1px solid #45475a; border-radius: 4px; color: #a6adc8; cursor: pointer; font-size: 10px; font-family: inherit; transition: background 0.15s, color 0.15s; white-space: nowrap; }
 .mbtn:hover { background: rgba(69,71,90,0.9); }
 .mbtn.active { background: rgba(137,180,250,0.2); border-color: #89b4fa; color: #89b4fa; }
-.model-expand-btn { width: 26px; height: 26px; background: rgba(30,30,46,0.85); border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4; font-size: 14px; cursor: pointer; display: flex; align-items: center; justify-content: center; line-height: 1; transition: background 0.2s; margin-left: auto; }
+.model-expand-btn { min-width: 44px; height: 26px; padding: 0 10px; background: rgba(30,30,46,0.85); border: 1px solid #45475a; border-radius: 4px; color: #cdd6f4; font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; line-height: 1; transition: background 0.2s; margin-left: auto; }
 .model-expand-btn:hover { background: rgba(69,71,90,0.95); }
 .model-overlay { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; z-index: 9999; background: #11111b; display: flex; flex-direction: column; }
 .model-overlay-bar { display: flex; flex-direction: column; gap: 5px; padding: 6px 12px; background: #181825; border-bottom: 1px solid #313244; flex-shrink: 0; font-size: 11px; }
@@ -307,6 +393,7 @@ document.getElementById('theme-toggle').addEventListener('click', function() {
 });
 var data = {{TIMELINE_JSON}};
 var glbData = {{GLB_JSON}};
+var mediaData = {{PREVIEW_JSON}};
 var calData = {{CALENDAR_JSON}};
 
 var TAG_PRESETS = {'建模':0,'UV拆分':1,'绑定':2,'贴图':3,'修复':4};
@@ -381,9 +468,19 @@ function render() {
         h += '</div>';
       }
 
+      var eErrors = e.preview_errors || [];
+      if (eErrors.length > 0) {
+        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▸</span><span>预览错误 (' + eErrors.length + ')</span></div>';
+        h += '<div class="sec-body" style="display:none">';
+        eErrors.forEach(function(err) {
+          h += '<div class="preview-error-line">⚠ ' + esc(err) + '</div>';
+        });
+        h += '</div>';
+      }
+
       var eGlbs = glbData && glbData[e.id] ? glbData[e.id] : [];
       if (eGlbs.length > 0) {
-        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▾</span><span>3D 模型预览 (' + eGlbs.length + ')</span></div>';
+        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▾</span><span>Model Preview (' + eGlbs.length + ')</span></div>';
         h += '<div class="sec-body" style="">';
         eGlbs.forEach(function(g) {
           h += '<div class="diff-entry"><div class="diff-path">' + esc(g.file) + '</div>';
@@ -391,6 +488,27 @@ function render() {
           h += '</div>';
         });
         h += '</div>';
+      }
+
+      var eMedia = mediaData && mediaData[e.id] ? mediaData[e.id] : [];
+      if (eMedia.length > 0) {
+        var eImages = eMedia.filter(function(m) { return m.type !== 'video'; });
+        var eVideos = eMedia.filter(function(m) { return m.type === 'video'; });
+        function renderMediaSection(list, label) {
+          if (!list.length) return;
+          h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▾</span><span>' + label + ' (' + list.length + ')</span></div>';
+          h += '<div class="sec-body" style=""><div class="media-grid">';
+          list.forEach(function(m) {
+            var itemLabel = m.type === 'video' ? 'Video' : 'Image';
+            h += '<div class="media-card preview-box">';
+            h += '<div class="media-thumb"><img loading="lazy" src="' + esc(m.url) + '" alt="' + esc(m.file) + '" data-full="' + esc(m.url) + '" data-name="' + esc(m.file) + '" onclick="openImageFullscreen(this)"></div>';
+            h += '<div class="media-meta"><span class="media-label">' + itemLabel + '</span><span class="media-name" title="' + esc(m.file) + '">' + esc(m.file) + '</span></div>';
+            h += '</div>';
+          });
+          h += '</div></div>';
+        }
+        renderMediaSection(eImages, 'Image Preview');
+        renderMediaSection(eVideos, 'Video Preview');
       }
       h += '</div>';
     });
@@ -867,7 +985,8 @@ function createViewer(container, w, h, url, isOverlay) {
     if (expandCb) {
       var eb = document.createElement('button');
       eb.className = 'model-expand-btn';
-      eb.innerHTML = '&#x26F6;';
+      eb.textContent = '放大';
+      eb.title = '放大到网页尺寸';
       eb.addEventListener('click', function(e) { e.stopPropagation(); expandCb(); });
       row2.appendChild(eb);
     }
@@ -1037,6 +1156,37 @@ function disposeViewer(el) {
   }
 }
 
+function openImageFullscreen(el) {
+  var url = el.getAttribute('data-full') || el.src;
+  var name = el.getAttribute('data-name') || '';
+  if (!url) return;
+  var overlay = document.createElement('div');
+  overlay.className = 'image-overlay';
+
+  var bar = document.createElement('div');
+  bar.className = 'image-overlay-bar';
+  var title = document.createElement('span');
+  title.textContent = name;
+  var close = document.createElement('button');
+  close.className = 'image-overlay-close';
+  close.innerHTML = '&times;';
+  close.setAttribute('title', '关闭');
+  close.addEventListener('click', function() { overlay.remove(); });
+  bar.appendChild(title);
+  bar.appendChild(close);
+  overlay.appendChild(bar);
+
+  var img = document.createElement('img');
+  img.src = url;
+  img.alt = name;
+  overlay.appendChild(img);
+
+  overlay.addEventListener('click', function(e) {
+    if (e.target === overlay) overlay.remove();
+  });
+  document.body.appendChild(overlay);
+}
+
 function openFullscreen(el) {
   var url = el.getAttribute('data-url');
   if (!url) return;
@@ -1081,7 +1231,7 @@ initModelsLazy();
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::timeline::{Timeline, TimelineEntry};
+    use crate::timeline::{PreviewFile, Timeline, TimelineEntry};
 
     #[test]
     fn test_generate_index_html_empty() -> Result<()> {
@@ -1089,10 +1239,11 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
+            version: 1,
             project: "Test".to_string(),
             entries: vec![],
-        rollback_marker: None,
-        removed_entries: Vec::new(),
+            rollback_marker: None,
+            removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "Test Project")?;
@@ -1113,6 +1264,7 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
+            version: 1,
             project: "My Project".to_string(),
             entries: vec![TimelineEntry {
                 id: "abc123def456".to_string(),
@@ -1122,10 +1274,19 @@ mod tests {
                 files: vec!["char.blend".to_string(), "textures/diffuse.png".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
-                tag: Some("建模".to_string()), milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: Some("建模".to_string()),
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+                preview_type: String::new(),
+                previews: Vec::new(),
+                preview_errors: Vec::new(),
             }],
-        rollback_marker: None,
-        removed_entries: Vec::new(),
+            rollback_marker: None,
+            removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "My Project")?;
@@ -1137,7 +1298,10 @@ mod tests {
         assert!(html.contains("建模"));
         assert!(html.contains("tag-badge"));
         assert!(!html.contains("diffsData"), "diff feature removed");
-        assert!(!html.contains("\"milestone\": true"), "non-milestone entry has milestone false");
+        assert!(
+            !html.contains("\"milestone\": true"),
+            "non-milestone entry has milestone false"
+        );
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1151,6 +1315,7 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
+            version: 1,
             project: "Test".to_string(),
             entries: vec![TimelineEntry {
                 id: "abc123def456".to_string(),
@@ -1160,8 +1325,16 @@ mod tests {
                 files: vec!["a.png".to_string()],
                 file_status: vec![],
                 preview: String::new(),
+                tag_category: None,
+                tags: Vec::new(),
                 tag: Some("<img src=x onerror=alert(2)>".to_string()),
-                milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+                preview_type: String::new(),
+                previews: Vec::new(),
+                preview_errors: Vec::new(),
             }],
             rollback_marker: None,
             removed_entries: Vec::new(),
@@ -1170,11 +1343,26 @@ mod tests {
         generate_index_html(&dir, &dir, &timeline, "\"><script>alert(3)</script>")?;
 
         let html = std::fs::read_to_string(dir.join("index.html"))?;
-        assert!(html.contains(r"\u003c/script>\u003cscript>alert(1)\u003c/script>"), "message must be JSON-escaped");
-        assert!(!html.contains("</script><script>alert(1)"), "raw script injection must not appear");
-        assert!(html.contains(r"\u003cimg src=x onerror=alert(2)>"), "tag must be JSON-escaped");
-        assert!(html.contains("&quot;&gt;&lt;script&gt;alert(3)&lt;/script&gt;"), "page title must be HTML-escaped");
-        assert!(!html.contains("<title>\"><script>"), "raw title injection must not appear");
+        assert!(
+            html.contains(r"\u003c/script>\u003cscript>alert(1)\u003c/script>"),
+            "message must be JSON-escaped"
+        );
+        assert!(
+            !html.contains("</script><script>alert(1)"),
+            "raw script injection must not appear"
+        );
+        assert!(
+            html.contains(r"\u003cimg src=x onerror=alert(2)>"),
+            "tag must be JSON-escaped"
+        );
+        assert!(
+            html.contains("&quot;&gt;&lt;script&gt;alert(3)&lt;/script&gt;"),
+            "page title must be HTML-escaped"
+        );
+        assert!(
+            !html.contains("<title>\"><script>"),
+            "raw title injection must not appear"
+        );
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1188,6 +1376,7 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
+            version: 1,
             project: "Sup".to_string(),
             entries: vec![
                 TimelineEntry {
@@ -1198,7 +1387,16 @@ mod tests {
                     files: vec!["a.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                    tag_category: None,
+                    tags: Vec::new(),
+                    tag: None,
+                    milestone: false,
+                    superseded: false,
+                    parent: String::new(),
+                    preview_enabled: true,
+                    preview_type: String::new(),
+                    previews: Vec::new(),
+                    preview_errors: Vec::new(),
                 },
                 TimelineEntry {
                     id: "bbb222bbb222".to_string(),
@@ -1208,7 +1406,16 @@ mod tests {
                     files: vec!["b.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: true, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                    tag_category: None,
+                    tags: Vec::new(),
+                    tag: None,
+                    milestone: false,
+                    superseded: true,
+                    parent: String::new(),
+                    preview_enabled: true,
+                    preview_type: String::new(),
+                    previews: Vec::new(),
+                    preview_errors: Vec::new(),
                 },
                 TimelineEntry {
                     id: "ccc333ccc333".to_string(),
@@ -1218,11 +1425,20 @@ mod tests {
                     files: vec!["c.blend".to_string()],
                     file_status: vec![],
                     preview: String::new(),
-                    tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                    tag_category: None,
+                    tags: Vec::new(),
+                    tag: None,
+                    milestone: false,
+                    superseded: false,
+                    parent: String::new(),
+                    preview_enabled: true,
+                    preview_type: String::new(),
+                    previews: Vec::new(),
+                    preview_errors: Vec::new(),
                 },
             ],
             rollback_marker: None,
-        removed_entries: Vec::new(),
+            removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "Sup")?;
@@ -1231,7 +1447,10 @@ mod tests {
         assert!(html.contains("主线2"), "主线记录应显示");
         // 数据 JSON 保留 superseded（GUI 时间线/回退需要）；渲染 JS 过滤（只显示主线）
         assert!(html.contains("!e.superseded"), "渲染 JS 应过滤被顶替记录");
-        assert!(html.contains("\"superseded\": true"), "数据 JSON 保留 superseded 标记");
+        assert!(
+            html.contains("\"superseded\": true"),
+            "数据 JSON 保留 superseded 标记"
+        );
         // 渲染入口只遍历主线（mainline）
         assert!(html.contains("var mainline"), "渲染使用主线过滤结果");
 
@@ -1245,6 +1464,7 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
+            version: 1,
             project: "Ms".to_string(),
             entries: vec![TimelineEntry {
                 id: "abc123def456".to_string(),
@@ -1254,20 +1474,33 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec![],
                 preview: "previews/abc123.png".to_string(),
+                tag_category: None,
+                tags: Vec::new(),
                 tag: None,
                 milestone: true,
-                superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+                preview_type: String::new(),
+                previews: Vec::new(),
+                preview_errors: Vec::new(),
             }],
-        rollback_marker: None,
-        removed_entries: Vec::new(),
+            rollback_marker: None,
+            removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "Ms")?;
         let html = std::fs::read_to_string(dir.join("index.html"))?;
-        assert!(html.contains("\"milestone\": true"), "milestone flag in timeline json");
+        assert!(
+            html.contains("\"milestone\": true"),
+            "milestone flag in timeline json"
+        );
         assert!(html.contains("milestone-star"), "star render code present");
         assert!(html.contains("11%"), "deepened milestone background");
-        assert!(html.contains("border-left-width: 5px"), "thick milestone border");
+        assert!(
+            html.contains("border-left-width: 5px"),
+            "thick milestone border"
+        );
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1276,10 +1509,12 @@ mod tests {
     #[test]
     fn test_generate_index_html_glb_section_only_when_file_exists() -> Result<()> {
         let dir = std::env::temp_dir().join("keinestamp_html_glb_exists");
+        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir)?;
         std::fs::create_dir_all(dir.join("previews_glb"))?;
 
         let timeline = Timeline {
+            version: 1,
             project: "GlbTest".to_string(),
             entries: vec![TimelineEntry {
                 id: "abc123def456".to_string(),
@@ -1289,21 +1524,288 @@ mod tests {
                 files: vec!["char.blend".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+                preview_type: String::new(),
+                previews: vec![PreviewFile {
+                    file: "char.blend".to_string(),
+                    path: "previews_glb/abc123d_char.glb".to_string(),
+                    kind: "glb".to_string(),
+                    enabled: true,
+                }],
+                preview_errors: Vec::new(),
             }],
-        rollback_marker: None,
-        removed_entries: Vec::new(),
+            rollback_marker: None,
+            removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "GlbTest")?;
         let html = std::fs::read_to_string(dir.join("index.html"))?;
-        assert!(html.contains("var glbData = {}"), "no glb file → empty glbData");
+        assert!(
+            html.contains("var glbData = {}"),
+            "no glb file → empty glbData"
+        );
 
         std::fs::write(dir.join("previews_glb/abc123d_char.glb"), b"fake glb")?;
         generate_index_html(&dir, &dir, &timeline, "GlbTest")?;
         let html = std::fs::read_to_string(dir.join("index.html"))?;
-        assert!(html.contains("previews_glb/abc123d_char.glb"), "glb file exists → glbData has entry");
+        assert!(
+            html.contains("previews_glb/abc123d_char.glb"),
+            "glb file exists → glbData has entry"
+        );
         assert!(html.contains("abc123def456"), "glbData keyed by entry id");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_renders_stored_glb_preview() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_preview_cfg");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("previews_glb")).unwrap();
+        std::fs::write(dir.join("previews_glb/abc123d_char.glb"), b"fake glb")?;
+
+        let timeline = Timeline {
+            version: 1,
+            project: "CfgTest".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "fbx model".to_string(),
+                files: vec!["char.fbx".to_string()],
+                file_status: vec!["M".to_string()],
+                preview: String::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+                preview_type: String::new(),
+                previews: vec![PreviewFile {
+                    file: "char.fbx".to_string(),
+                    path: "previews_glb/abc123d_char.glb".to_string(),
+                    kind: "glb".to_string(),
+                    enabled: true,
+                }],
+                preview_errors: Vec::new(),
+            }],
+            rollback_marker: None,
+            removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "CfgTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(
+            html.contains("previews_glb/abc123d_char.glb"),
+            "存储的 GLB 预览应渲染"
+        );
+        assert!(
+            html.contains("abc123def456"),
+            "preview map keyed by entry id"
+        );
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_renders_image_preview() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_image_prev");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("previews_image")).unwrap();
+        std::fs::write(dir.join("previews_image/abc123d_design.jpg"), b"fake jpg")?;
+
+        let timeline = Timeline {
+            version: 1,
+            project: "ImgTest".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "design update".to_string(),
+                files: vec!["design.psd".to_string()],
+                file_status: vec!["M".to_string()],
+                preview: "previews_image/abc123d_design.jpg".to_string(),
+                preview_type: "image".to_string(),
+                previews: Vec::new(),
+                preview_errors: Vec::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+            }],
+            rollback_marker: None,
+            removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "ImgTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(html.contains("mediaData"), "html 应注入通用媒体预览数据");
+        assert!(
+            html.contains("previews_image/abc123d_design.jpg"),
+            "图片预览 URL 应出现"
+        );
+        assert!(html.contains("Image Preview"), "图片预览区块标题应出现");
+        assert!(html.contains("preview-box"), "图片预览容器应出现");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_renders_multiple_previews() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_multi_prev");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("previews_glb")).unwrap();
+        std::fs::create_dir_all(dir.join("previews_image")).unwrap();
+        std::fs::write(dir.join("previews_glb/abc123d_model.glb"), b"fake glb")?;
+        std::fs::write(dir.join("previews_image/abc123d_tex.png"), b"fake png")?;
+
+        let timeline = Timeline {
+            version: 1,
+            project: "MultiTest".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "multi preview".to_string(),
+                files: vec!["model.glb".to_string(), "tex.png".to_string()],
+                file_status: vec![],
+                preview: "previews_glb/abc123d_model.glb".to_string(),
+                preview_type: "glb".to_string(),
+                previews: vec![
+                    PreviewFile {
+                        file: "model.glb".to_string(),
+                        path: "previews_glb/abc123d_model.glb".to_string(),
+                        kind: "glb".to_string(),
+                        enabled: true,
+                    },
+                    PreviewFile {
+                        file: "tex.png".to_string(),
+                        path: "previews_image/abc123d_tex.png".to_string(),
+                        kind: "image".to_string(),
+                        enabled: true,
+                    },
+                ],
+                preview_errors: Vec::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+            }],
+            rollback_marker: None,
+            removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "MultiTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(
+            html.contains("previews_glb/abc123d_model.glb"),
+            "GLB 预览应出现"
+        );
+        assert!(
+            html.contains("previews_image/abc123d_tex.png"),
+            "图片预览应出现"
+        );
+        assert!(html.contains("Model Preview"), "GLB 区块标题应出现");
+        assert!(html.contains("Image Preview"), "图片区块标题应出现");
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn test_generate_index_html_renders_video_glb_image_together() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_mixed_prev");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("previews_glb")).unwrap();
+        std::fs::create_dir_all(dir.join("previews_image")).unwrap();
+        std::fs::create_dir_all(dir.join("previews_video")).unwrap();
+        std::fs::write(dir.join("previews_glb/abc123d_model.glb"), b"fake glb")?;
+        std::fs::write(dir.join("previews_image/abc123d_tex.png"), b"fake png")?;
+        std::fs::write(dir.join("previews_video/abc123d_clip.jpg"), b"fake jpg")?;
+
+        let timeline = Timeline {
+            version: 1,
+            project: "MixedTest".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "mixed".to_string(),
+                files: vec![
+                    "model.glb".to_string(),
+                    "tex.png".to_string(),
+                    "clip.mp4".to_string(),
+                ],
+                file_status: vec![],
+                preview: "previews_video/abc123d_clip.jpg".to_string(),
+                preview_type: "video".to_string(),
+                previews: vec![
+                    PreviewFile {
+                        file: "clip.mp4".to_string(),
+                        path: "previews_video/abc123d_clip.jpg".to_string(),
+                        kind: "video".to_string(),
+                        enabled: true,
+                    },
+                    PreviewFile {
+                        file: "model.glb".to_string(),
+                        path: "previews_glb/abc123d_model.glb".to_string(),
+                        kind: "glb".to_string(),
+                        enabled: true,
+                    },
+                    PreviewFile {
+                        file: "tex.png".to_string(),
+                        path: "previews_image/abc123d_tex.png".to_string(),
+                        kind: "image".to_string(),
+                        enabled: true,
+                    },
+                ],
+                preview_errors: Vec::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+            }],
+            rollback_marker: None,
+            removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "MixedTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(
+            html.contains("previews_glb/abc123d_model.glb"),
+            "GLB 预览应出现"
+        );
+        assert!(
+            html.contains("previews_image/abc123d_tex.png"),
+            "图片预览应出现"
+        );
+        assert!(
+            html.contains("previews_video/abc123d_clip.jpg"),
+            "视频预览应出现"
+        );
+        assert!(html.contains("Model Preview"), "GLB 区块标题应出现");
+        assert!(html.contains("Image Preview"), "图片区块标题应出现");
+        assert!(html.contains("Video Preview"), "视频区块标题应出现");
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
@@ -1315,6 +1817,7 @@ mod tests {
         std::fs::create_dir_all(&dir)?;
 
         let timeline = Timeline {
+            version: 1,
             project: "NoTag".to_string(),
             entries: vec![TimelineEntry {
                 id: "def456abc789".to_string(),
@@ -1324,10 +1827,19 @@ mod tests {
                 files: vec!["fix.txt".to_string()],
                 file_status: vec!["M".to_string()],
                 preview: String::new(),
-                tag: None, milestone: false, superseded: false, parent: String::new(), preview_enabled: true, preview_type: String::new(),
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+                preview_type: String::new(),
+                previews: Vec::new(),
+                preview_errors: Vec::new(),
             }],
-        rollback_marker: None,
-        removed_entries: Vec::new(),
+            rollback_marker: None,
+            removed_entries: Vec::new(),
         };
 
         generate_index_html(&dir, &dir, &timeline, "NoTag Project")?;
@@ -1341,15 +1853,76 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_index_html_renders_preview_errors() -> Result<()> {
+        let dir = std::env::temp_dir().join("keinestamp_html_preview_errors");
+        std::fs::create_dir_all(&dir)?;
+
+        let timeline = Timeline {
+            version: 1,
+            project: "ErrTest".to_string(),
+            entries: vec![TimelineEntry {
+                id: "abc123def456".to_string(),
+                timestamp: "2026-06-13T12:00:00Z".to_string(),
+                author: "artist".to_string(),
+                message: "preview fail".to_string(),
+                files: vec!["bad.psd".to_string()],
+                file_status: vec!["M".to_string()],
+                preview: String::new(),
+                preview_type: String::new(),
+                previews: Vec::new(),
+                preview_errors: vec!["bad.psd: 未能生成预览".to_string()],
+                tag_category: None,
+                tags: Vec::new(),
+                tag: None,
+                milestone: false,
+                superseded: false,
+                parent: String::new(),
+                preview_enabled: true,
+            }],
+            rollback_marker: None,
+            removed_entries: Vec::new(),
+        };
+
+        generate_index_html(&dir, &dir, &timeline, "ErrTest")?;
+        let html = std::fs::read_to_string(dir.join("index.html"))?;
+        assert!(
+            html.contains("预览错误"),
+            "deploy page should render preview error section"
+        );
+        assert!(
+            html.contains("bad.psd: 未能生成预览"),
+            "deploy page should show concrete error text"
+        );
+
+        std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    #[test]
     fn test_transform_gltf_loader() {
         let src = std::str::from_utf8(crate::three_assets::GLTF_LOADER_SRC).unwrap();
         let result = crate::three_assets::transform_addon_js(src);
         assert!(result.starts_with("(function(){"), "should wrap in IIFE");
-        assert!(result.contains("var THREE = window.THREE;"), "should have THREE alias");
-        assert!(result.contains("var toTrianglesDrawMode = window.toTrianglesDrawMode;"), "should handle cross-addon import");
-        assert!(result.contains("window.GLTFLoader = GLTFLoader;"), "should export GLTFLoader to window");
-        assert!(!result.contains("import {"), "should have no import statements");
-        assert!(!result.contains("export {"), "should have no export statements");
+        assert!(
+            result.contains("var THREE = window.THREE;"),
+            "should have THREE alias"
+        );
+        assert!(
+            result.contains("var toTrianglesDrawMode = window.toTrianglesDrawMode;"),
+            "should handle cross-addon import"
+        );
+        assert!(
+            result.contains("window.GLTFLoader = GLTFLoader;"),
+            "should export GLTFLoader to window"
+        );
+        assert!(
+            !result.contains("import {"),
+            "should have no import statements"
+        );
+        assert!(
+            !result.contains("export {"),
+            "should have no export statements"
+        );
         assert!(!result.contains("import "), "should have no import at all");
     }
 
@@ -1358,7 +1931,10 @@ mod tests {
         let src = std::str::from_utf8(crate::three_assets::ORBIT_CONTROLS_SRC).unwrap();
         let result = crate::three_assets::transform_addon_js(src);
         assert!(result.starts_with("(function(){"), "should wrap in IIFE");
-        assert!(result.contains("window.OrbitControls = OrbitControls;"), "should export OrbitControls to window");
+        assert!(
+            result.contains("window.OrbitControls = OrbitControls;"),
+            "should export OrbitControls to window"
+        );
         assert!(!result.contains("import "), "should have no import at all");
         assert!(!result.contains("export "), "should have no export at all");
     }

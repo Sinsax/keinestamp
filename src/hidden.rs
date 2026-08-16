@@ -1,5 +1,5 @@
-use std::path::Path;
 use anyhow::Result;
+use std::path::Path;
 
 /// web 产物相对目录（html_gen 输出 + timeline.json；位于 .keinestamp/ 私有目录内）
 pub const WEB_DIR: &str = ".keinestamp/web/";
@@ -7,6 +7,9 @@ pub const WEB_DIR: &str = ".keinestamp/web/";
 pub const PRIVATE_DIR: &str = ".keinestamp/";
 /// Lore 原生忽略文件（项目级，被提交跟随历史；由 Lore 在 status/stage 原生过滤）
 pub const LOREIGNORE: &str = ".loreignore";
+/// 空提交 / 纯里程碑记录用的私有 marker（位于 .keinestamp/ 内，UI/时间线隐藏；
+/// 每次空提交更新内容并通过 `--force stage` 制造可提交改动）
+pub const EMPTY_MARKER: &str = ".keinestamp/milestone-marker";
 
 /// 应用层隐藏（程序私有目录 + .loreignore 自身，UI 变更面板不显示）。
 /// `.keinestamp/` 已由 loreignore 预设整体忽略（init 时 ensure_loreignore 写入，lore 原生过滤）——
@@ -151,7 +154,10 @@ fn rule_matches(rule: &str, path: &str) -> bool {
             // 含 / 的规则：段数必须一致（`cache/*` 匹配 `cache/x`，不匹配 `cache/a/b`）
             let path_segs: Vec<&str> = path.split('/').collect();
             path_segs.len() == rule_segs.len()
-                && rule_segs.iter().zip(path_segs.iter()).all(|(r, p)| wildcard_match(r, p))
+                && rule_segs
+                    .iter()
+                    .zip(path_segs.iter())
+                    .all(|(r, p)| wildcard_match(r, p))
         }
     } else {
         path == rule || path.starts_with(&rule)
@@ -237,7 +243,10 @@ mod tests {
         let with_bom = format!("\u{feff}*.blend\n.keinestamp/.keinestamp.toml\n# 注释\n\ncache/\n");
         std::fs::write(dir.join(LOREIGNORE), with_bom).unwrap();
         let rules = load_ignore_rules(&dir);
-        assert_eq!(rules, vec!["*.blend", ".keinestamp/.keinestamp.toml", "cache/"]);
+        assert_eq!(
+            rules,
+            vec!["*.blend", ".keinestamp/.keinestamp.toml", "cache/"]
+        );
         std::fs::remove_dir_all(&dir).unwrap();
         Ok(())
     }
@@ -298,7 +307,11 @@ mod tests {
         assert!(is_ignored("a/x.tmp", &rules));
         assert!(!is_ignored("keep.tmp", &rules));
         // 后规则重新忽略（最后命中者生效）
-        let rules2 = vec!["*.tmp".to_string(), "!keep.tmp".to_string(), "keep.tmp".to_string()];
+        let rules2 = vec![
+            "*.tmp".to_string(),
+            "!keep.tmp".to_string(),
+            "keep.tmp".to_string(),
+        ];
         assert!(is_ignored("keep.tmp", &rules2));
     }
 

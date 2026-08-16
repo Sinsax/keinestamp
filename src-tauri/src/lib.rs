@@ -1,10 +1,10 @@
+use keinestamp::preview::PreviewKind;
 use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use tauri::Emitter;
 use tauri::Manager;
-use keinestamp::preview::PreviewProvider;
 
 fn map_err<T>(r: anyhow::Result<T>) -> Result<T, String> {
     r.map_err(|e| e.to_string())
@@ -44,6 +44,12 @@ pub struct LogEntry {
     pub message: String,
 }
 
+#[derive(Serialize)]
+pub struct FileDiff {
+    pub file: String,
+    pub diff: String,
+}
+
 #[tauri::command]
 fn detect(path: String) -> Result<String, String> {
     eprintln!("[debug] detect({})", path);
@@ -65,7 +71,10 @@ fn init_project(path: String) -> Result<keinestamp::config::MetaConfig, String> 
     let meta_path = keinestamp::config::meta_path(&p);
     let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
     keinestamp::recent::RecentProjects::add_path(&p);
-    eprintln!("[debug] init_project → ok, project_root={}", meta.project_root.display());
+    eprintln!(
+        "[debug] init_project → ok, project_root={}",
+        meta.project_root.display()
+    );
     map_err(keinestamp::config::read_meta(&meta_path))
 }
 
@@ -76,16 +85,39 @@ struct CommitProgress {
 }
 
 #[tauri::command]
-async fn record(app: tauri::AppHandle, path: String, message: String, tag: Option<String>, no_preview: Option<bool>, files: Option<Vec<String>>, preview_files: Option<Vec<String>>) -> Result<String, String> {
-    eprintln!("[debug] record({}, message={:?}, tag={:?}, no_preview={}, files={:?}, preview_files={:?})", path, message, tag, no_preview.unwrap_or(false), files, preview_files);
+async fn record(
+    app: tauri::AppHandle,
+    path: String,
+    message: String,
+    tag: Option<String>,
+    tag_category: Option<String>,
+    tags: Option<Vec<String>>,
+    no_preview: Option<bool>,
+    files: Option<Vec<String>>,
+    preview_files: Option<Vec<String>>,
+) -> Result<String, String> {
+    eprintln!(
+        "[debug] record({}, message={:?}, tag={:?}, tag_category={:?}, tags={:?}, no_preview={}, files={:?}, preview_files={:?})",
+        path,
+        message,
+        tag,
+        tag_category,
+        tags,
+        no_preview.unwrap_or(false),
+        files,
+        preview_files
+    );
     let app_clone = app.clone();
     let handle = tokio::task::spawn_blocking(move || {
         let emit = |phase: &str, msg: &str| {
             eprintln!("[debug] record-phase: {} — {}", phase, msg);
-            let _ = app_clone.emit("commit-progress", CommitProgress {
-                phase: phase.to_string(),
-                message: msg.to_string(),
-            });
+            let _ = app_clone.emit(
+                "commit-progress",
+                CommitProgress {
+                    phase: phase.to_string(),
+                    message: msg.to_string(),
+                },
+            );
         };
 
         emit("git_commit", "记录中...");
@@ -98,20 +130,76 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
         // 本次记录涉及的文件（Blender 预览判定用；selected 或全量 changed）
         let changed_files: Vec<String> = match &files {
             Some(sel) => sel.clone(),
-            None => map_err(keinestamp::lore_project::changed_files(&meta.project_root, &hidden))?
-                .into_iter()
-                .map(|f| f.path)
+            None => map_err(keinestamp::lore_project::changed_files(
+                &meta.project_root,
+                &hidden,
+            ))?
+            .into_iter()
+            .map(|f| f.path)
+            .collect(),
+        };
+        // 预览配置（glb / image / video；用户可在 .keinestamp/preview.toml 覆盖默认映射）
+        let preview_cfg = keinestamp::preview::PreviewConfig::load_or_default(&meta.project_root);
+        // 预览目标必须在提交前算好：preview_files = Some([])（本次没有任何预览标记）时，
+        // 绝不去下载/启动 Blender——旧实现只要“有可预览文件”就 ensure_blender，会在大项目上
+        // 表现为记录卡死（Blender 下载/首次启动耗时）。
+        let preview_targets: Option<Vec<&String>> = preview_files.as_ref().map(|list| {
+            changed_files
+                .iter()
+                .filter(|f| {
+                    list.contains(f)
+                        && preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None
+                })
+                .collect()
+        });
+        let mut preview_sources: Vec<&String> = match &preview_targets {
+            Some(targets) => targets.clone(),
+            None => changed_files
+                .iter()
+                .filter(|f| preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None)
                 .collect(),
         };
-        // 预览配置（阶段 1：仅 .blend → glb；后续类型加入默认映射即扩）
-        let preview_cfg = keinestamp::preview::PreviewConfig::default();
-        let has_previewable = changed_files.iter().any(|f| preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None);
+        preview_sources.sort();
+        preview_sources.dedup();
+        let needs_blender = !skip_preview
+            && preview_sources
+                .iter()
+                .any(|f| preview_cfg.kind_of(f) == keinestamp::preview::PreviewKind::Glb);
+        let commit_size: u64 = changed_files
+            .iter()
+            .filter_map(|f| meta.project_root.join(f).metadata().ok())
+            .map(|m| m.len())
+            .sum();
+        emit(
+            "git_commit",
+            &format!(
+                "正在提交 {} 个文件（{:.1} MB）...",
+                changed_files.len(),
+                commit_size as f64 / 1024.0 / 1024.0
+            ),
+        );
 
         // 记录（回退状态下 = 顶替：Lore branch reset 后 HEAD 即回退点，新记录自然顶替）；
         // 成功后清回退标记
         let hash: String = match files {
-            Some(f) => map_err(keinestamp::lore_project::record(&meta.project_root, &message, tag.as_deref(), Some(&f), &hidden))?,
-            None => map_err(keinestamp::lore_project::record(&meta.project_root, &message, tag.as_deref(), None, &hidden))?,
+            Some(f) => map_err(keinestamp::lore_project::record_with_category(
+                &meta.project_root,
+                &message,
+                tag.as_deref(),
+                tag_category.as_deref(),
+                tags.as_deref(),
+                Some(&f),
+                &hidden,
+            ))?,
+            None => map_err(keinestamp::lore_project::record_with_category(
+                &meta.project_root,
+                &message,
+                tag.as_deref(),
+                tag_category.as_deref(),
+                tags.as_deref(),
+                None,
+                &hidden,
+            ))?,
         };
         // 提交已成功 → 后续步骤（清回退态/时间线重建/HTML 生成）失败只降级为警告，
         // 不把"已提交"误报成"记录失败"（否则用户重试报"无改动可记录"）
@@ -120,79 +208,108 @@ async fn record(app: tauri::AppHandle, path: String, message: String, tag: Optio
         }
         let short_hash = hash[..7.min(hash.len())].to_string();
 
-        let blender_path_buf = if !skip_preview && has_previewable {
+        let blender_path_buf = if needs_blender {
             emit("blender_prepare", "准备 Blender...");
             match keinestamp::blender_download::ensure_blender() {
                 Ok(path) => Some(path),
                 Err(e) => {
-                    eprintln!("[debug] record: Blender auto-download failed: {}, trying PATH", e);
+                    eprintln!(
+                        "[debug] record: Blender auto-download failed: {}, trying PATH",
+                        e
+                    );
                     keinestamp::app_config::get_blender_path()
                 }
             }
         } else {
+            // 没有需要 GLB 导出的文件：完全不碰 Blender，避免无谓的下载/启动耗时
             keinestamp::app_config::get_blender_path()
         };
         let blender_path: Option<&Path> = blender_path_buf.as_deref();
 
-        let preview_path = if !skip_preview && has_previewable {
-            let glb_config = keinestamp::blender_render::RenderConfig {
-                output_dir: meta.web_root.join("previews_glb"),
-                ..Default::default()
-            };
-            // 预览标记：只生成用户标记（preview_files）的可预览文件；
-            // 未标记（None，旧调用兼容）→ 生成全部可预览文件（原行为）
-            let preview_targets: Option<Vec<&String>> = preview_files
-                .as_ref()
-                .map(|list| changed_files.iter().filter(|f| list.contains(f) && preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None).collect());
-            let mut glb_names: Vec<String> = Vec::new();
-            let mut preview_sources: Vec<&String> = preview_targets
-                .clone()
-                .unwrap_or_else(|| changed_files.iter().filter(|f| preview_cfg.kind_of(f) != keinestamp::preview::PreviewKind::None).collect());
-            preview_sources.sort();
-            preview_sources.dedup();
+        let mut preview_errors: Vec<String> = Vec::new();
+        let preview_result: Vec<(String, PreviewKind, String)> = if !skip_preview
+            && !preview_sources.is_empty()
+        {
+            let glb_max_previews = keinestamp::blender_render::RenderConfig::default().max_previews;
+            let mut generated: Vec<(PathBuf, PreviewKind, String)> = Vec::new();
             for bf in preview_sources {
                 let kind = preview_cfg.kind_of(bf);
-                let safe_name = bf.replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_', "_");
-                let base_name = safe_name.strip_suffix(".blend").unwrap_or(&safe_name).to_string();
-                let glb_name = format!("{}_{}", short_hash, base_name);
+                let Some(provider) = keinestamp::preview::PreviewConfig::provider_for(
+                    kind,
+                    blender_path.map(|p| p.to_path_buf()),
+                ) else {
+                    let msg = format!("{}: 预览类型 {} 尚未实现", bf, kind.as_str());
+                    eprintln!("[debug] record: {msg}");
+                    preview_errors.push(msg);
+                    continue;
+                };
+                let safe_name = bf.replace(
+                    |c: char| !c.is_alphanumeric() && c != '.' && c != '-' && c != '_',
+                    "_",
+                );
+                let base_name = safe_name
+                    .rsplit_once('.')
+                    .map(|(base, _)| base.to_string())
+                    .unwrap_or_else(|| safe_name.clone());
+                let output_name = format!("{}_{}", short_hash, base_name);
                 let bpath = meta.project_root.join(bf);
-                match kind {
-                    keinestamp::preview::PreviewKind::Glb => {
-                        emit("blender_export", &format!("导出 GLB: {}", bf));
-                        let provider = keinestamp::preview::GlbProvider { blender_path: blender_path.map(|p| p.to_path_buf()) };
-                        if let Ok(Some(_)) = provider.generate(&bpath, &glb_config.output_dir, &glb_name) {
-                            glb_names.push(glb_name);
-                        }
+                let output_dir = meta.web_root.join(provider.output_subdir());
+                emit("preview_export", &format!("生成预览: {}", bf));
+                match provider.generate(&bpath, &output_dir, &output_name) {
+                    Ok(Some(path)) => generated.push((path, kind, bf.clone())),
+                    Ok(None) => {
+                        let msg = format!("{}: 未能生成预览", bf);
+                        eprintln!("[debug] record: {msg}");
+                        preview_errors.push(msg);
                     }
-                    _ => {
-                        eprintln!("[debug] record: 预览类型 {} 尚未实现，跳过 {}", kind.as_str(), bf);
+                    Err(e) => {
+                        let msg = format!("{}: {}", bf, e);
+                        eprintln!("[debug] record: 预览生成失败（降级为无预览）: {e}");
+                        preview_errors.push(msg);
                     }
                 }
             }
             let _ = keinestamp::blender_render::clean_old_glb_previews(
                 &meta.project_root,
                 &meta.web_root.join("previews_glb"),
-                glb_config.max_previews,
+                glb_max_previews,
             );
-            glb_names
-                .iter()
-                .map(|n| format!("previews_glb/{}.glb", n))
-                .find(|rel| meta.web_root.join(rel).exists())
+            generated
+                .into_iter()
+                .filter_map(|(path, kind, file)| {
+                    path.strip_prefix(&meta.web_root)
+                        .ok()
+                        .map(|rel| (rel.to_string_lossy().replace('\\', "/"), kind, file))
+                })
+                .collect::<Vec<_>>()
         } else {
-            None
+            Vec::new()
         };
 
         emit("timeline", "更新时间线...");
 
-        // 时间线缓存已由 record() 内部 rebuild_cache 重建；补写预览路径
+        // 时间线缓存已由 record() 内部 rebuild_cache 重建；补写全部预览路径、类型、开关与失败诊断
         let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
-        if let Some(preview) = &preview_path {
-            if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
-                if let Some(e) = tl.entries.iter_mut().find(|e| e.id == hash) {
-                    e.preview = preview.clone();
+        if let Ok(mut tl) = keinestamp::timeline::read_timeline(&timeline_path) {
+            if let Some(e) = tl.entries.iter_mut().find(|e| e.id == hash) {
+                e.preview_errors = preview_errors;
+                if !preview_result.is_empty() {
+                    e.previews = preview_result
+                        .iter()
+                        .map(|(path, kind, file)| keinestamp::timeline::PreviewFile {
+                            file: file.clone(),
+                            path: path.clone(),
+                            kind: kind.as_str().to_string(),
+                            enabled: true,
+                        })
+                        .collect();
+                    let (first_path, first_kind, _) = &preview_result[0];
+                    e.preview = first_path.clone();
+                    e.preview_type = first_kind.as_str().to_string();
+                    e.preview_enabled = true;
                 }
-                let _ = keinestamp::timeline::write_timeline(&timeline_path, &tl);
             }
+            let _ = keinestamp::timeline::write_timeline(&timeline_path, &tl);
         }
 
         let project_name = meta
@@ -234,7 +351,10 @@ async fn push(path: String) -> Result<(), String> {
         eprintln!("[debug] push: project_root={}", meta.project_root.display());
 
         if has_remote_impl(&meta.project_root) {
-            map_err(keinestamp::lore_backend::run_lore(&meta.project_root, &["push"]))?;
+            map_err(keinestamp::lore_backend::run_lore(
+                &meta.project_root,
+                &["push"],
+            ))?;
         } else {
             eprintln!("[debug] push: no lore remote, skipping");
         }
@@ -275,8 +395,7 @@ async fn deploy(path: String) -> Result<(), String> {
             map_err(keinestamp::config::write_meta(&meta_p, &meta))?;
         }
 
-        let server = keinestamp::app_config::get_deploy_server_url()
-            .filter(|s| !s.is_empty());
+        let server = keinestamp::app_config::get_deploy_server_url().filter(|s| !s.is_empty());
 
         if let Some(ref server) = server {
             eprintln!("[debug] deploy: server={}", server);
@@ -284,7 +403,12 @@ async fn deploy(path: String) -> Result<(), String> {
             let project_name = keinestamp::config::resolve_site_name(&meta);
             let project_id = meta.project_id.as_deref().unwrap_or("");
             map_err(keinestamp::push::deploy_to_server(
-                &meta.web_root, server, deploy_token.as_deref(), meta.access_token.as_deref(), &project_name, project_id,
+                &meta.web_root,
+                server,
+                deploy_token.as_deref(),
+                meta.access_token.as_deref(),
+                &project_name,
+                project_id,
             ))?;
             meta.site_name = Some(project_name);
             meta.site_locked = true;
@@ -322,7 +446,10 @@ async fn test_connection(server_url: String, deploy_token: Option<String>) -> Re
         match req.call() {
             Ok(resp) => {
                 let ok = resp.status() == 200;
-                eprintln!("[debug] test_connection → {}", if ok { "connected" } else { "failed" });
+                eprintln!(
+                    "[debug] test_connection → {}",
+                    if ok { "connected" } else { "failed" }
+                );
                 Ok(ok)
             }
             Err(e) => {
@@ -352,10 +479,15 @@ async fn get_deploy_status(
         let p = PathBuf::from(&path);
         let meta_path = keinestamp::config::meta_path(&p);
         let meta = map_err(keinestamp::config::read_meta(&meta_path))?;
-        let local = map_err(keinestamp::lore_project::web_revision_count(&meta.project_root))?;
+        let local = map_err(keinestamp::lore_project::web_revision_count(
+            &meta.project_root,
+        ))?;
         if !meta.site_locked {
             eprintln!("[debug] get_deploy_status: not deployed (site_locked=false), skip request");
-            return Ok(DeployStatus { local, remote: None });
+            return Ok(DeployStatus {
+                local,
+                remote: None,
+            });
         }
         let site = keinestamp::config::resolve_site_name(&meta);
         let url = format!("{}/{}/version", server_url.trim_end_matches('/'), site);
@@ -391,7 +523,10 @@ async fn pull(path: String) -> Result<(), String> {
         eprintln!("[debug] pull: project_root={}", meta.project_root.display());
 
         if has_remote_impl(&meta.project_root) {
-            map_err(keinestamp::lore_backend::run_lore(&meta.project_root, &["sync"]))?;
+            map_err(keinestamp::lore_backend::run_lore(
+                &meta.project_root,
+                &["sync"],
+            ))?;
         } else {
             eprintln!("[debug] pull: no lore remote, skipping");
         }
@@ -434,17 +569,26 @@ fn open_folder(path: String) -> Result<(), String> {
     };
     let path_str = clean.to_string();
     #[cfg(target_os = "windows")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("explorer")).arg(&path_str).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("explorer"))
+        .arg(&path_str)
+        .spawn();
     #[cfg(target_os = "macos")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&path_str).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("open"))
+        .arg(&path_str)
+        .spawn();
     #[cfg(target_os = "linux")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&path_str).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open"))
+        .arg(&path_str)
+        .spawn();
     result.map_err(|e| format!("failed to open folder: {}", e))?;
     Ok(())
 }
 
 #[tauri::command]
-fn get_ignore_info(project_root: String, files: Option<Vec<String>>) -> Result<serde_json::Value, String> {
+fn get_ignore_info(
+    project_root: String,
+    files: Option<Vec<String>>,
+) -> Result<serde_json::Value, String> {
     // v2：忽略规则存项目级 .loreignore（Lore 原生过滤，status/stage 自动生效）；
     // ignored 返回规则列表供设置界面展示；tracked 概念不存在
     // rule_ignored = 传入文件列表中命中规则者（后端权威匹配，lore 语义 hidden::is_ignored）——
@@ -461,7 +605,10 @@ fn get_ignore_info(project_root: String, files: Option<Vec<String>>) -> Result<s
 
 #[tauri::command]
 fn add_skip_worktree(project_root: String, path: String) -> Result<(), String> {
-    eprintln!("[debug] add_skip_worktree(root={}, path={})", project_root, path);
+    eprintln!(
+        "[debug] add_skip_worktree(root={}, path={})",
+        project_root, path
+    );
     validate_entry(&path)?;
     let root = PathBuf::from(&project_root);
     let normalized = path.trim_end_matches('/').to_string();
@@ -474,15 +621,15 @@ fn add_skip_worktree(project_root: String, path: String) -> Result<(), String> {
 
 #[tauri::command]
 fn remove_ignore(project_root: String, entry: String) -> Result<(), String> {
-    eprintln!("[debug] remove_ignore(root={}, entry={})", project_root, entry);
+    eprintln!(
+        "[debug] remove_ignore(root={}, entry={})",
+        project_root, entry
+    );
     validate_entry(&entry)?;
     let root = PathBuf::from(&project_root);
     let needle = entry.trim_end_matches('/').to_string();
     let rules = keinestamp::hidden::load_ignore_rules(&root);
-    let kept: Vec<String> = rules
-        .into_iter()
-        .filter(|r| *r != needle)
-        .collect();
+    let kept: Vec<String> = rules.into_iter().filter(|r| *r != needle).collect();
     map_err(keinestamp::hidden::save_ignore_rules(&root, &kept))
 }
 
@@ -501,7 +648,10 @@ fn validate_entry(entry: &str) -> Result<(), String> {
 
 #[tauri::command]
 fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
-    eprintln!("[debug] add_to_gitignore(root={}, entry={})", project_root, entry);
+    eprintln!(
+        "[debug] add_to_gitignore(root={}, entry={})",
+        project_root, entry
+    );
     validate_entry(&entry)?;
     let root = PathBuf::from(&project_root);
     let normalized = entry.trim_end_matches('/').to_string();
@@ -514,14 +664,24 @@ fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn rollback(path: String, entry_id: String, discard: bool) -> Result<(), String> {
-    eprintln!("[debug] rollback({}, {}, discard={})", path, &entry_id[..7.min(entry_id.len())], discard);
+    eprintln!(
+        "[debug] rollback({}, {}, discard={})",
+        path,
+        &entry_id[..7.min(entry_id.len())],
+        discard
+    );
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
         let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
         // Lore 回退 = branch reset，Lore 拒绝 dirty/staged 而非产生冲突 →
         // 错误契约保持 v1（无冲突文件时返回普通错误，CONFLICT| 分支不再触发）
-        map_err(keinestamp::lore_project::rollback(&meta.project_root, &entry_id, &hidden, discard))
+        map_err(keinestamp::lore_project::rollback(
+            &meta.project_root,
+            &entry_id,
+            &hidden,
+            discard,
+        ))
     });
     handle.await.map_err(|e| e.to_string())?
 }
@@ -534,28 +694,44 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
         let meta = read_meta(&p)?;
         match keinestamp::timeline::read_marker(&meta.project_root) {
             Ok(Some(m)) => {
-                let head_matches = match keinestamp::lore_backend::current_revision(&meta.project_root) {
-                    Ok(cur) => cur == m.rollback_point, // current == X-1（回退后 HEAD）
-                    Err(_) => {
-                        // 读取失败（超时/锁竞争等瞬态错误）：保守保留回退态（不清 marker/备份），
-                        // 视为仍处于回退态，等待下次成功轮询再判定——避免一次瞬态失败销毁回退前未提交改动
-                        eprintln!("[debug] rollback state: current_revision 读取失败，保守保留回退态");
-                        true
-                    }
-                };
+                let head_matches =
+                    match keinestamp::lore_backend::current_revision(&meta.project_root) {
+                        Ok(cur) => cur == m.rollback_point, // current == X-1（回退后 HEAD）
+                        Err(_) => {
+                            // 读取失败（超时/锁竞争等瞬态错误）：保守保留回退态（不清 marker/备份），
+                            // 视为仍处于回退态，等待下次成功轮询再判定——避免一次瞬态失败销毁回退前未提交改动
+                            eprintln!(
+                                "[debug] rollback state: current_revision 读取失败，保守保留回退态"
+                            );
+                            true
+                        }
+                    };
                 if !head_matches {
-                    // 只有确认 HEAD 已前进（current_revision 读取成功且 != rollback_point）才清理——
-                    // 半状态残留（HEAD 已前进但 marker 未清——异常退出/恢复失败等）：
-                    // 自动清理（marker + 备份），避免"恢复按钮 disabled + 回退态残留"卡死
-                    eprintln!("[debug] rollback marker 不一致（HEAD 已前进），自动清理回退态");
-                    let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
-                    return Ok(serde_json::json!({
-                        "rollback_point": null,
-                        "head_matches": true,
-                        "deleted_files": [],
-                        "change_files": [],
-                        "modified_files": [],
-                    }));
+                    if keinestamp::lore_project::rollback_operation_in_progress() {
+                        // 正常回退/恢复过程中 HEAD 会先移动、最后才清 marker；此时不能把
+                        // 中间窗口当成异常残留自动清理（否则会并发删除备份/标记，甚至造成卡顿）
+                        eprintln!("[debug] rollback marker 不一致（HEAD 已前进），但回退/恢复操作进行中，跳过自动清理");
+                        return Ok(serde_json::json!({
+                            "rollback_point": m.superseded_point,
+                            "head_matches": false,
+                            "deleted_files": m.deleted_files,
+                            "change_files": m.change_files,
+                            "modified_files": [],
+                        }));
+                    } else {
+                        // 只有确认 HEAD 已前进（current_revision 读取成功且 != rollback_point）才清理——
+                        // 半状态残留（HEAD 已前进但 marker 未清——异常退出/恢复失败等）：
+                        // 自动清理（marker + 备份），避免"恢复按钮 disabled + 回退态残留"卡死
+                        eprintln!("[debug] rollback marker 不一致（HEAD 已前进），自动清理回退态");
+                        let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
+                        return Ok(serde_json::json!({
+                            "rollback_point": null,
+                            "head_matches": true,
+                            "deleted_files": [],
+                            "change_files": [],
+                            "modified_files": [],
+                        }));
+                    }
                 }
                 Ok(serde_json::json!({
                     "rollback_point": m.superseded_point, // 灰显起点（选中的 X）
@@ -581,12 +757,19 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
 
 #[tauri::command]
 async fn restore_rollback(path: String, discard_modified: Option<bool>) -> Result<(), String> {
-    eprintln!("[debug] restore_rollback({}, discard_modified={:?})", path, discard_modified);
+    eprintln!(
+        "[debug] restore_rollback({}, discard_modified={:?})",
+        path, discard_modified
+    );
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
         let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
-        map_err(keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden, discard_modified))
+        map_err(keinestamp::lore_project::undo_rollback(
+            &meta.project_root,
+            &hidden,
+            discard_modified,
+        ))
     });
     handle.await.map_err(|e| e.to_string())?
 }
@@ -595,7 +778,9 @@ async fn restore_rollback(path: String, discard_modified: Option<bool>) -> Resul
 fn get_rollback_conflicts(path: String) -> Result<Vec<String>, String> {
     let p = PathBuf::from(&path);
     let meta = read_meta(&p)?;
-    map_err(keinestamp::lore_project::rollback_conflicts(&meta.project_root))
+    map_err(keinestamp::lore_project::rollback_conflicts(
+        &meta.project_root,
+    ))
 }
 
 #[tauri::command]
@@ -607,7 +792,11 @@ fn keep_rollback_file(path: String, file: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn resolve_rollback_conflicts(path: String, choices: Vec<Vec<String>>) -> Result<(), String> {
-    eprintln!("[debug] resolve_rollback_conflicts({}, {} files)", path, choices.len());
+    eprintln!(
+        "[debug] resolve_rollback_conflicts({}, {} files)",
+        path,
+        choices.len()
+    );
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
@@ -633,10 +822,18 @@ async fn resolve_rollback_conflicts(path: String, choices: Vec<Vec<String>>) -> 
 async fn status(path: String) -> Result<StatusResult, String> {
     // async + spawn_blocking：lore status 可达数秒，同步命令会阻塞主线程导致 UI 冻结
     let handle = tokio::task::spawn_blocking(move || -> Result<StatusResult, String> {
+        let t0 = std::time::Instant::now();
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
         let hidden = keinestamp::hidden::load_hidden(&meta.project_root);
-        let files = map_err(keinestamp::lore_project::changed_files(&meta.project_root, &hidden))?;
+        let files = map_err(keinestamp::lore_project::changed_files(
+            &meta.project_root,
+            &hidden,
+        ))?;
+        let elapsed = t0.elapsed();
+        if elapsed.as_secs() >= 1 {
+            eprintln!("[debug] status slow: {}ms", elapsed.as_millis());
+        }
         let clean = files.is_empty();
         // 输出格式与 CLI status 一致（中文标签，state 码 + 路径）
         let output = if clean {
@@ -662,7 +859,10 @@ async fn discard_file(path: String, file: String) -> Result<(), String> {
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
-        map_err(keinestamp::lore_project::discard_file_changes(&meta.project_root, &file))
+        map_err(keinestamp::lore_project::discard_file_changes(
+            &meta.project_root,
+            &file,
+        ))
     });
     handle.await.map_err(|e| e.to_string())?
 }
@@ -674,7 +874,9 @@ async fn log(path: String, count: Option<usize>) -> Result<Vec<LogEntry>, String
         eprintln!("[debug] log({}, count={:?})", path, count);
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
-        let hist = map_err(keinestamp::lore_backend::revision_history(&meta.project_root))?;
+        let hist = map_err(keinestamp::lore_backend::revision_history(
+            &meta.project_root,
+        ))?;
         let c = count.unwrap_or(20);
         let entries: Vec<LogEntry> = hist
             .iter()
@@ -702,12 +904,11 @@ fn read_config(path: String) -> Result<keinestamp::config::MetaConfig, String> {
 }
 
 #[tauri::command]
-fn update_config(
-    path: String,
-    key: String,
-    value: Option<String>,
-) -> Result<(), String> {
-    eprintln!("[debug] update_config({}, key={:?}, value={:?})", path, key, value);
+fn update_config(path: String, key: String, value: Option<String>) -> Result<(), String> {
+    eprintln!(
+        "[debug] update_config({}, key={:?}, value={:?})",
+        path, key, value
+    );
     let p = PathBuf::from(&path);
     let meta_path = keinestamp::config::meta_path(&p);
     let mut meta = map_err(keinestamp::config::read_meta(&meta_path))?;
@@ -726,7 +927,11 @@ fn update_config(
             }
             meta.site_name = v;
         }
-        _ => return Err(format!("unknown config key: {key}. Available: access_token, site_name")),
+        _ => {
+            return Err(format!(
+                "unknown config key: {key}. Available: access_token, site_name"
+            ));
+        }
     }
 
     map_err(keinestamp::config::write_meta(&meta_path, &meta))
@@ -736,7 +941,10 @@ fn update_config(
 async fn export_entry(path: String, entry_id: String, output_dir: String) -> Result<(), String> {
     // dump + 逐文件 write 可能耗时 → async 防主线程阻塞
     let handle = tokio::task::spawn_blocking(move || {
-        eprintln!("[debug] export_entry({}, entry_id={}, output_dir={})", path, entry_id, output_dir);
+        eprintln!(
+            "[debug] export_entry({}, entry_id={}, output_dir={})",
+            path, entry_id, output_dir
+        );
         map_err(keinestamp::main_helpers::export_entry(
             Path::new(&path),
             &entry_id,
@@ -769,6 +977,7 @@ fn get_timeline(path: String) -> Result<keinestamp::timeline::Timeline, String> 
             Ok(t)
         }
         Err(_) => Ok(keinestamp::timeline::Timeline {
+            version: 1,
             project: String::new(),
             entries: vec![],
             rollback_marker: None,
@@ -778,19 +987,81 @@ fn get_timeline(path: String) -> Result<keinestamp::timeline::Timeline, String> 
 }
 
 #[tauri::command]
+fn get_tag_groups(path: String) -> Result<Vec<keinestamp::tag_groups::TagGroup>, String> {
+    let p = PathBuf::from(&path);
+    let meta = read_meta(&p)?;
+    map_err(keinestamp::tag_groups::load_tag_groups(&meta.project_root))
+}
+
+#[tauri::command]
+async fn compare_entries(
+    path: String,
+    entry_a: String,
+    entry_b: String,
+) -> Result<Vec<FileDiff>, String> {
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
+        let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
+
+        let find = |id: &str| -> Result<keinestamp::timeline::TimelineEntry, String> {
+            timeline
+                .entries
+                .iter()
+                .find(|e| e.id == id || e.id.starts_with(id))
+                .cloned()
+                .ok_or_else(|| format!("entry not found: {}", id))
+        };
+        let a = find(&entry_a)?;
+        let b = find(&entry_b)?;
+
+        let mut files: Vec<String> = a.files.clone();
+        for f in &b.files {
+            if !files.contains(f) {
+                files.push(f.clone());
+            }
+        }
+        files.sort();
+        files.dedup();
+
+        let mut result = Vec::new();
+        for file in files {
+            let diff = keinestamp::lore_backend::run_lore(
+                &meta.project_root,
+                &["diff", "--source", &a.id, "--target", &b.id, &file],
+            )
+            .unwrap_or_default();
+            result.push(FileDiff { file, diff });
+        }
+        Ok(result)
+    });
+    handle.await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn get_tracked_files(path: String) -> Result<Vec<String>, String> {
     // 全树递归 walk 可能耗时（大项目 + 每 10s 轮询）→ async 防主线程阻塞
     let handle = tokio::task::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
         fn walk(dir: &Path, prefix: &str, files: &mut Vec<String>) -> std::io::Result<()> {
             for entry in std::fs::read_dir(dir)? {
                 let entry = entry?;
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
                 // v2：web/ 为部署产物目录（主仓库内），不计入文件列表
-                if name.starts_with('.') || name == "node_modules" || name == "target" || name == "web" {
+                if name.starts_with('.')
+                    || name == "node_modules"
+                    || name == "target"
+                    || name == "web"
+                {
                     continue;
                 }
-                let rel = if prefix.is_empty() { name.to_string() } else { format!("{}/{}", prefix, name) };
+                let rel = if prefix.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}/{}", prefix, name)
+                };
                 if entry.file_type()?.is_dir() {
                     walk(&entry.path(), &rel, files)?;
                 } else {
@@ -803,6 +1074,10 @@ async fn get_tracked_files(path: String) -> Result<Vec<String>, String> {
         let meta = read_meta(&p)?;
         let mut files = vec![];
         map_err(walk(&meta.project_root, "", &mut files).map_err(|e| anyhow::anyhow!("{}", e)))?;
+        let elapsed = t0.elapsed();
+        if elapsed.as_secs() >= 1 {
+            eprintln!("[debug] get_tracked_files slow: {}ms", elapsed.as_millis());
+        }
         Ok(files)
     });
     handle.await.map_err(|e| e.to_string())?
@@ -813,6 +1088,7 @@ async fn get_empty_dirs(path: String) -> Result<Vec<String>, String> {
     // 空目录在文件树不显示（get_tracked_files 只列文件）→ 单独返回"无文件后代"的目录
     // （带尾斜杠，沿用 lore 目录行惯例 `out/`），前端并入 DirTree 渲染为文件夹节点
     let handle = tokio::task::spawn_blocking(move || {
+        let t0 = std::time::Instant::now();
         // 返回该子树内是否有文件（含后代）；无 → 本目录为"空"目录，push 入 out
         fn walk(dir: &Path, prefix: &str, out: &mut Vec<String>) -> std::io::Result<bool> {
             let mut has_files = false;
@@ -820,10 +1096,18 @@ async fn get_empty_dirs(path: String) -> Result<Vec<String>, String> {
                 let entry = entry?;
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
-                if name.starts_with('.') || name == "node_modules" || name == "target" || name == "web" {
+                if name.starts_with('.')
+                    || name == "node_modules"
+                    || name == "target"
+                    || name == "web"
+                {
                     continue;
                 }
-                let rel = if prefix.is_empty() { name.to_string() } else { format!("{}/{}", prefix, name) };
+                let rel = if prefix.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{}/{}", prefix, name)
+                };
                 if entry.file_type()?.is_dir() {
                     has_files |= walk(&entry.path(), &rel, out)?;
                 } else {
@@ -839,6 +1123,10 @@ async fn get_empty_dirs(path: String) -> Result<Vec<String>, String> {
         let meta = read_meta(&p)?;
         let mut out = vec![];
         map_err(walk(&meta.project_root, "", &mut out).map_err(|e| anyhow::anyhow!("{}", e)))?;
+        let elapsed = t0.elapsed();
+        if elapsed.as_secs() >= 1 {
+            eprintln!("[debug] get_empty_dirs slow: {}ms", elapsed.as_millis());
+        }
         Ok(out)
     });
     handle.await.map_err(|e| e.to_string())?
@@ -869,8 +1157,15 @@ fn reorder_recent(paths: Vec<String>) -> Vec<keinestamp::recent::RecentEntry> {
 }
 
 #[tauri::command]
-async fn set_entry_milestone(path: String, entry_id: String, milestone: bool) -> Result<(), String> {
-    eprintln!("[debug] set_entry_milestone({}, entry_id={}, milestone={})", path, entry_id, milestone);
+async fn set_entry_milestone(
+    path: String,
+    entry_id: String,
+    milestone: bool,
+) -> Result<(), String> {
+    eprintln!(
+        "[debug] set_entry_milestone({}, entry_id={}, milestone={})",
+        path, entry_id, milestone
+    );
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
@@ -879,7 +1174,11 @@ async fn set_entry_milestone(path: String, entry_id: String, milestone: bool) ->
         // 方案 B：写 timeline.json 展示缓存的 milestone 字段（rebuild_cache 读取
         // metadata，下一记录后 milestone 恢复默认；Task 9 处理 metadata 方案）
         let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
-        map_err(keinestamp::timeline::set_entry_milestone(&timeline_path, &entry_id, milestone))?;
+        map_err(keinestamp::timeline::set_entry_milestone(
+            &timeline_path,
+            &entry_id,
+            milestone,
+        ))?;
 
         let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
         let project_name = meta
@@ -904,13 +1203,20 @@ async fn set_entry_milestone(path: String, entry_id: String, milestone: bool) ->
 
 #[tauri::command]
 async fn set_entry_preview(path: String, entry_id: String, enabled: bool) -> Result<(), String> {
-    eprintln!("[debug] set_entry_preview({}, entry_id={}, enabled={})", path, entry_id, enabled);
+    eprintln!(
+        "[debug] set_entry_preview({}, entry_id={}, enabled={})",
+        path, entry_id, enabled
+    );
     let handle = tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
         // 只写 timeline.json 展示缓存的开关字段（GLB 文件保留，重新开启即恢复）
         let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
-        map_err(keinestamp::timeline::set_entry_preview(&timeline_path, &entry_id, enabled))?;
+        map_err(keinestamp::timeline::set_entry_preview(
+            &timeline_path,
+            &entry_id,
+            enabled,
+        ))?;
 
         let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
         let project_name = meta
@@ -933,6 +1239,47 @@ async fn set_entry_preview(path: String, entry_id: String, enabled: bool) -> Res
 }
 
 #[tauri::command]
+async fn set_entry_preview_file(
+    path: String,
+    entry_id: String,
+    preview_path: String,
+    enabled: bool,
+) -> Result<(), String> {
+    eprintln!(
+        "[debug] set_entry_preview_file({}, entry_id={}, preview_path={}, enabled={})",
+        path, entry_id, preview_path, enabled
+    );
+    let handle = tokio::task::spawn_blocking(move || {
+        let p = PathBuf::from(&path);
+        let meta = read_meta(&p)?;
+        let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
+        map_err(keinestamp::timeline::set_entry_preview_file(
+            &timeline_path,
+            &entry_id,
+            &preview_path,
+            enabled,
+        ))?;
+
+        let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
+        let project_name = meta
+            .project_root
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+        map_err(keinestamp::html_gen::generate_index_html(
+            &meta.web_root,
+            &meta.project_root,
+            &timeline,
+            &project_name,
+        ))?;
+
+        // 单个预览开关同样属于显示偏好：重建页面但不自增 web 版本号
+        Ok(())
+    });
+    handle.await.map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
 async fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
     eprintln!("[debug] delete_entry({}, entry_id={})", path, entry_id);
     let handle = tokio::task::spawn_blocking(move || {
@@ -940,7 +1287,10 @@ async fn delete_entry(path: String, entry_id: String) -> Result<(), String> {
         let meta = read_meta(&p)?;
         let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
 
-        map_err(keinestamp::timeline::remove_entry(&timeline_path, &entry_id))?;
+        map_err(keinestamp::timeline::remove_entry(
+            &timeline_path,
+            &entry_id,
+        ))?;
 
         let timeline = map_err(keinestamp::timeline::read_timeline(&timeline_path))?;
         let project_name = meta
@@ -972,7 +1322,9 @@ async fn get_project_log(path: String, count: Option<usize>) -> Result<Vec<Strin
         let p = PathBuf::from(&path);
         let c = count.unwrap_or(20);
         let meta = read_meta(&p)?;
-        let hist = map_err(keinestamp::lore_backend::revision_history(&meta.project_root))?;
+        let hist = map_err(keinestamp::lore_backend::revision_history(
+            &meta.project_root,
+        ))?;
         Ok(hist
             .iter()
             .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
@@ -994,33 +1346,44 @@ struct BlenderProgress {
 }
 
 #[tauri::command]
-async fn download_blender(app: tauri::AppHandle, version: Option<String>) -> Result<String, String> {
+async fn download_blender(
+    app: tauri::AppHandle,
+    version: Option<String>,
+) -> Result<String, String> {
     eprintln!("[debug] download_blender(version={:?})", version);
     use tauri::Emitter;
     let version_clone = version.clone();
     let app_clone = app.clone();
     let handle = tokio::task::spawn_blocking(move || {
         let mut progress_tx = |p: keinestamp::blender_download::DownloadProgress| {
-            let _ = app_clone.emit("blender-download-progress", BlenderProgress {
-                phase: p.phase.clone(),
-                message: p.message.clone(),
-                percent: p.percent,
-                bytes_downloaded: p.bytes_downloaded,
-                bytes_total: p.bytes_total,
-            });
+            let _ = app_clone.emit(
+                "blender-download-progress",
+                BlenderProgress {
+                    phase: p.phase.clone(),
+                    message: p.message.clone(),
+                    percent: p.percent,
+                    bytes_downloaded: p.bytes_downloaded,
+                    bytes_total: p.bytes_total,
+                },
+            );
         };
-        keinestamp::blender_download::download_blender_with_progress(version_clone.as_deref(), &mut progress_tx)
-            .map(|p| p.to_string_lossy().to_string())
+        keinestamp::blender_download::download_blender_with_progress(
+            version_clone.as_deref(),
+            &mut progress_tx,
+        )
+        .map(|p| p.to_string_lossy().to_string())
     });
-    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+    handle
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn refresh_blender_versions() -> Vec<String> {
     eprintln!("[debug] refresh_blender_versions: fetching from mirrors");
-    let handle = tokio::task::spawn_blocking(|| {
-        keinestamp::blender_download::fetch_blender_versions()
-    });
+    let handle =
+        tokio::task::spawn_blocking(|| keinestamp::blender_download::fetch_blender_versions());
     let fetched = handle.await.unwrap_or(Ok(Vec::new()));
     if let Ok(versions) = fetched {
         if !versions.is_empty() {
@@ -1048,7 +1411,10 @@ async fn delete_blender_version(version: String) -> Result<(), String> {
     let handle = tokio::task::spawn_blocking(move || {
         keinestamp::blender_download::delete_blender_version(&version)
     });
-    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+    handle
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1113,7 +1479,10 @@ fn get_server_toggles() -> (bool, bool) {
 
 #[tauri::command]
 fn set_server_toggles(deploy_enabled: bool, lore_enabled: bool) {
-    eprintln!("[debug] set_server_toggles(deploy={}, lore={})", deploy_enabled, lore_enabled);
+    eprintln!(
+        "[debug] set_server_toggles(deploy={}, lore={})",
+        deploy_enabled, lore_enabled
+    );
     keinestamp::app_config::set_server_toggles(deploy_enabled, lore_enabled);
 }
 
@@ -1223,11 +1592,18 @@ async fn migrate_repo(path: String) -> Result<(), String> {
         let meta = read_meta(&p).map_err(|e| anyhow::anyhow!(e))?;
         keinestamp::lore_backend::migrate_offline_to_online(&meta.project_root)
     });
-    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+    handle
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-async fn clone_server_repo(url: String, name: String, dest_parent: String) -> Result<String, String> {
+async fn clone_server_repo(
+    url: String,
+    name: String,
+    dest_parent: String,
+) -> Result<String, String> {
     let handle = tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
         let p = PathBuf::from(&dest_parent);
         // 克隆 + init 补洞（.keinestamp 结构 + loreignore + recent）
@@ -1239,7 +1615,10 @@ async fn clone_server_repo(url: String, name: String, dest_parent: String) -> Re
         keinestamp::recent::RecentProjects::add_path(&repo);
         Ok(repo.to_string_lossy().to_string())
     });
-    handle.await.map_err(|e| e.to_string())?.map_err(|e| e.to_string())
+    handle
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())
 }
 
 static LOCAL_SERVERS: OnceLock<Mutex<HashMap<String, u16>>> = OnceLock::new();
@@ -1265,7 +1644,13 @@ async fn open_web_timeline(path: String) -> Result<(), String> {
                 Some(p) => {
                     let alive = format!("127.0.0.1:{}", p)
                         .parse::<std::net::SocketAddr>()
-                        .map(|a| std::net::TcpStream::connect_timeout(&a, std::time::Duration::from_millis(300)).is_ok())
+                        .map(|a| {
+                            std::net::TcpStream::connect_timeout(
+                                &a,
+                                std::time::Duration::from_millis(300),
+                            )
+                            .is_ok()
+                        })
                         .unwrap_or(false);
                     if alive {
                         Some(*p)
@@ -1283,7 +1668,8 @@ async fn open_web_timeline(path: String) -> Result<(), String> {
                 std::thread::spawn(move || {
                     let _ = keinestamp::serve::serve_local(&wr, tx);
                 });
-                let p = rx.recv_timeout(std::time::Duration::from_secs(5))
+                let p = rx
+                    .recv_timeout(std::time::Duration::from_secs(5))
                     .map_err(|_| "timeline server failed to start".to_string())?;
                 guard.insert(key, p);
                 p
@@ -1291,11 +1677,17 @@ async fn open_web_timeline(path: String) -> Result<(), String> {
         };
         let url = format!("http://127.0.0.1:{}/", port);
         #[cfg(target_os = "windows")]
-        let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();
+        let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd"))
+            .args(["/c", "start", &url])
+            .spawn();
         #[cfg(target_os = "macos")]
-        let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&url).spawn();
+        let result = keinestamp::process_util::hide_console(std::process::Command::new("open"))
+            .arg(&url)
+            .spawn();
         #[cfg(target_os = "linux")]
-        let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&url).spawn();
+        let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open"))
+            .arg(&url)
+            .spawn();
         result.map_err(|e| format!("failed to open timeline: {}", e))?;
         Ok(())
     });
@@ -1313,11 +1705,17 @@ fn open_site(url: String) -> Result<(), String> {
         return Err("invalid URL: contains shell metacharacters".to_string());
     }
     #[cfg(target_os = "windows")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd")).args(["/c", "start", &url]).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("cmd"))
+        .args(["/c", "start", &url])
+        .spawn();
     #[cfg(target_os = "macos")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("open")).arg(&url).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("open"))
+        .arg(&url)
+        .spawn();
     #[cfg(target_os = "linux")]
-    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open")).arg(&url).spawn();
+    let result = keinestamp::process_util::hide_console(std::process::Command::new("xdg-open"))
+        .arg(&url)
+        .spawn();
     result.map_err(|e| format!("failed to open site: {}", e))?;
     Ok(())
 }
@@ -1356,7 +1754,12 @@ pub fn run() {
                     _ => {}
                 })
                 .on_tray_icon_event(|tray, event| {
-                    if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
                         if let Some(win) = tray.app_handle().get_webview_window("main") {
                             let _ = win.show();
                             let _ = win.set_focus();
@@ -1406,6 +1809,8 @@ pub fn run() {
             update_config,
             export_entry,
             get_timeline,
+            get_tag_groups,
+            compare_entries,
             get_recent,
             add_recent,
             remove_recent,
@@ -1420,6 +1825,7 @@ pub fn run() {
             delete_entry,
             set_entry_milestone,
             set_entry_preview,
+            set_entry_preview_file,
             get_project_log,
             get_tracked_files,
             get_empty_dirs,
@@ -1460,5 +1866,3 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
-
