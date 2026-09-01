@@ -536,6 +536,7 @@ fn entry_files(project_root: &Path, revision: &str) -> Vec<String> {
         .collect()
 }
 
+#[cfg(test)]
 fn parse_dump_paths(out: &str) -> Vec<String> {
     out.lines()
         .filter_map(|l| {

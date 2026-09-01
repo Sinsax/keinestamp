@@ -522,7 +522,11 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     const { msg, tag, tagCategory, tags, noPreview, files, previewFiles } = p.data
     pendingConfirm = null
     showCommit = false
-    void performRecord(msg, tag, tagCategory, tags, noPreview, files, previewFiles)
+    // 回退状态提交 = 顶替操作，显示等待遮罩，避免用户以为卡住
+    busyText = '回退中记录...'
+    void performRecord(msg, tag, tagCategory, tags, noPreview, files, previewFiles).finally(() => {
+      busyText = ''
+    })
   }
 
   async function handleDeploy() {

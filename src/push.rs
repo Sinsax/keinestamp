@@ -106,10 +106,21 @@ pub fn deploy_to_server(
             req = req.set("X-Access-Token", token);
         }
     }
-    let resp = req.send_bytes(&zip_bytes).map_err(|e| {
-        eprintln!("[debug] deploy_to_server: ureq error: {}", e);
-        anyhow::anyhow!("连接服务器失败: {}", e)
-    })?;
+    let resp = match req.send_bytes(&zip_bytes) {
+        Ok(r) => r,
+        Err(ureq::Error::Status(code, response)) => {
+            let body = response.into_string().unwrap_or_default();
+            eprintln!(
+                "[debug] deploy_to_server: server error {}: {}",
+                code, body
+            );
+            anyhow::bail!("服务器返回 {}: {}", code, body)
+        }
+        Err(e) => {
+            eprintln!("[debug] deploy_to_server: ureq error: {}", e);
+            anyhow::bail!("连接服务器失败: {}", e)
+        }
+    };
 
     let status = resp.status();
     let body = resp.into_string().unwrap_or_else(|_| "unknown".to_string());

@@ -143,7 +143,8 @@
   let userCollapsed = $state<Set<string>>(new Set())
   // 记录已经处于“已删除”状态的路径：用于检测“文件刚变成删除”时自动从选择中移除，
   // 避免之前勾选/文件夹勾选残留的删除项在用户不知情时被提交。
-  let knownDeletedPaths = $state<Set<string>>(new Set())
+  // 注意：必须是非响应式普通变量，否则在 effect 里赋值会无限触发重跑导致 UI 假死。
+  let knownDeletedPaths = new Set<string>()
 
   const autoFoldable = $derived.by(() => {
     const s = new Set<string>()

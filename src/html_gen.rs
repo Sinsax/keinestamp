@@ -336,7 +336,7 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
 @media (max-width: 900px) {
   .page { flex-direction: column; padding: 16px; gap: 16px; }
   .left-col { width: 100%; position: static; order: 2; padding: 16px; }
-  .right-col { max-width: 100%; }
+  .right-col { width: 100%; max-width: 100%; flex: none; }
   .right-head { padding: 16px 16px 14px; }
   .head-row { flex-direction: column; align-items: flex-start; gap: 10px; }
   h1 { font-size: clamp(26px, 7vw, 36px); }
@@ -345,6 +345,10 @@ h1 { font-size: clamp(34px, 4vw, 48px); font-weight: 800; letter-spacing: -2px; 
   .wave { height: 90px; opacity: 0.05; }
   .cal-days { gap: 3px; }
   .cal-cday { width: 18px; height: 18px; }
+  /* 手机端 3D 工具栏：允许换行，避免按钮/“放大”块被横向裁掉 */
+  .model-toolbar-row { flex-wrap: wrap; }
+  .mbtn { white-space: normal; }
+  .model-expand-btn { min-width: 44px; }
 }
 
 </style>
@@ -603,9 +607,11 @@ function createViewer(container, w, h, url, isOverlay) {
 
   var renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(w, h);
-  // 1.5 上限：高分屏 2.25x 采样（原 2 = 4x），GPU 负载降 ~44%，画质差别极小——预览大模型时帧率更稳
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  // 2 倍像素比上限：兼顾手机高分屏清晰度与性能（不再像 1.5 那样容易显糊）
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  // 关闭电影级色调映射，尽量保留 GLB 贴图原始颜色，避免颜色被压暗/变灰
+  renderer.toneMapping = THREE.NoToneMapping;
   renderer.toneMappingExposure = 1.0;
 
   var OC = window.OrbitControls || THREE.OrbitControls;
@@ -631,7 +637,8 @@ function createViewer(container, w, h, url, isOverlay) {
 
   var modelObj = null;
   var originalMaterials = [];
-  var wireframeVisible = false;
+  var textureVisible = true;
+  var solidVisible = true;
   var xrayMode = false;
 
   function saveMaterials() {
@@ -645,27 +652,36 @@ function createViewer(container, w, h, url, isOverlay) {
     });
   }
 
-  function rebuildWireframe() {
-    markDirty();
-    if (!modelObj) return;
-    modelObj.traverse(function(c) {
-      if (!c.isMesh) return;
-      var toRemove = [];
-      c.children.forEach(function(child) {
-        if (child.userData._wireframeEdge) toRemove.push(child);
-      });
-      toRemove.forEach(function(child) { c.remove(child); });
-    });
-    if (!wireframeVisible) return;
-    modelObj.traverse(function(c) {
-      if (!c.isMesh) return;
-      try {
-        var edges = new THREE.WireframeGeometry(c.geometry);
-        var lines = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x89b4fa, opacity: 0.7, transparent: true }));
-        lines.userData._wireframeEdge = true;
-        c.add(lines);
-      } catch(e) {}
-    });
+  function buildDisplayMaterial(info, useTexture, useSolid) {
+    var saved = Array.isArray(info.saved) && info.saved.length > 0 ? info.saved : [info.saved];
+    var src = saved[0] || info.saved;
+    // 默认强制双面显示，不剔除背面
+    if (useTexture && useSolid) {
+      // 贴图 + 实体：保留原材质（含贴图、高光阴影），但强制双面
+      var m = src.clone();
+      m.side = THREE.DoubleSide;
+      return m;
+    }
+    if (useTexture && !useSolid) {
+      // 仅贴图：无光照，直接用贴图颜色
+      var texMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+      if (src.map) texMat.map = src.map;
+      if (src.alphaMap) texMat.alphaMap = src.alphaMap;
+      if (src.alphaTest !== undefined) texMat.alphaTest = src.alphaTest;
+      texMat.transparent = src.transparent || false;
+      texMat.side = THREE.DoubleSide;
+      return texMat;
+    }
+    if (!useTexture && useSolid) {
+      // 仅实体：灰模但有高光阴影
+      var stdMat = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.7, metalness: 0 });
+      stdMat.side = THREE.DoubleSide;
+      return stdMat;
+    }
+    // 都不开：纯灰无光照
+    var basicMat = new THREE.MeshBasicMaterial({ color: 0xcccccc });
+    basicMat.side = THREE.DoubleSide;
+    return basicMat;
   }
 
   function applyShading() {
@@ -675,16 +691,15 @@ function createViewer(container, w, h, url, isOverlay) {
       if (!c.isMesh) return;
       var info = originalMaterials.find(function(o) { return o.mesh === c; });
       if (!info) return;
-      if (xrayMode) {
-        var base = Array.isArray(info.saved) && info.saved.length === 1 ? info.saved[0] : info.saved[0];
-        var xmat = base.clone();
-        xmat.transparent = true;
-        xmat.opacity = 0.35;
-        xmat.wireframe = false;
-        xmat.depthWrite = false;
-        c.material = xmat;
+      var saved = Array.isArray(info.saved) && info.saved.length > 0 ? info.saved : [info.saved];
+      var newMats = saved.map(function() { return buildDisplayMaterial(info, textureVisible, solidVisible); });
+      c.material = Array.isArray(c.material) ? newMats : newMats[0];
+      if (c.material) c.material.side = THREE.DoubleSide;
+      if (xrayMode && c.material) {
+        c.material.transparent = true;
+        c.material.opacity = 0.35;
+        c.material.depthWrite = false;
       } else {
-        c.material = Array.isArray(info.saved) && info.saved.length === 1 ? info.saved[0] : info.saved;
         c.material.transparent = false;
         c.material.opacity = 1.0;
         c.material.depthWrite = true;
@@ -887,55 +902,29 @@ function createViewer(container, w, h, url, isOverlay) {
     var row2 = document.createElement('div');
     row2.className = 'model-toolbar-row';
 
-    var shadeModes = ['material', 'flat', 'normal'];
-    var shadeLabels = { material: '贴图', flat: '灰模', normal: '平滑' };
-    var currentShading = 'material';
-    shadeModes.forEach(function(m) {
-      var b = btn(shadeLabels[m], 'mbtn' + (currentShading===m?' active':''), function() {
-        currentShading = m;
-        if (modelObj) {
-          modelObj.traverse(function(c) {
-            if (!c.isMesh) return;
-            var info = originalMaterials.find(function(o) { return o.mesh === c; });
-            if (!info) return;
-            if (m === 'material') {
-              c.material = Array.isArray(info.saved) && info.saved.length === 1 ? info.saved[0] : info.saved;
-              c.material.flatShading = false;
-              c.material.needsUpdate = true;
-            } else if (m === 'flat') {
-              c.material = new THREE.MeshStandardMaterial({ color: 0xcccccc, roughness: 0.7, metalness: 0 });
-            } else if (m === 'normal') {
-              c.material = new THREE.MeshNormalMaterial();
-            }
-            if (xrayMode && c.material) {
-              c.material.transparent = true;
-              c.material.opacity = 0.35;
-              c.material.depthWrite = false;
-            }
-          });
-        }
-        tb.querySelectorAll('.shade-btn').forEach(function(x) { x.classList.remove('active'); });
-        b.classList.add('active');
-        markDirty();
-      });
-      b.classList.add('shade-btn');
-      if (currentShading === m) b.classList.add('active');
-      row1.appendChild(b);
+    var textureBtn = btn('贴图', 'mbtn active', function() {
+      textureVisible = !textureVisible;
+      applyShading();
+      if (textureVisible) textureBtn.classList.add('active'); else textureBtn.classList.remove('active');
     });
+    textureBtn.classList.add('shade-btn');
+    row1.appendChild(textureBtn);
 
-    var wireBtn = btn('线框', 'mbtn', function() {
-      wireframeVisible = !wireframeVisible;
-      rebuildWireframe();
-      if (wireframeVisible) wireBtn.classList.add('active'); else wireBtn.classList.remove('active');
+    var solidBtn = btn('实体', 'mbtn active', function() {
+      solidVisible = !solidVisible;
+      applyShading();
+      if (solidVisible) solidBtn.classList.add('active'); else solidBtn.classList.remove('active');
     });
-    row2.appendChild(wireBtn);
+    solidBtn.classList.add('shade-btn');
+    row1.appendChild(solidBtn);
 
-    var xrayBtn = btn('透视', 'mbtn', function() {
+    var xrayBtn = btn('X光', 'mbtn', function() {
       xrayMode = !xrayMode;
       applyShading();
       if (xrayMode) xrayBtn.classList.add('active'); else xrayBtn.classList.remove('active');
     });
-    row2.appendChild(xrayBtn);
+    xrayBtn.classList.add('shade-btn');
+    row1.appendChild(xrayBtn);
 
     var gridBtn = btn('网格', 'mbtn active', function() {
       grid.visible = !grid.visible;

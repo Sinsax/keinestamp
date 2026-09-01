@@ -111,17 +111,21 @@ for obj in bpy.data.objects:
         md.decimate_type = 'COLLAPSE'
         md.ratio = max(TARGET_VERTS / vcount, 0.05)
 
-# 3) 贴图限尺寸（1024，保持比例）：内存操作，不写回文件
-TEX_SIZE = 1024
-for img in bpy.data.images:
-    if img.users > 0 and max(img.size) > TEX_SIZE:
-        s = TEX_SIZE / max(img.size)
-        img.scale(max(1, int(img.size[0] * s)), max(1, int(img.size[1] * s)))
+# 3) 贴图保持原始尺寸，不缩放（WebP 仍会编码，但分辨率不再降低）
+# 4) 透明贴图：若材质使用了带 alpha 的图像，设为 BLEND 混合，保证 GLB 网页预览正确显示透明
+for mat in bpy.data.materials:
+    if mat is None or not mat.use_nodes or mat.node_tree is None:
+        continue
+    for node in mat.node_tree.nodes:
+        if node.type == 'TEX_IMAGE' and node.image and node.image.use_alpha:
+            mat.blend_method = 'BLEND'
+            break
 
 bpy.ops.export_scene.gltf(
     filepath=output_path,
     export_format='GLB',
     export_image_format='WEBP',
+    export_image_quality=95,
     use_selection=False,
     use_visible=True,
     use_renderable=False,
