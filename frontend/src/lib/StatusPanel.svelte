@@ -21,6 +21,10 @@
     onSelectionChange = (_sel: string[] | null) => {},
     onDiscardChanges = (_file: string, _state: 'M' | 'D') => {},
     onTogglePreviewMark = (_path: string) => {},
+    sidebarCollapsed = false,
+    onToggleSidebar = () => {},
+    displayPath = '',
+    onOpenFolder = (_p: string) => {},
   }: {
     statusOutput: string
     onRefresh: () => void
@@ -37,6 +41,10 @@
     onSelectionChange?: (sel: string[] | null) => void
     onDiscardChanges?: (file: string, state: 'M' | 'D') => void
     onTogglePreviewMark?: (path: string) => void
+    sidebarCollapsed?: boolean
+    onToggleSidebar?: () => void
+    displayPath?: string
+    onOpenFolder?: (path: string) => void
   } = $props()
 
   const HIDDEN_PREFIXES = ['.gitignore', '.gitattributes', '.keinestamp']
@@ -508,6 +516,23 @@
 
 <div class="status-panel">
   <div class="sp-header">
+    <button class="sp-icon-btn" onclick={onToggleSidebar} title={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}>
+      {#if sidebarCollapsed}
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
+      {:else}
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M3 6l5 5 5-5H3z"/></svg>
+      {/if}
+    </button>
+    {#if displayPath}
+      <span class="sp-crumb" title={displayPath}>{displayPath}</span>
+      <button class="sp-icon-btn" onclick={() => onOpenFolder(activePath)} title="在文件管理器中打开">
+        <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
+          <path d="M1.5 2.5a1 1 0 0 1 1-1h3.672a1 1 0 0 1 .707.293l.828.828A1 1 0 0 0 8.414 3H13.5a1 1 0 0 1 1 1v1.5H1.5V2.5Z"/>
+          <path d="M1.5 6h13l-1.41 5.44a1 1 0 0 1-.97.81H3.88a1 1 0 0 1-.97-.81L1.5 6Z"/>
+        </svg>
+      </button>
+      <span class="sp-divider"></span>
+    {/if}
     <span class="sp-title">变更</span>
     <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件{#if ignoredVisibleCount > 0} · {ignoredVisibleCount} 已忽略{/if}</span>
     <div class="sp-spacer"></div>
@@ -517,8 +542,8 @@
     {#if selectedCount > 0}
       <button class="sp-select-all" onclick={selectNone} title="全部取消">全不选</button>
     {/if}
-    <button class="sp-refresh" onclick={onRefresh} title="刷新状态">
-      <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 3a5 5 0 014.546 2.916.5.5 0 01-.908.417A4 4 0 108 11.5a4.002 4.002 0 003.392-1.87.5.5 0 11.854.52A5 5 0 113 8a5 5 0 015-5z"/><path d="M11.5 3.5A.5.5 0 0112 4v2.5a.5.5 0 01-.5.5H9a.5.5 0 010-1h1.802A4.003 4.003 0 004 8a.5.5 0 01-1 0 5 5 0 015-5 .5.5 0 01.5.5z"/></svg>
+    <button class="sp-refresh sp-icon-btn" onclick={onRefresh} title="刷新状态">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 3a5 5 0 014.546 2.916.5.5 0 01-.908.417A4 4 0 108 11.5a4.002 4.002 0 003.392-1.87.5.5 0 11.854.52A5 5 0 113 8a5 5 0 015-5z"/><path d="M11.5 3.5A.5.5 0 0112 4v2.5a.5.5 0 01-.5.5H9a.5.5 0 010-1h1.802A4.003 4.003 0 004 8a.5.5 0 01-1 0 5 5 0 015-5 .5.5 0 01.5.5z"/></svg>
     </button>
   </div>
 
@@ -645,9 +670,41 @@
   .sp-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     padding: 6px 10px;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    min-height: 34px;
+  }
+  .sp-icon-btn {
+    background: none;
+    border: none;
+    padding: 3px 5px;
+    cursor: pointer;
+    color: var(--text-dim);
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.12s, color 0.12s;
+  }
+  .sp-icon-btn:hover {
+    background: var(--surface2);
+    color: var(--accent);
+  }
+  .sp-crumb {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+    color: var(--text-dim);
+    max-width: 40%;
+  }
+  .sp-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
     flex-shrink: 0;
   }
   .sp-title {
@@ -689,8 +746,7 @@
     align-items: center;
     transition: background 0.12s, color 0.12s;
   }
-  .sp-refresh:hover { background: var(--surface2); color: var(--accent); }
-  .sp-empty {
+  .sp-refresh:hover { background: var(--surface2); color: var(--accent); }  .sp-empty {
     display: flex;
     flex-direction: column;
     align-items: center;

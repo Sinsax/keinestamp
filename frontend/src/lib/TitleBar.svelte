@@ -55,10 +55,9 @@
   .titlebar {
     display: flex;
     align-items: center;
-    height: 32px;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
-    padding: 0 10px;
+    height: 34px;
+    background: transparent;
+    padding: 0 12px;
     flex-shrink: 0;
     -webkit-app-region: drag;
     user-select: none;

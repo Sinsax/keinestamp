@@ -67,7 +67,9 @@
     height: var(--action-h);
     padding: 0 8px;
     background: var(--surface);
-    border-top: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-panel);
   }
   .action-bar button {
     display: flex;
@@ -77,17 +79,17 @@
     gap: 0;
     font-size: 11px;
     padding: 2px 14px;
-    border-radius: var(--radius);
+    border-radius: var(--radius-sm);
     cursor: pointer;
     background: transparent;
-    border: 1px solid var(--border-strong);
+    border: 1px solid transparent;
     color: var(--text);
     transition: background 0.12s var(--ease), border-color 0.12s var(--ease),
       color 0.12s var(--ease), box-shadow 0.12s var(--ease);
   }
   .action-bar button:hover:not(:disabled) {
     background: var(--surface2);
-    border-color: var(--border-strong);
+    border-color: transparent;
   }
   .action-bar button:disabled {
     opacity: 0.35;
@@ -107,9 +109,17 @@
     text-transform: uppercase;
   }
   .record-btn {
+    flex-direction: row;
+    gap: 6px;
+    padding: 4px 18px;
+    border-radius: 999px;
     background: var(--accent) !important;
     border-color: var(--accent) !important;
     color: #fff !important;
+    box-shadow: var(--accent-shadow);
+  }
+  .record-btn .ab-label {
+    font-size: 12.5px;
   }
   .record-btn .ab-hint {
     color: rgba(255, 255, 255, 0.72);
@@ -117,22 +127,18 @@
   .record-btn:hover:not(:disabled) {
     background: var(--accent-hover) !important;
     border-color: var(--accent-hover) !important;
-    box-shadow: var(--accent-shadow);
   }
   .deploy-btn {
-    border-color: color-mix(in srgb, var(--success) 45%, var(--border-strong)) !important;
     color: var(--success) !important;
     background: transparent !important;
   }
   .backup-btn {
-    border-color: color-mix(in srgb, var(--tint) 45%, var(--border-strong)) !important;
     color: var(--tint) !important;
     background: transparent !important;
-    margin-right: 10px; /* 与部署保持间隔（同属服务器功能） */
+    margin-right: 8px; /* 与部署保持间隔（同属服务器功能） */
   }
   .backup-btn:hover:not(:disabled) {
     background: var(--tint-soft) !important;
-    border-color: var(--tint) !important;
     color: var(--tint) !important;
   }
   .backup-btn .ab-hint {
@@ -141,7 +147,6 @@
   }
   .deploy-btn:hover:not(:disabled) {
     background: var(--success-soft) !important;
-    border-color: var(--success) !important;
     color: var(--success) !important;
   }
   .deploy-btn .ab-hint {
@@ -149,7 +154,6 @@
     opacity: 0.75;
   }
   .deploy-btn.ahead {
-    border-color: color-mix(in srgb, var(--error) 50%, var(--border-strong)) !important;
     color: var(--error) !important;
   }
   .deploy-btn.ahead .ab-hint {
@@ -158,16 +162,13 @@
   }
   .deploy-btn.ahead:hover:not(:disabled) {
     background: color-mix(in srgb, var(--error) 9%, transparent) !important;
-    border-color: var(--error) !important;
     color: var(--error) !important;
   }
   .spacer { flex: 1; }
   .restore-btn.enabled {
-    border-color: var(--accent) !important;
     color: var(--accent) !important;
   }
   .restore-btn.enabled:hover:not(:disabled) {
     background: var(--accent-soft) !important;
-    border-color: var(--accent) !important;
   }
 </style>

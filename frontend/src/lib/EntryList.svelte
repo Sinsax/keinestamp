@@ -321,16 +321,20 @@
 </script>
 
 <div class="entries">
+  <div class="entries-toolbar">
+    <span class="tl-title">时间线</span>
+    <input type="search" placeholder="搜索记录 / 标签 / 文件..." bind:value={searchText} />
+    <select bind:value={filterCategory} title="按流程筛选">
+      <option value="">全部流程</option>
+      <option value="modeling">建模流程</option>
+      <option value="painting">绘画流程</option>
+      <option value="video">视频流程</option>
+    </select>
+    <button class="tl-local-btn" onclick={onOpenLocalView} title="在浏览器中打开本地时间线页面">
+      <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 1.8 2.7 3.8 2.7 6S9.8 12.2 8 14M8 2c-1.8 1.8-2.7 3.8-2.7 6s.9 4.2 2.7 6"/></svg>
+    </button>
+  </div>
   <div class="entries-scroll">
-    <div class="entries-toolbar">
-      <input type="search" placeholder="搜索记录 / 标签 / 文件..." bind:value={searchText} />
-      <select bind:value={filterCategory}>
-        <option value="">全部流程</option>
-        <option value="modeling">建模流程</option>
-        <option value="painting">绘画流程</option>
-        <option value="video">视频流程</option>
-      </select>
-    </div>
     {#if filteredEntries.length === 0}
       <div class="empty-state">
         <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>
@@ -357,6 +361,18 @@
         </div>
       {/if}
       {#if !entry.superseded || supersededOpen}
+      <div class="tl-row">
+        <div class="tl-rail" aria-hidden="true">
+          <span class="tl-line"></span>
+          <span
+            class="tl-node"
+            class:ms={!!entry.milestone}
+            class:superseded={entry.superseded}
+            class:dim={isEntryDimmed(entry)}
+            class:sel={entry.id === selectedId}
+            style={entryTag && !entry.milestone ? `background:${tagColor(entryTag)}` : ''}
+          ></span>
+        </div>
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
       <div
         class="entry-card"
@@ -485,6 +501,7 @@
             </div>
           {/if}
         {/if}
+      </div>
       </div>
       {/if}
     {/each}
@@ -626,9 +643,36 @@
     padding: 6px 8px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
-    position: sticky;
-    top: 0;
-    z-index: 5;
+    flex-shrink: 0;
+    min-height: 34px;
+  }
+  .tl-title {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .tl-local-btn {
+    flex-shrink: 0;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+  }
+  .tl-local-btn:hover {
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .entries-toolbar input,
   .entries-toolbar select {
@@ -642,9 +686,9 @@
     width: auto;
   }
   .entries-toolbar select {
-    flex: 0 0 auto;
+    flex: 0 1 auto;
     min-width: 0;
-    max-width: 45%;
+    max-width: 40%;
     width: auto;
   }
   .compare-overlay {
@@ -714,8 +758,82 @@
     align-items: center;
     gap: 4px;
   }
-  .entry-card {
+  /* 竖轨时间线：脊线 + 节点 + 无边框条目行 */
+  .entries-scroll { padding: 4px 10px 12px; }
+  .tl-row {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+  }
+  .tl-rail {
+    width: 15px;
+    flex-shrink: 0;
     position: relative;
+    display: flex;
+    justify-content: center;
+  }
+  .tl-line {
+    position: absolute;
+    top: -6px;
+    bottom: -6px;
+    left: 50%;
+    width: 2px;
+    margin-left: -1px;
+    background: var(--border);
+    border-radius: 1px;
+  }
+  .tl-node {
+    position: relative;
+    z-index: 1;
+    width: 9px;
+    height: 9px;
+    margin-top: 16px;
+    border-radius: 50%;
+    background: var(--surface3);
+    box-shadow: 0 0 0 3px var(--surface);
+    transition: background 0.12s;
+  }
+  .tl-node.sel { background: var(--tint); }
+  .tl-node.ms { background: var(--accent); }
+  .tl-node.superseded { background: var(--border-strong); }
+  .tl-node.dim { opacity: 0.45; }
+  .entries .entry-card {
+    flex: 1;
+    min-width: 0;
+    position: relative;
+    border: 1px solid transparent;
+    border-radius: var(--radius);
+    background: transparent;
+    box-shadow: none;
+    padding: 7px 10px;
+    margin-bottom: 2px;
+    /* 列表出现动画：轻 fadeUp + 逐条 stagger（--card-delay） */
+    animation: card-in 0.24s var(--ease) both;
+    animation-delay: var(--card-delay, 0ms);
+  }
+  @keyframes card-in {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .entries .entry-card { animation: none; }
+  }
+  .entry-card .top {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 2px;
+  }
+  .entry-card .hash { font-size: 10.5px; color: var(--text-dim); font-family: var(--mono); }
+  .entry-card .date { font-size: 10.5px; color: var(--text-dim); }
+  .entry-card .msg { font-size: 12.5px; font-weight: 550; margin-bottom: 2px; }
+  .entries .entry-card:hover {
+    background: var(--surface2);
+    border-color: transparent;
+    box-shadow: none;
+  }
+  .entries .entry-card.active {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    box-shadow: none;
   }
   .ms-badge {
     position: absolute;
@@ -807,13 +925,13 @@
     align-items: center;
     gap: 6px;
     padding: 4px 9px;
-    margin: 3px 0;
+    margin: 3px 0 3px 23px;
     font-size: 11px;
     font-weight: 600;
     color: var(--text-dim);
     background: transparent;
     border: 1px dashed var(--border-strong);
-    border-radius: var(--radius-sm);
+    border-radius: 999px;
     cursor: pointer;
     user-select: none;
     transition: color 0.12s, border-color 0.12s;
@@ -825,30 +943,29 @@
   .superseded-header .arr {
     font-size: 9px;
   }
-  .entry-card.milestone {
-    background: color-mix(in srgb, var(--accent) 6%, var(--surface));
-    border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
-    border-left: 2px solid var(--accent);
+  .entries .entry-card.milestone {
+    background: color-mix(in srgb, var(--accent) 5%, transparent);
+    border-color: color-mix(in srgb, var(--accent) 24%, transparent);
   }
-  .entry-card.milestone:hover {
-    border-color: var(--accent);
+  .entries .entry-card.milestone:hover {
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent);
   }
-  .entry-card.milestone.active {
-    border-color: var(--accent);
+  .entries .entry-card.milestone.active {
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .entry-card.milestone .msg {
     font-weight: 650;
   }
-  /* 被顶替记录（superseded）：整卡变灰（置于 milestone 之后，覆盖其底色；与 dimmed 叠加自然） */
-  .entry-card.superseded {
+  /* 被顶替记录（superseded）：整行灰显（与 dimmed 叠加自然） */
+  .entries .entry-card.superseded {
     background: transparent;
-    border-color: var(--border);
-    border-left: 2px solid var(--border-strong);
+    border-color: transparent;
     color: var(--text-dim);
     box-shadow: none;
   }
-  .entry-card.superseded:hover {
-    border-color: var(--text-dim);
+  .entries .entry-card.superseded:hover {
+    background: var(--surface2);
+    border-color: transparent;
   }
   .entry-card.superseded .hash,
   .entry-card.superseded .date {
@@ -943,8 +1060,8 @@
     background: var(--accent-soft);
     color: var(--accent);
   }
-  .tag-group { display: flex; align-items: center; gap: 7px; margin: 10px 0 5px; }
-  .tag-group-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2.5px var(--bg); }
+  .tag-group { display: flex; align-items: center; gap: 7px; margin: 10px 0 5px; margin-left: 23px; }
+  .tag-group-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; box-shadow: 0 0 0 2.5px var(--surface); }
   .tag-group-label { font-size: 11px; font-weight: 700; letter-spacing: 0.2px; }
   .tag-group-line { flex: 1; height: 1px; background: var(--border); }
   .tag-badge {

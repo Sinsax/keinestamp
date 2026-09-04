@@ -207,21 +207,22 @@
     display: flex;
     align-items: center;
     gap: 4px;
-    padding: 0 8px;
-    background: var(--bg);
-    border-bottom: 1px solid var(--border);
-    min-height: 34px;
+    padding: 0 14px 6px;
+    background: transparent;
+    min-height: 36px;
+    flex-shrink: 0;
   }
   .tabs-scroll {
     flex: 1;
     min-width: 0;
     display: flex;
-    align-items: stretch;
-    gap: 1px;
+    align-items: center;
+    gap: 5px;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: thin;
     scrollbar-color: transparent transparent;
+    padding: 3px 0;
   }
   .project-tabs:hover .tabs-scroll {
     scrollbar-color: var(--surface3) transparent;
@@ -242,10 +243,10 @@
   .tabs-actions {
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 3px;
     flex-shrink: 0;
-    margin-left: 6px;
-    padding-left: 6px;
+    margin-left: 4px;
+    padding-left: 8px;
     border-left: 1px solid var(--border);
   }
   .project-tab {
@@ -253,19 +254,19 @@
     align-items: center;
     gap: 5px;
     width: 136px;
-    padding: 6px 11px;
+    padding: 4px 12px;
     font-size: 11px;
     background: transparent;
-    border: none;
-    border-radius: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
     position: relative;
     cursor: pointer;
     color: var(--text-dim);
     white-space: nowrap;
-    transition: background 0.12s var(--ease), color 0.12s var(--ease);
+    transition: background 0.12s var(--ease), color 0.12s var(--ease), border-color 0.12s var(--ease), box-shadow 0.12s var(--ease);
   }
   .project-tab:hover {
-    background: var(--surface2);
+    background: color-mix(in srgb, var(--text-dim) 9%, transparent);
     color: var(--text);
   }
   .project-tab.dragging {
@@ -276,8 +277,8 @@
     z-index: 200;
     background: var(--surface);
     border: 1px solid var(--accent);
-    border-radius: var(--radius-sm);
-    padding: 4px 11px;
+    border-radius: 999px;
+    padding: 4px 12px;
     font-size: 11px;
     color: var(--accent);
     box-shadow: var(--shadow-md);
@@ -289,16 +290,10 @@
   }
   .project-tab.active {
     background: var(--surface);
+    border-color: var(--border);
+    box-shadow: var(--shadow-sm);
     color: var(--text);
-  }
-  .project-tab.active::after {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: -1px;
-    height: 2px;
-    background: var(--accent);
+    font-weight: 600;
   }
   .tab-name {
     flex: 1;
@@ -333,32 +328,35 @@
     right: 0;
     margin-left: auto;
     width: auto;
-    padding: 6px 8px;
-    background: var(--bg);
+    padding: 4px 9px;
+    background: transparent;
+    border: 1px dashed var(--border-strong);
     color: var(--text-dim);
     flex-shrink: 0;
     align-self: center;
-    border-radius: var(--radius-sm);
+    border-radius: 999px;
     z-index: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
   .add-tab:hover {
-    background: var(--surface2);
+    background: var(--accent-soft);
+    border-color: var(--accent);
     color: var(--accent);
   }
   .settings-tab, .theme-tab {
     width: auto;
-    padding: 5px 8px;
+    padding: 4px 8px;
     background: transparent;
+    border-color: transparent;
     color: var(--text-dim);
     flex-shrink: 0;
     align-self: center;
-    border-radius: var(--radius-sm);
+    border-radius: 999px;
   }
   .settings-tab:hover, .theme-tab:hover {
-    background: var(--surface2);
+    background: color-mix(in srgb, var(--text-dim) 9%, transparent);
     color: var(--text);
   }
 </style>

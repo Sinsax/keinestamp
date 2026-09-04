@@ -25,7 +25,8 @@
     height: var(--status-h);
     padding: 0 10px;
     background: var(--surface);
-    border-top: 1px solid var(--border);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
     font-size: 10.5px;
     color: var(--text-dim);
   }

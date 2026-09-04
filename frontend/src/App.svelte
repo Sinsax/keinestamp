@@ -991,31 +991,6 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     />
 
     <div class="main-area">
-      <div class="toolbar">
-        <button
-          class="toolbar-icon"
-          onclick={() => sidebarCollapsed = !sidebarCollapsed}
-          title={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}
-        >
-          {#if sidebarCollapsed}
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
-          {:else}
-            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M3 6l5 5 5-5H3z"/></svg>
-          {/if}
-        </button>
-        {#if activePath}
-          <span class="toolbar-path">
-            <span class="path-text" title={cleanPath(activePath)}>{cleanPath(activePath)}</span>
-            <button class="path-folder" onclick={() => { try { openFolder(activePath) } catch { /* ignore */ } }} title="Open in file manager">
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor">
-                <path d="M1.5 2.5a1 1 0 0 1 1-1h3.672a1 1 0 0 1 .707.293l.828.828A1 1 0 0 0 8.414 3H13.5a1 1 0 0 1 1 1v1.5H1.5V2.5Z"/>
-                <path d="M1.5 6h13l-1.41 5.44a1 1 0 0 1-.97.81H3.88a1 1 0 0 1-.97-.81L1.5 6Z"/>
-              </svg>
-            </button>
-          </span>
-        {/if}
-      </div>
-
       {#if rollbackState.rollback_point}
         <div class="rollback-banner">
           <span>⚠️ 当前处于回退状态，提交将顶替时间线结构</span>
@@ -1038,7 +1013,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
               <div style="font-size:12px">请重新打开文件夹进行初始化</div>
             </div>
           {:else}
-            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} onDiscardChanges={handleDiscardChanges} {previewMarked} onTogglePreviewMark={togglePreviewMark} />
+            <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} onDiscardChanges={handleDiscardChanges} {previewMarked} onTogglePreviewMark={togglePreviewMark} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => sidebarCollapsed = !sidebarCollapsed} displayPath={activePath ? cleanPath(activePath) : ''} onOpenFolder={(p) => { try { openFolder(p) } catch { /* ignore */ } }} />
           {/if}
         </div>
 
@@ -1046,12 +1021,6 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="tl-resize" onpointerdown={startTimelineDrag} onclick={(e) => e.stopPropagation()}></div>
           <div class="timeline-panel" style="width: {timelineWidth}px">
-            <div class="tl-header">
-              <span class="tl-title">时间线</span>
-              <button class="tl-local-btn" onclick={handleLocalView} title="在浏览器中打开本地时间线页面">
-                本地查看
-              </button>
-            </div>
             <EntryList
               entries={entries}
               selectedId={selectedEntryId}
@@ -1242,9 +1211,11 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     gap: 12px;
     padding: 5px 12px;
     background: color-mix(in srgb, var(--warning) 10%, var(--surface));
-    border-bottom: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
+    border-radius: var(--radius);
     color: var(--text);
     font-size: 12px;
+    flex-shrink: 0;
   }
   .rollback-banner button {
     flex-shrink: 0;
@@ -1266,111 +1237,41 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     display: flex;
     flex: 1;
     overflow: hidden;
+    min-height: 0;
   }
+  /* 浮动软面板：中央变更区 */
   .content-area {
     flex: 1;
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--panel-radius);
+    box-shadow: var(--shadow-panel);
   }
   .timeline-panel {
-    border-left: 1px solid var(--border);
-    background: var(--bg);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--panel-radius);
+    box-shadow: var(--shadow-panel);
     overflow: hidden;
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
     transition: none;
   }
-  .tl-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 5px 10px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-  .tl-title {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    color: var(--text-dim);
-  }
-  .tl-local-btn {
-    font-size: 11px;
-    padding: 1px 9px;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    border: 1px solid var(--border-strong);
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: background 0.12s, color 0.12s, border-color 0.12s;
-  }
-  .tl-local-btn:hover {
-    background: var(--accent-soft);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .toolbar-icon {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    padding: 3px 5px;
-    border-radius: var(--radius-sm);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    transition: background 0.12s, color 0.12s;
-  }
-  .toolbar-icon:hover {
-    background: var(--surface2);
-    color: var(--accent);
-  }
   .tl-resize {
-    width: 5px;
+    width: 9px;
     cursor: col-resize;
     flex-shrink: 0;
     background: transparent;
+    border-radius: 5px;
     transition: background 0.15s var(--ease);
     z-index: 1;
   }
   .tl-resize:hover {
-    background: var(--accent-soft);
-  }
-  .toolbar-path {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-left: 6px;
-    flex: 1;
-    overflow: hidden;
-    font-size: 11.5px;
-    color: var(--text-dim);
-  }
-  .path-text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .path-folder {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 2px 4px;
-    line-height: 1;
-    border-radius: 4px;
-    flex-shrink: 0;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .path-folder:hover {
-    color: var(--accent);
     background: var(--accent-soft);
   }
 </style>
