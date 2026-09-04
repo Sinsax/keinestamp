@@ -993,7 +993,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     <div class="main-area">
       {#if rollbackState.rollback_point}
         <div class="rollback-banner">
-          <span>⚠️ 当前处于回退状态，提交将顶替时间线结构</span>
+          <span class="rb-label">
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.3 14.4 13.3H1.6L8 2.3z"/><path d="M8 6.6v2.8"/><circle cx="8" cy="11.6" r="0.75" fill="currentColor" stroke="none"/></svg>
+            当前处于回退状态，提交将顶替时间线结构
+          </span>
           <button onclick={handleRestore} disabled={rollbackBusy}>恢复</button>
         </div>
       {/if}
@@ -1216,6 +1219,15 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     color: var(--text);
     font-size: 12px;
     flex-shrink: 0;
+  }
+  .rb-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--warning);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .rollback-banner button {
     flex-shrink: 0;

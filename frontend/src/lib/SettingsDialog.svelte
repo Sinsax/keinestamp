@@ -264,6 +264,13 @@
   }
 </script>
 
+{#snippet iconOk()}
+  <svg class="st-icon ok" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4" /><path d="M5.3 8.2l1.9 1.9 3.5-3.9" /></svg>
+{/snippet}
+{#snippet iconFail()}
+  <svg class="st-icon fail" viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.4" /><path d="M5.6 5.6l4.8 4.8M10.4 5.6l-4.8 4.8" /></svg>
+{/snippet}
+
 <div class="dialog-overlay" onclick={onClose} role="presentation">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog settings-panel" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
@@ -336,10 +343,10 @@
       <div class="section-title">服务器</div>
       <div class="svc-toggle-row">
         <button class="svc-toggle" class:on={deployEnabled} onclick={() => (deployEnabled = !deployEnabled)} title="开启/关闭网页部署服务">
-          {deployEnabled ? '●' : '○'} 网页部署
+          <span class="svc-dot"></span>网页部署
         </button>
         <button class="svc-toggle" class:on={loreEnabled} onclick={() => (loreEnabled = !loreEnabled)} title="开启/关闭 loreserver 服务">
-          {loreEnabled ? '●' : '○'} loreserver
+          <span class="svc-dot"></span>loreserver
         </button>
       </div>
       <div class="conn-grid">
@@ -375,8 +382,8 @@
           </button>
           {#if connectStatus !== 'none' || loreStatus !== 'none'}
             <span class="conn-result">
-              网页部署 {connectStatus === 'ok' ? '✅' : connectStatus === 'fail' ? '❌' : '—'}
-              · lore {loreStatus === 'ok' ? '✅' : loreStatus === 'fail' ? '❌' : '—'}
+              网页部署 {#if connectStatus === 'ok'}{@render iconOk()}{:else if connectStatus === 'fail'}{@render iconFail()}{:else}—{/if}
+              · lore {#if loreStatus === 'ok'}{@render iconOk()}{:else if loreStatus === 'fail'}{@render iconFail()}{:else}—{/if}
             </span>
           {/if}
         </div>
@@ -548,6 +555,9 @@
 .test-row .connect-btn { flex-shrink: 0; }
 .svc-toggle-row { display: flex; gap: 6px; margin-bottom: 10px; }
 .svc-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 3px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
@@ -564,6 +574,18 @@
   color: #fff;
   font-weight: 600;
 }
+.svc-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+  flex-shrink: 0;
+  transition: background 0.12s;
+}
+.svc-toggle.on .svc-dot { background: #fff; }
+.st-icon { flex-shrink: 0; vertical-align: -2px; }
+.st-icon.ok { color: var(--success); }
+.st-icon.fail { color: var(--error); }
 .connect-btn { font-size: 11px; padding: 3px 12px; border-radius: var(--radius-sm); cursor: pointer; background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); white-space: nowrap; }
   .connect-btn:hover:not(:disabled) { background: var(--surface2); }
   .connect-btn:disabled { opacity: 0.4; cursor: default; }

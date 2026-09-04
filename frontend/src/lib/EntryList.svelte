@@ -404,7 +404,10 @@
               >{previewLabel(entry)}</span>
             {/if}
             {#if entry.preview_errors && entry.preview_errors.length > 0}
-              <span class="preview-error-badge" title={entry.preview_errors.join('\n')}>⚠ 预览失败</span>
+              <span class="preview-error-badge" title={entry.preview_errors.join('\n')}>
+                <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.3 14.4 13.3H1.6L8 2.3z"/><path d="M8 6.6v2.8"/><circle cx="8" cy="11.6" r="0.7" fill="currentColor" stroke="none"/></svg>
+                预览失败
+              </span>
             {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
           </span>

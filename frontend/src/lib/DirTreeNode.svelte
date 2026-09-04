@@ -2,6 +2,7 @@
   import DirTreeNode from './DirTreeNode.svelte'
   import type { FileTreeNode } from './fileTree'
   import { openFolder } from '../api'
+  import FileTypeIcon from './FileTypeIcon.svelte'
 
   let {
     node,
@@ -58,7 +59,7 @@
     </span>
   {:else}
     <span class="arr-placeholder"></span>
-    <span class="ico"><svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" opacity="0.5"><path d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V7a2 2 0 00-2-2h-5.586a1 1 0 01-.707-.293L9.293 3.293A1 1 0 008.586 3H4z"/></svg></span>
+    <span class="ico"><FileTypeIcon path={node.path} size={14} /></span>
   {/if}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <span class="nm" class:dir={isDir} onclick={(e) => { if (isDir) { e.stopPropagation(); toggle(node.path) } }} ondblclick={!isDir ? handleFileDblClick : undefined}>{node.name}</span>
