@@ -438,36 +438,9 @@ fn index_page_html() -> String {
             crate::three_assets::logo_green_favicon_b64(),
         )
         .replace("{site_name}", &site_name)
-        .replace("{projects}", &render_project_list())
 }
 
-fn render_project_list() -> String {
-    let Some(root) = WEB_ROOT.get() else {
-        return String::new();
-    };
-    let mut items = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(root) {
-        for entry in rd.flatten() {
-            let path = entry.path();
-            if path.is_dir() && path.join("index.html").exists() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                items.push(format!(
-                    r##"<a class="proj-item" href="/{}/">{}</a>"##,
-                    name, name
-                ));
-            }
-        }
-    }
-    if items.is_empty() {
-        return String::new();
-    }
-    format!(
-        "<div class=\"projects-panel\"><div class=\"proj-grid\">{}</div></div>",
-        items.join("")
-    )
-}
-
-const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
+const INDEX_HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
@@ -584,39 +557,87 @@ h1 {
   line-height: 1;
 }
 .hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; max-width: 36ch; }
-.projects-section {
-  max-width: 960px; margin: 0 auto; padding: 6px 24px 10px;
+/* ---- 彩蛋特效层 ---- */
+/* 记录印章：点击空白处落下「史」字朱印 */
+.fx-stamp {
+  position: fixed; z-index: 60; width: 46px; height: 46px;
+  margin: -23px 0 0 -23px;
+  display: flex; align-items: center; justify-content: center;
+  border: 2.5px solid var(--accent); border-radius: 50%;
+  color: var(--accent); font-weight: 800; font-size: 19px;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  pointer-events: none; opacity: 0;
+  animation: stamp-in 0.9s var(--ease) forwards;
 }
-.projects-panel {
+.fx-stamp::after {
+  content: ""; position: absolute; inset: 4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  border-radius: 50%;
+}
+@keyframes stamp-in {
+  0% { opacity: 0; transform: scale(1.7) rotate(var(--rot, 0deg)); }
+  22% { opacity: 0.92; transform: scale(1) rotate(var(--rot, 0deg)); }
+  70% { opacity: 0.5; }
+  100% { opacity: 0; transform: scale(0.94) rotate(var(--rot, 0deg)); }
+}
+/* 月爆环：点击月亮时的冲击波 */
+.moon-burst {
+  position: absolute; width: 60px; height: 60px;
+  left: 50%; top: 50%; margin: -30px 0 0 -30px;
+  border: 2px solid var(--accent); border-radius: 50%;
+  pointer-events: none; animation: burst 0.6s var(--ease) forwards;
+}
+@keyframes burst {
+  from { opacity: 0.8; transform: scale(0.4); }
+  to { opacity: 0; transform: scale(2.6); }
+}
+.ha-moon { will-change: transform; }
+.ha-moon:hover { animation: moon-wobble 1.6s ease-in-out infinite; }
+@keyframes moon-wobble {
+  0%, 100% { transform: rotate(-2.5deg); }
+  50% { transform: rotate(2.5deg); }
+}
+/* 历史吞噬：文字被抹去，只剩月亮注视 */
+.hero-text, .stage, .topbar, footer { transition: filter 0.6s var(--ease), opacity 0.6s var(--ease); }
+body.eat-history .hero-text,
+body.eat-history .stage,
+body.eat-history .topbar,
+body.eat-history footer {
+  filter: blur(7px); opacity: 0.12; pointer-events: none;
+}
+.eat-toast {
+  position: fixed; left: 50%; top: 50%; z-index: 70;
+  transform: translate(-50%, -50%);
+  font-size: 15px; font-weight: 700; letter-spacing: 14px; text-indent: 14px;
+  color: var(--accent); white-space: nowrap;
+  opacity: 0; transition: opacity 0.7s var(--ease) 0.3s;
+  pointer-events: none;
+}
+.eat-toast::before, .eat-toast::after {
+  content: ""; position: absolute; top: 50%; width: 64px; height: 1px;
+  background: color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.eat-toast::before { right: calc(100% + 18px); }
+.eat-toast::after { left: calc(100% + 18px); }
+body.eat-history .eat-toast { opacity: 1; }
+/* 白泽形态徽标 */
+.haku-badge {
+  position: fixed; top: 30px; right: 88px; z-index: 5;
+  font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 10px; letter-spacing: 6px; text-indent: 6px;
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  border-radius: 999px; padding: 3px 12px;
   background: var(--surface);
-  border: 1px solid var(--line);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-panel);
-  padding: 16px 18px;
+  opacity: 0; transform: translateY(-6px);
+  transition: opacity 0.4s var(--ease), transform 0.4s var(--ease);
+  pointer-events: none;
 }
-.projects-section h2 { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; margin: 0 0 10px; color: var(--text-dim); }
-.proj-grid { display: flex; flex-wrap: wrap; gap: 8px; }
-.proj-item {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 5px 14px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 550;
-  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), background 0.15s var(--ease);
+html[data-hakutaku] .haku-badge { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) {
+  .fx-stamp, .moon-burst { animation-duration: 0.01s; }
+  .ha-moon:hover { animation: none; }
 }
-.proj-item::before {
-  content: ""; width: 7px; height: 7px; border-radius: 50%;
-  background: var(--tint); opacity: 0.75; flex-shrink: 0;
-  transition: background 0.15s var(--ease);
-}
-.proj-item:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
-.proj-item:hover::before { background: var(--accent); }
 .hero-code {
   display: inline-block;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -872,10 +893,8 @@ html[data-moon="full"] .bm-logo {
   </div>
 </main>
 
-<div class="projects-section">
-  <h2>项目</h2>
-  {projects}
-</div>
+<div class="haku-badge" id="hakuBadge">白泽形态</div>
+<div class="eat-toast">历史已吞噬</div>
 
 <div class="stage">
   <div class="cf-geo">
@@ -960,6 +979,7 @@ html[data-moon="full"] .bm-logo {
     var day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
     var real = moonInfo(day);
     var overridePhase = null;
+    var hakutaku = false;
     var NAME_IDX = { '新月': 0, '蛾眉月': 1, '上弦月': 2, '盈凸月': 3, '满月': 4, '亏凸月': 5, '下弦月': 6, '残月': 7 };
     var realIdx = NAME_IDX[moonName(real.phase, real.illum)];
 
@@ -986,7 +1006,7 @@ html[data-moon="full"] .bm-logo {
       if (cfMark) {
         cfMark.style.left = (6 + (p % 1) * 208) + 'px';
       }
-      var full = overridePhase === 4 || (overridePhase === null && real.illum >= 0.95);
+      var full = hakutaku || overridePhase === 4 || (overridePhase === null && real.illum >= 0.95);
       if (full) {
         document.documentElement.dataset.moon = 'full';
         setGreenFavicon(true);
@@ -995,16 +1015,115 @@ html[data-moon="full"] .bm-logo {
         setGreenFavicon(false);
       }
     }
+    function spawnBurst() {
+      var moon = document.querySelector('.ha-moon');
+      if (!moon) return;
+      var b = document.createElement('div');
+      b.className = 'moon-burst';
+      moon.appendChild(b);
+      setTimeout(function () { b.remove(); }, 650);
+    }
     renderMoon();
+
+    // 月相转盘：点击拨动月相，走满一圈回到真实月相
     document.querySelector('.ha-moon').addEventListener('click', function () {
       if (overridePhase === null) overridePhase = realIdx;
       overridePhase = (overridePhase + 1) % 8;
+      spawnBurst();
       renderMoon();
+      if (overridePhase === realIdx && !hakutaku) {
+        setTimeout(function () {
+          if (overridePhase === realIdx && !hakutaku) { overridePhase = null; spawnBurst(); renderMoon(); }
+        }, 900);
+      }
     });
     document.getElementById('moonName').addEventListener('click', function () {
       overridePhase = null;
       renderMoon();
     });
+
+    // 历史吞噬（慧音的能力）：文字被抹去，只剩月亮
+    var eatTimer = null;
+    function eatHistory() {
+      document.body.classList.add('eat-history');
+      if (eatTimer) clearTimeout(eatTimer);
+      eatTimer = setTimeout(function () { document.body.classList.remove('eat-history'); }, 2600);
+    }
+
+    // 白泽形态：满月 + 绿色 + 徽标 + 一段被吞噬的历史
+    var baseTitle = document.title;
+    function toggleHakutaku() {
+      hakutaku = !hakutaku;
+      var root = document.documentElement;
+      if (hakutaku) {
+        overridePhase = 4;
+        root.dataset.hakutaku = '1';
+        document.title = baseTitle + ' · 白泽';
+        setTimeout(eatHistory, 700);
+      } else {
+        overridePhase = null;
+        delete root.dataset.hakutaku;
+        document.title = baseTitle;
+      }
+      renderMoon();
+    }
+
+    // 键入 keine 唤醒白泽；键入 history 吞噬历史
+    var buf = '';
+    document.addEventListener('keydown', function (ev) {
+      if (!ev.key || ev.key.length !== 1) return;
+      buf = (buf + ev.key.toLowerCase()).slice(-10);
+      if (buf.slice(-5) === 'keine') { buf = ''; toggleHakutaku(); }
+      else if (buf.slice(-7) === 'history') { buf = ''; eatHistory(); }
+    });
+
+    // 记录印章：点哪儿盖哪儿（Keinestamp 之本行）
+    var lastStamp = 0;
+    document.addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (t && t.closest && t.closest('a, button, input, code, .ha-moon')) return;
+      var ts = Date.now();
+      if (ts - lastStamp < 160) return;
+      lastStamp = ts;
+      var s = document.createElement('div');
+      s.className = 'fx-stamp';
+      s.textContent = '史';
+      s.style.left = ev.clientX + 'px';
+      s.style.top = ev.clientY + 'px';
+      s.style.setProperty('--rot', (Math.random() * 28 - 14).toFixed(1) + 'deg');
+      document.body.appendChild(s);
+      setTimeout(function () { s.remove(); }, 950);
+    });
+
+    // 视差：光晕与圆环随鼠标微微游移
+    var g1 = document.querySelector('.glow-tl');
+    var g2 = document.querySelector('.glow-br');
+    var ring = document.querySelector('.ha-ring');
+    var raf = null;
+    document.addEventListener('mousemove', function (ev) {
+      if (raf) return;
+      raf = requestAnimationFrame(function () {
+        raf = null;
+        var nx = ev.clientX / window.innerWidth - 0.5;
+        var ny = ev.clientY / window.innerHeight - 0.5;
+        if (g1) g1.style.transform = 'translate(' + (nx * 26).toFixed(1) + 'px,' + (ny * 26).toFixed(1) + 'px)';
+        if (g2) g2.style.transform = 'translate(' + (nx * -20).toFixed(1) + 'px,' + (ny * -20).toFixed(1) + 'px)';
+        if (ring) ring.style.transform = 'translate(' + (nx * 10).toFixed(1) + 'px,' + (ny * 10).toFixed(1) + 'px)';
+      });
+    });
+
+    // 待机漂移：无人操作时「当前」标记在时间轴上自己游走
+    setInterval(function () {
+      if (overridePhase !== null || hakutaku) return;
+      var cfMark = document.getElementById('cfMark');
+      if (cfMark) cfMark.style.left = (4 + Math.random() * 210).toFixed(1) + 'px';
+    }, 4200);
+
+    // 给开控制台的人留的话
+    try {
+      console.log('%cKeinestamp · 秘藏历史在此', 'color:#dc4a44;font-weight:bold;font-size:14px;letter-spacing:2px');
+      console.log('%c  _..._\n .:::::::.\n:::::::::   ← 月相转盘：点它\n \':::::::\'   键入 keine 唤醒白泽\n   \'\'\'      键入 history 吞噬历史', 'color:#8a8f98;font-family:monospace');
+    } catch (e) { /* ignore */ }
   })();
 </script>
 <script>
@@ -1016,8 +1135,7 @@ html[data-moon="full"] .bm-logo {
 </script>
 
 </body>
-</html>
- + "##;
+</html>"##;
 
 pub fn sanitize_project_name(name: &str) -> String {
     name.chars()
