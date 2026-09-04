@@ -176,6 +176,7 @@ input:disabled { background: var(--surface2); cursor: not-allowed; }
   min-width: 0;
 }
 .entries { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+.entries-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; min-width: 0; }
 
 /* ---- 底部操作栏（浮动圆角条） / 状态栏 ---- */
 .action-bar {

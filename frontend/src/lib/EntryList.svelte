@@ -585,53 +585,51 @@
         <div class="site-hint">部署后锁定，作为站点访问地址</div>
       {/if}
     </div>
-    {#if siteLocked}
-      <div class="at-section">
-        <label for="el-access-token">网页访问令牌</label>
-        <div class="at-row">
-          {#if editingToken}
-            <input
-              type="text"
-              id="el-access-token"
-              class="at-input"
-              bind:value={tokenInput}
-              placeholder="访问令牌"
-            />
-            {#if !tokenInput}
-              <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
-            {/if}
-            <button
-              class="at-save-btn"
-              class:saved={!isDirty}
-              onclick={saveToken}
-              disabled={tokenSaving || !isDirty}
-            >
-              {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
-            </button>
-          {:else if accessToken}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div
-              class="at-masked"
-              class:copied={copyFeedback}
-              onclick={copyToken}
-              ondblclick={() => { editingToken = true; tokenInput = accessToken }}
-              title="单击复制，双击编辑"
-            >
-              {#if copyFeedback}
-                已复制!
-              {:else}
-                {'*'.repeat(Math.min(accessToken.length, 16))}
-              {/if}
-            </div>
-          {:else}
-            <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-            <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
-              - 未设置 -
-            </div>
+    <div class="at-section">
+      <label for="el-access-token">网页访问令牌</label>
+      <div class="at-row">
+        {#if editingToken}
+          <input
+            type="text"
+            id="el-access-token"
+            class="at-input"
+            bind:value={tokenInput}
+            placeholder="访问令牌"
+          />
+          {#if !tokenInput}
+            <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
           {/if}
-        </div>
+          <button
+            class="at-save-btn"
+            class:saved={!isDirty}
+            onclick={saveToken}
+            disabled={tokenSaving || !isDirty}
+          >
+            {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
+          </button>
+        {:else if accessToken}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div
+            class="at-masked"
+            class:copied={copyFeedback}
+            onclick={copyToken}
+            ondblclick={() => { editingToken = true; tokenInput = accessToken }}
+            title="单击复制，双击编辑"
+          >
+            {#if copyFeedback}
+              已复制!
+            {:else}
+              {'*'.repeat(Math.min(accessToken.length, 16))}
+            {/if}
+          </div>
+        {:else}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
+            - 未设置 -
+          </div>
+        {/if}
       </div>
-    {/if}
+    </div>
   </div>
 </div>
 
