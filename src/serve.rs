@@ -560,14 +560,14 @@ h1 {
 /* ---- 彩蛋特效层 ---- */
 /* 记录印章：点击空白处落下朱印（史/记/印/岁） */
 .fx-stamp {
-  position: fixed; z-index: 60; width: 46px; height: 46px;
-  margin: -23px 0 0 -23px;
+  position: fixed; z-index: 60; width: 50px; height: 50px;
+  margin: -25px 0 0 -25px;
   display: flex; align-items: center; justify-content: center;
   border: 2.5px solid var(--accent); border-radius: 50%;
-  color: var(--accent); font-weight: 800; font-size: 19px;
+  color: var(--accent); font-weight: 800; font-size: 20px;
   font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
   pointer-events: none; opacity: 0;
-  animation: stamp-in 0.9s var(--ease) forwards;
+  animation: stamp-in 1s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
 }
 .fx-stamp::after {
   content: ""; position: absolute; inset: 4px;
@@ -575,28 +575,30 @@ h1 {
   border-radius: 50%;
 }
 @keyframes stamp-in {
-  0% { opacity: 0; transform: scale(1.7) rotate(var(--rot, 0deg)); }
-  22% { opacity: 0.92; transform: scale(1) rotate(var(--rot, 0deg)); }
-  70% { opacity: 0.5; }
+  0% { opacity: 0; transform: scale(1.8) rotate(var(--rot, 0deg)); }
+  14% { opacity: 0.95; transform: scale(1) rotate(var(--rot, 0deg)); }
+  65% { opacity: 0.55; }
   100% { opacity: 0; transform: scale(0.94) rotate(var(--rot, 0deg)); }
 }
-/* 月晕脉冲：拨动月相时的柔光扩散 + 月体轻弹 */
+/* 月晕脉冲：月亮本色的柔光自月体扩散，同时月体轻弹 */
 .moon-halo {
-  position: absolute; left: 50%; top: 50%; width: 170px; height: 170px;
-  margin: -85px 0 0 -85px; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--tint) 30%, transparent), transparent 62%);
-  animation: halo-pulse 0.9s var(--ease) forwards;
+  position: absolute; left: 50%; top: 50%; width: 190px; height: 190px;
+  margin: -95px 0 0 -95px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--tint) 35%, transparent), transparent 62%);
+  animation: halo-pulse 1s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
 }
 @keyframes halo-pulse {
-  0% { opacity: 0; transform: scale(0.5); }
-  28% { opacity: 0.95; }
-  100% { opacity: 0; transform: scale(1.55); }
+  0% { opacity: 0; transform: scale(0.45); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: scale(1.7); }
 }
-.moon-pop { animation: moon-pop 0.5s var(--ease); }
+/* 注视位移走 CSS 变量，轻弹动画叠加其上，避免 transform 互相覆盖导致跳变 */
+.ha-moon svg { transform: translate(var(--gx, 0px), var(--gy, 0px)); }
+.moon-pop { animation: moon-pop 0.5s cubic-bezier(0.25, 0.6, 0.3, 1); }
 @keyframes moon-pop {
-  0% { transform: scale(1); }
-  35% { transform: scale(1.05); }
-  100% { transform: scale(1); }
+  0% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1); }
+  35% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1.06); }
+  100% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1); }
 }
 .ha-moon { will-change: transform; }
 .ha-moon:hover { animation: moon-wobble 1.6s ease-in-out infinite; }
@@ -623,7 +625,7 @@ h1 {
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
   font-size: 10.5px; letter-spacing: 3px; color: var(--text-dim);
   opacity: 0; pointer-events: none;
-  animation: whisper-in 5.4s var(--ease) forwards;
+  animation: whisper-in 5.4s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
 }
 @keyframes whisper-in {
   0% { opacity: 0; transform: translateY(8px); }
@@ -637,9 +639,15 @@ h1 {
   0%, 100% { transform: scaleY(1); }
   50% { transform: scaleY(1.45); }
 }
+/* 印章提示：让彩蛋有迹可循 */
+.hint-touch { color: var(--text-dim); opacity: 0.65; animation: hint-breathe 3.2s ease-in-out infinite; }
+@keyframes hint-breathe {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.85; }
+}
 @media (prefers-reduced-motion: reduce) {
   .fx-stamp, .moon-halo { animation-duration: 0.01s; }
-  .ha-moon:hover, .cf-scale b { animation: none; }
+  .ha-moon:hover, .cf-scale b, .hint-touch { animation: none; }
   .mote { display: none; }
 }
 .hero-code {
@@ -923,7 +931,7 @@ html[data-moon="full"] .bm-logo {
   </div>
 </div>
 
-<footer>Keinestamp · Lore Progress Board · Lore v0.8.6 · © 2026</footer>
+<footer>Keinestamp · Lore Progress Board · Lore v0.8.6 · © 2026 <span class="hint-touch">· 在页面空白处点一下，会有意外之喜</span></footer>
 
 <script>
   (function () {
@@ -1049,14 +1057,14 @@ html[data-moon="full"] .bm-logo {
       renderMoon();
     });
 
-    // 记录印章：点哪儿盖哪儿（史 / 记 / 印 / 岁 随机）
+    // 记录印章：点哪儿盖哪儿（史 / 记 / 印 / 岁 随机；按钮/链接/月亮除外）
     var STAMP_CHARS = ['史', '记', '印', '岁'];
     var lastStamp = 0;
     document.addEventListener('click', function (ev) {
       var t = ev.target;
-      if (t && t.closest && t.closest('a, button, input, code, .ha-moon')) return;
+      if (t && t.closest && t.closest('a, button, .ha-moon')) return;
       var ts = Date.now();
-      if (ts - lastStamp < 160) return;
+      if (ts - lastStamp < 120) return;
       lastStamp = ts;
       var s = document.createElement('div');
       s.className = 'fx-stamp';
@@ -1065,7 +1073,7 @@ html[data-moon="full"] .bm-logo {
       s.style.top = ev.clientY + 'px';
       s.style.setProperty('--rot', (Math.random() * 28 - 14).toFixed(1) + 'deg');
       document.body.appendChild(s);
-      setTimeout(function () { s.remove(); }, 950);
+      setTimeout(function () { s.remove(); }, 1050);
     });
 
     // 浮游星尘：月夜里缓缓上浮的微光
@@ -1101,7 +1109,7 @@ html[data-moon="full"] .bm-logo {
       setTimeout(function () { spawnWhisper(); loopWhisper(); }, 13000 + Math.random() * 12000);
     })();
 
-    // 视差 + 月亮注视：光晕反向游移，月亮朝鼠标微倾
+    // 视差 + 月亮注视：光晕反向游移，月亮朝鼠标微倾（走 --gx/--gy 变量，不与轻弹动画抢 transform）
     var g1 = document.querySelector('.glow-tl');
     var g2 = document.querySelector('.glow-br');
     var ring = document.querySelector('.ha-ring');
@@ -1116,7 +1124,10 @@ html[data-moon="full"] .bm-logo {
         if (g1) g1.style.transform = 'translate(' + (nx * 26).toFixed(1) + 'px,' + (ny * 26).toFixed(1) + 'px)';
         if (g2) g2.style.transform = 'translate(' + (nx * -20).toFixed(1) + 'px,' + (ny * -20).toFixed(1) + 'px)';
         if (ring) ring.style.transform = 'translate(' + (nx * 10).toFixed(1) + 'px,' + (ny * 10).toFixed(1) + 'px)';
-        if (moonSvg) moonSvg.style.transform = 'translate(' + (nx * 9).toFixed(1) + 'px,' + (ny * 9).toFixed(1) + 'px)';
+        if (moonSvg) {
+          moonSvg.style.setProperty('--gx', (nx * 9).toFixed(1) + 'px');
+          moonSvg.style.setProperty('--gy', (ny * 9).toFixed(1) + 'px');
+        }
       });
     });
 
