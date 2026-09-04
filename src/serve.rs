@@ -558,28 +558,6 @@ h1 {
 }
 .hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; max-width: 36ch; }
 /* ---- 彩蛋特效层 ---- */
-/* 记录印章：点击空白处落下朱印（史/记/印/岁） */
-.fx-stamp {
-  position: fixed; z-index: 60; width: 50px; height: 50px;
-  margin: -25px 0 0 -25px;
-  display: flex; align-items: center; justify-content: center;
-  border: 2.5px solid var(--accent); border-radius: 50%;
-  color: var(--accent); font-weight: 800; font-size: 20px;
-  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
-  pointer-events: none; opacity: 0;
-  animation: stamp-in 1s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
-}
-.fx-stamp::after {
-  content: ""; position: absolute; inset: 4px;
-  border: 1px solid color-mix(in srgb, var(--accent) 55%, transparent);
-  border-radius: 50%;
-}
-@keyframes stamp-in {
-  0% { opacity: 0; transform: scale(1.8) rotate(var(--rot, 0deg)); }
-  14% { opacity: 0.95; transform: scale(1) rotate(var(--rot, 0deg)); }
-  65% { opacity: 0.55; }
-  100% { opacity: 0; transform: scale(0.94) rotate(var(--rot, 0deg)); }
-}
 /* 月晕脉冲：月亮本色的柔光自月体扩散，同时月体轻弹 */
 .moon-halo {
   position: absolute; left: 50%; top: 50%; width: 190px; height: 190px;
@@ -639,15 +617,9 @@ h1 {
   0%, 100% { transform: scaleY(1); }
   50% { transform: scaleY(1.45); }
 }
-/* 印章提示：让彩蛋有迹可循 */
-.hint-touch { color: var(--text-dim); opacity: 0.65; animation: hint-breathe 3.2s ease-in-out infinite; }
-@keyframes hint-breathe {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.85; }
-}
 @media (prefers-reduced-motion: reduce) {
-  .fx-stamp, .moon-halo { animation-duration: 0.01s; }
-  .ha-moon:hover, .cf-scale b, .hint-touch { animation: none; }
+  .moon-halo { animation-duration: 0.01s; }
+  .ha-moon:hover, .cf-scale b { animation: none; }
   .mote { display: none; }
 }
 .hero-code {
@@ -931,7 +903,7 @@ html[data-moon="full"] .bm-logo {
   </div>
 </div>
 
-<footer>Keinestamp · Lore Progress Board · Lore v0.8.6 · © 2026 <span class="hint-touch">· 在页面空白处点一下，会有意外之喜</span></footer>
+<footer>Keinestamp · Lore Progress Board · Lore v0.8.6 · © 2026</footer>
 
 <script>
   (function () {
@@ -1055,25 +1027,6 @@ html[data-moon="full"] .bm-logo {
     document.getElementById('moonName').addEventListener('click', function () {
       overridePhase = null;
       renderMoon();
-    });
-
-    // 记录印章：点哪儿盖哪儿（史 / 记 / 印 / 岁 随机；按钮/链接/月亮除外）
-    var STAMP_CHARS = ['史', '记', '印', '岁'];
-    var lastStamp = 0;
-    document.addEventListener('click', function (ev) {
-      var t = ev.target;
-      if (t && t.closest && t.closest('a, button, .ha-moon')) return;
-      var ts = Date.now();
-      if (ts - lastStamp < 120) return;
-      lastStamp = ts;
-      var s = document.createElement('div');
-      s.className = 'fx-stamp';
-      s.textContent = STAMP_CHARS[Math.floor(Math.random() * STAMP_CHARS.length)];
-      s.style.left = ev.clientX + 'px';
-      s.style.top = ev.clientY + 'px';
-      s.style.setProperty('--rot', (Math.random() * 28 - 14).toFixed(1) + 'deg');
-      document.body.appendChild(s);
-      setTimeout(function () { s.remove(); }, 1050);
     });
 
     // 浮游星尘：月夜里缓缓上浮的微光
