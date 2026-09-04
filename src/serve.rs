@@ -558,24 +558,23 @@ h1 {
 }
 .hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; max-width: 36ch; }
 /* ---- 彩蛋特效层 ---- */
-/* 月晕脉冲：月亮本色的柔光自月体扩散，同时月体轻弹 */
+/* 月晕脉冲：月亮本色的柔光自月体扩散，同时月体轻弹（强度收敛） */
 .moon-halo {
-  position: absolute; left: 50%; top: 50%; width: 190px; height: 190px;
-  margin: -95px 0 0 -95px; border-radius: 50%; pointer-events: none;
-  background: radial-gradient(circle, color-mix(in srgb, var(--tint) 35%, transparent), transparent 62%);
-  animation: halo-pulse 1s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
+  position: absolute; left: 50%; top: 50%; width: 180px; height: 180px;
+  margin: -90px 0 0 -90px; border-radius: 50%; pointer-events: none;
+  background: radial-gradient(circle, color-mix(in srgb, var(--tint) 18%, transparent), transparent 60%);
+  animation: halo-pulse 0.9s cubic-bezier(0.25, 0.6, 0.3, 1) forwards;
 }
 @keyframes halo-pulse {
-  0% { opacity: 0; transform: scale(0.45); }
-  30% { opacity: 1; }
-  100% { opacity: 0; transform: scale(1.7); }
+  0% { opacity: 0; transform: scale(0.55); }
+  30% { opacity: 0.55; }
+  100% { opacity: 0; transform: scale(1.3); }
 }
-/* 注视位移走 CSS 变量，轻弹动画叠加其上，避免 transform 互相覆盖导致跳变 */
 .ha-moon svg { transform: translate(var(--gx, 0px), var(--gy, 0px)); }
 .moon-pop { animation: moon-pop 0.5s cubic-bezier(0.25, 0.6, 0.3, 1); }
 @keyframes moon-pop {
   0% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1); }
-  35% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1.06); }
+  35% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1.025); }
   100% { transform: translate(var(--gx, 0px), var(--gy, 0px)) scale(1); }
 }
 .ha-moon { will-change: transform; }
