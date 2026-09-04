@@ -360,25 +360,27 @@ fn login_page_html(project_name: &str) -> String {
 <script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
 <style>
 :root{{
---bg:#f4f6f8;--surface:#ffffff;--border:#e3e7ed;--text:#1e2833;--text-dim:#6b7684;
---accent:#d94747;--accent-hover:#c63b3b;--accent-soft:#fbeded;
---shadow-lg:0 16px 48px rgba(30,40,51,0.18);
+--bg:#f2f4f7;--surface:#ffffff;--border:#e3e6ea;--border-strong:#d3d8de;--text:#191d23;--text-dim:#6b7480;
+--accent:#dc4a44;--accent-hover:#c93d38;--accent-soft:#fbeeed;
+--shadow-panel:0 1px 2px rgba(20,24,30,0.04),0 6px 20px rgba(20,24,30,0.05);
+--shadow-lg:0 12px 40px rgba(20,24,30,0.16);
 }}
 [data-theme="night"]{{
---bg:#141d18;--surface:#1b2620;--border:#3b4f45;--text:#f4faf6;--text-dim:#bccac4;
---accent:#ec6262;--accent-hover:#d94f4f;--accent-soft:#4a2b2d;
---shadow-lg:0 16px 48px rgba(0,0,0,0.55);
+--bg:#101114;--surface:#1a1c1f;--border:#26292d;--border-strong:#34383d;--text:#e6e8eb;--text-dim:#8f96a0;
+--accent:#e05a55;--accent-hover:#d14b46;--accent-soft:#3d2628;
+--shadow-panel:0 1px 2px rgba(0,0,0,0.25),0 6px 20px rgba(0,0,0,0.3);
+--shadow-lg:0 12px 40px rgba(0,0,0,0.5);
 }}
 *{{box-sizing:border-box}}
 body{{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:var(--bg);color:var(--text)}}
-.card{{background:var(--surface);border:1px solid var(--border);padding:40px 36px 32px;border-radius:14px;box-shadow:var(--shadow-lg);text-align:center;width:340px}}
-h1{{font-size:20px;margin:0 0 4px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
-.sub{{font-size:13px;color:var(--text-dim);margin-bottom:24px}}
-input{{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px;outline:none;transition:border-color .15s,box-shadow .15s}}
-input:focus{{border-color:var(--accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--accent) 14%,transparent)}}
-button{{margin-top:16px;padding:10px 32px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;width:100%;transition:background .15s}}
+.card{{background:var(--surface);border:1px solid var(--border);padding:34px 32px 28px;border-radius:14px;box-shadow:var(--shadow-panel);text-align:center;width:330px}}
+h1{{font-size:18px;margin:0 0 4px;font-weight:700;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.sub{{font-size:12.5px;color:var(--text-dim);margin-bottom:22px}}
+input{{width:100%;padding:9px 13px;border:1px solid var(--border-strong);border-radius:8px;background:var(--surface);color:var(--text);font-size:13.5px;outline:none;transition:border-color .15s,box-shadow .15s}}
+input:focus{{border-color:var(--accent);box-shadow:0 0 0 2.5px color-mix(in srgb,var(--accent) 16%,transparent)}}
+button{{margin-top:14px;padding:9px 32px;border:none;border-radius:8px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:600;cursor:pointer;width:100%;transition:background .15s}}
 button:hover{{background:var(--accent-hover)}}
-.error{{color:var(--accent);font-size:13px;margin-top:12px;display:none}}
+.error{{color:var(--accent);font-size:12.5px;margin-top:12px;display:none}}
 </style>
 <link rel="icon" href="data:image/png;base64,{favicon}">
 </head>
@@ -459,7 +461,10 @@ fn render_project_list() -> String {
     if items.is_empty() {
         return String::new();
     }
-    format!("<div class=\"proj-grid\">{}</div>", items.join(""))
+    format!(
+        "<div class=\"projects-panel\"><div class=\"proj-grid\">{}</div></div>",
+        items.join("")
+    )
 }
 
 const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
@@ -474,33 +479,36 @@ const INDEX_HTML_TEMPLATE: &str = r##" + <!DOCTYPE html>
 </script>
 <style>
 :root {
-  --bg: #f2f5f9;
+  --bg: #f2f4f7;
   --surface: #ffffff;
-  --text: #1b222b;
-  --text-dim: #69727c;
-  --line: #d9dee5;
-  --accent: #d94747;
-  --tint: #7fa8ce;
-  --tint-soft: #eff5fb;
+  --text: #191d23;
+  --text-dim: #6b7480;
+  --line: #e3e6ea;
+  --accent: #dc4a44;
+  --tint: #4f8ec4;
+  --tint-soft: #edf4fb;
   --deco-a: #9ab3cd;
   --deco-b: #8fa694;
   --deco-c: #c7a9a9;
-  --shadow-lg: 0 16px 48px rgba(27, 34, 43, 0.14);
-  --shadow-sm: 0 1px 2px rgba(27, 34, 43, 0.06);
+  --radius-lg: 14px;
+  --shadow-panel: 0 1px 2px rgba(20, 24, 30, 0.04), 0 6px 20px rgba(20, 24, 30, 0.05);
+  --shadow-lg: 0 12px 40px rgba(20, 24, 30, 0.16);
+  --shadow-sm: 0 1px 2px rgba(20, 24, 30, 0.05);
 }
 [data-theme="night"] {
-  --bg: #151719;
-  --surface: #1c1f21;
-  --text: #e9efeb;
-  --text-dim: #9aa5a0;
-  --line: #2a2d30;
-  --accent: #e05a5a;
-  --tint: #6fc49a;
-  --tint-soft: #25362e;
+  --bg: #101114;
+  --surface: #1a1c1f;
+  --text: #e6e8eb;
+  --text-dim: #8f96a0;
+  --line: #26292d;
+  --accent: #e05a55;
+  --tint: #5b9ecf;
+  --tint-soft: #1f2c38;
   --deco-a: #6b7478;
   --deco-b: #6e8478;
   --deco-c: #8a6e6e;
-  --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.5);
+  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.25), 0 6px 20px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.5);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
 }
 * { box-sizing: border-box; }
@@ -569,28 +577,46 @@ body {
 }
 .eyebrow .dot { color: var(--accent); }
 h1 {
-  font-size: clamp(52px, 7.5vw, 84px);
-  font-weight: 800;
+  font-size: clamp(44px, 6.5vw, 72px);
+  font-weight: 750;
   letter-spacing: -2px;
   margin: 0 0 10px;
   line-height: 1;
 }
 .hero-sub { font-size: 15px; color: var(--text-dim); margin: 0 0 26px; letter-spacing: 0.3px; max-width: 36ch; }
-.projects-section { max-width: 960px; margin: 0 auto; padding: 20px 24px; }
-.projects-section h2 { font-size: 18px; margin: 0 0 12px; color: var(--text); }
-.proj-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+.projects-section {
+  max-width: 960px; margin: 0 auto; padding: 6px 24px 10px;
+}
+.projects-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-panel);
+  padding: 16px 18px;
+}
+.projects-section h2 { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; margin: 0 0 10px; color: var(--text-dim); }
+.proj-grid { display: flex; flex-wrap: wrap; gap: 8px; }
 .proj-item {
-  display: inline-block;
-  padding: 8px 16px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 14px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
   background: var(--surface);
   color: var(--text);
   text-decoration: none;
-  font-size: 14px;
-  transition: border-color 0.15s var(--ease), color 0.15s var(--ease);
+  font-size: 13px;
+  font-weight: 550;
+  transition: border-color 0.15s var(--ease), color 0.15s var(--ease), background 0.15s var(--ease);
 }
-.proj-item:hover { border-color: var(--accent); color: var(--accent); }
+.proj-item::before {
+  content: ""; width: 7px; height: 7px; border-radius: 50%;
+  background: var(--tint); opacity: 0.75; flex-shrink: 0;
+  transition: background 0.15s var(--ease);
+}
+.proj-item:hover { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 5%, transparent); }
+.proj-item:hover::before { background: var(--accent); }
 .hero-code {
   display: inline-block;
   font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
@@ -806,7 +832,6 @@ html[data-moon="full"] .bm-logo {
 <header class="topbar">
   <div class="brand-mini">
     <img class="bm-logo" src="data:image/png;base64,{favicon}" alt="logo">
-      <rect width="100" height="100" rx="22" fill="var(--accent)"/>
     Keinestamp
   </div>
   <div class="topbar-right">
@@ -822,7 +847,7 @@ html[data-moon="full"] .bm-logo {
     <div class="eyebrow">Lore · Timeline <span class="dot">●</span></div>
     <h1>{site_name}</h1>
     <p class="hero-sub">Lore Progress Board</p>
-    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok">✓ 已记录</span><span class="cursor"></span></code>
+    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M5.3 8.2l1.9 1.9 3.5-3.9"/></svg> 已记录</span><span class="cursor"></span></code>
   </div>
   <div class="hero-art">
     <div class="ha-ring">
