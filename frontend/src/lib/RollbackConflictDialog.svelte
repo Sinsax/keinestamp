@@ -54,13 +54,13 @@
     position: fixed;
     inset: 0;
     background: var(--dialog-overlay);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
-    animation: fade-in 0.15s var(--ease);
+    animation: fade-in 0.12s var(--ease);
   }
   .conflict-dialog {
     width: 480px;
@@ -69,25 +69,25 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    padding: 18px;
+    padding: 16px 18px;
     box-shadow: var(--shadow-lg);
   }
   .conflict-hint {
     font-size: 12px;
     color: var(--text-dim);
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
   .conflict-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    padding: 6px 0;
+    padding: 5px 0;
     border-bottom: 1px solid var(--border);
   }
   .conflict-path {
     font-family: var(--mono, monospace);
-    font-size: 12px;
+    font-size: 11.5px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -96,36 +96,37 @@
   }
   .conflict-opts {
     display: flex;
-    gap: 6px;
+    gap: 5px;
     flex-shrink: 0;
   }
   .conflict-opts button {
     font-size: 11px;
-    padding: 4px 10px;
-    border-radius: 6px;
+    padding: 2px 9px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: transparent;
+    border: 1px solid var(--border-strong);
     color: var(--text-dim);
+    transition: all 0.12s var(--ease);
   }
   .conflict-opts button.active {
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     color: var(--accent);
     background: var(--accent-soft);
   }
   .actions {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     justify-content: flex-end;
-    margin-top: 16px;
+    margin-top: 14px;
   }
   .actions button {
     font-size: 12px;
-    padding: 6px 16px;
-    border-radius: 8px;
+    padding: 4px 14px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     background: var(--surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     color: var(--text);
   }
   .actions button.accent {

@@ -55,10 +55,10 @@
   .titlebar {
     display: flex;
     align-items: center;
-    height: 34px;
+    height: 32px;
     background: var(--surface);
     border-bottom: 1px solid var(--border);
-    padding: 0 8px;
+    padding: 0 10px;
     flex-shrink: 0;
     -webkit-app-region: drag;
     user-select: none;
@@ -66,25 +66,26 @@
   .tb-brand {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 7px;
     height: 100%;
   }
   .tb-icon {
-    width: 18px;
-    height: 18px;
+    width: 16px;
+    height: 16px;
     flex-shrink: 0;
   }
   .tb-title {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: 0.3px;
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: 0.2px;
     white-space: nowrap;
   }
   .tb-subtitle {
     font-size: 10px;
     color: var(--text-dim);
-    margin-left: 10px;
+    margin-left: 8px;
     white-space: nowrap;
+    opacity: 0.8;
   }
   .tb-spacer {
     flex: 1;
@@ -92,7 +93,7 @@
   }
   .tb-controls {
     display: flex;
-    gap: 2px;
+    gap: 1px;
     margin-right: -4px;
     height: 100%;
     align-items: center;
@@ -103,18 +104,18 @@
     border: none;
     color: var(--text-dim);
     cursor: pointer;
-    padding: 4px 8px;
-    border-radius: 6px;
+    padding: 4px 9px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    height: 26px;
+    height: 24px;
     -webkit-app-region: no-drag;
     transition: background 0.1s, color 0.1s;
   }
   .tb-btn:hover {
-    background: var(--accent-soft);
-    color: var(--accent);
+    background: var(--surface2);
+    color: var(--text);
   }
   .tb-close:hover {
     background: var(--error);

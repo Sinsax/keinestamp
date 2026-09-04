@@ -87,8 +87,4 @@
     color: var(--error);
     margin-top: 4px;
   }
-  button.danger {
-    background: var(--error);
-    border-color: var(--error);
-  }
 </style>

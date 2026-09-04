@@ -186,7 +186,7 @@
   }
   .cat-label {
     display: block;
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-dim);
     margin-bottom: 4px;
@@ -194,18 +194,18 @@
   .cat-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
     margin-top: 4px;
   }
   .cat-btn {
-    font-size: 12px;
-    padding: 4px 12px;
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    background: var(--surface);
+    font-size: 11.5px;
+    padding: 2px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--border-strong);
+    background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    transition: all 0.15s var(--ease);
+    transition: all 0.12s var(--ease);
   }
   .cat-btn:hover {
     border-color: var(--accent);
@@ -214,24 +214,24 @@
   .cat-btn.active {
     background: var(--accent-soft);
     color: var(--accent);
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     font-weight: 600;
   }
   .tag-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
     margin-top: 4px;
   }
   .tag-btn {
-    font-size: 12px;
-    padding: 4px 12px;
+    font-size: 11.5px;
+    padding: 2px 11px;
     border-radius: 999px;
-    border: 1px solid var(--border);
-    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    background: transparent;
     color: var(--text-dim);
     cursor: pointer;
-    transition: all 0.15s var(--ease);
+    transition: all 0.12s var(--ease);
   }
   .tag-btn:hover {
     border-color: var(--accent);
@@ -240,23 +240,20 @@
   .tag-btn.active {
     background: var(--accent-soft);
     color: var(--accent);
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
     font-weight: 600;
   }
   .custom-btn.active {
     background: var(--accent-soft);
     color: var(--accent);
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
   }
   .custom-input {
     margin-top: 6px;
     width: 100%;
-    padding: 4px 8px;
+    padding: 3px 8px;
     font-size: 12px;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    background: var(--bg);
-    color: var(--text);
+    border-radius: var(--radius-sm);
   }
   .row-field {
     display: flex;

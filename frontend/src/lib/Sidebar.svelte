@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
   import DirTree from './DirTree.svelte'
   import { openFolder } from '../api'
 
@@ -142,18 +142,20 @@
   }
   .sidebar-count {
     margin-left: auto;
-    font-size: 10px;
+    font-size: 9.5px;
     background: var(--surface2);
     padding: 0 6px;
     border-radius: 8px;
     color: var(--text-dim);
-    font-weight: 500;
+    font-weight: 600;
     text-transform: none;
     letter-spacing: normal;
+    line-height: 1.5;
   }
   .sidebar-list {
     flex: 1;
     overflow-y: auto;
+    padding: 4px 0;
   }
   .sidebar-empty {
     display: flex;
@@ -181,38 +183,38 @@
     align-items: center;
     gap: 6px;
     width: 100%;
-    padding: 6px 10px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 5px;
+    padding: 4px 9px;
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
     color: var(--text-dim);
-    font-size: 12px;
+    font-size: 11.5px;
     cursor: pointer;
     transition: background 0.1s, color 0.1s, border-color 0.1s;
   }
   .close-btn:hover {
     background: var(--accent-soft);
     color: var(--accent);
-    border-color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 35%, transparent);
   }
   .sidebar-collapsed-bar {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding-top: 10px;
+    padding-top: 8px;
   }
   .expand-btn {
     background: none;
     border: none;
     color: var(--text-dim);
-    padding: 6px;
-    border-radius: 6px;
+    padding: 5px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
   }
   .expand-btn:hover {
-    background: var(--accent-soft);
+    background: var(--surface2);
     color: var(--accent);
   }
   .ctx-backdrop {
@@ -228,19 +230,24 @@
     overflow-y: auto;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--shadow-md);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
     padding: 4px;
     font-size: 12px;
+    animation: ctx-in 0.1s var(--ease);
+  }
+  @keyframes ctx-in {
+    from { opacity: 0; transform: scale(0.98) translateY(-2px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
   }
   .ctx-menu button {
     display: block;
     width: 100%;
     text-align: left;
-    padding: 6px 10px;
+    padding: 5px 9px;
     background: none;
     border: none;
-    border-radius: 5px;
+    border-radius: 4px;
     color: var(--text);
     cursor: pointer;
     font-size: 12px;

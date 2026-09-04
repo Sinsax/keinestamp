@@ -1240,25 +1240,27 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 8px 14px;
-    background: color-mix(in srgb, var(--warning) 18%, var(--surface));
-    border-bottom: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    padding: 5px 12px;
+    background: color-mix(in srgb, var(--warning) 10%, var(--surface));
+    border-bottom: 1px solid color-mix(in srgb, var(--warning) 32%, transparent);
     color: var(--text);
-    font-size: 13px;
+    font-size: 12px;
   }
   .rollback-banner button {
     flex-shrink: 0;
-    padding: 4px 14px;
-    font-size: 12px;
+    padding: 2px 10px;
+    font-size: 11px;
     font-weight: 600;
-    border-radius: 6px;
-    border: 1px solid var(--warning);
+    border-radius: var(--radius-sm);
+    border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
     background: transparent;
     color: var(--warning);
     cursor: pointer;
+    transition: background 0.12s var(--ease), border-color 0.12s var(--ease);
   }
   .rollback-banner button:hover {
     background: var(--warning-soft);
+    border-color: var(--warning);
   }
   .content-body {
     display: flex;
@@ -1285,36 +1287,39 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 6px 10px;
+    padding: 5px 10px;
     border-bottom: 1px solid var(--border);
     background: var(--surface);
     flex-shrink: 0;
   }
   .tl-title {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
     color: var(--text-dim);
   }
   .tl-local-btn {
     font-size: 11px;
-    padding: 3px 12px;
-    border-radius: 6px;
-    background: var(--surface);
-    border: 1px solid var(--accent);
-    color: var(--accent);
+    padding: 1px 9px;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
     cursor: pointer;
-    transition: background 0.12s, color 0.12s;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
   }
   .tl-local-btn:hover {
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .toolbar-icon {
     background: none;
     border: none;
     color: var(--text-dim);
-    padding: 4px 6px;
-    border-radius: 6px;
+    padding: 3px 5px;
+    border-radius: var(--radius-sm);
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -1340,10 +1345,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-left: 8px;
+    margin-left: 6px;
     flex: 1;
     overflow: hidden;
-    font-size: 12px;
+    font-size: 11.5px;
     color: var(--text-dim);
   }
   .path-text {

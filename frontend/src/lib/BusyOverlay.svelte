@@ -18,31 +18,36 @@
     position: fixed;
     inset: 0;
     z-index: 300;
-    background: color-mix(in srgb, var(--bg) 55%, transparent);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    background: color-mix(in srgb, var(--bg) 50%, transparent);
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     display: flex;
     align-items: center;
     justify-content: center;
+    animation: fade-in 0.12s var(--ease);
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
   .busy-box {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 14px;
-    padding: 24px 40px;
+    gap: 12px;
+    padding: 20px 36px;
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-lg);
   }
   .busy-spinner {
-    width: 28px;
-    height: 28px;
-    border: 3px solid var(--surface3);
+    width: 24px;
+    height: 24px;
+    border: 2.5px solid var(--surface3);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: busy-spin 0.8s linear infinite;
+    animation: busy-spin 0.7s linear infinite;
   }
   @keyframes busy-spin {
     to {
@@ -50,7 +55,7 @@
     }
   }
   .busy-text {
-    font-size: 13px;
+    font-size: 12.5px;
     color: var(--text);
   }
 </style>

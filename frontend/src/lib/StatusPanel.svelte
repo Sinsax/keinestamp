@@ -646,43 +646,47 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 10px 14px;
+    padding: 6px 10px;
     border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
   }
   .sp-title {
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 12px;
+    font-weight: 650;
   }
   .sp-count {
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-dim);
     background: var(--surface2);
-    padding: 1px 8px;
-    border-radius: 999px;
+    padding: 0 7px;
+    border-radius: 8px;
+    line-height: 1.7;
   }
   .sp-spacer { flex: 1; }
   .sp-select-all {
     background: none;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     color: var(--text-dim);
-    font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 6px;
+    font-size: 10.5px;
+    padding: 1px 7px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: color 0.12s, border-color 0.12s;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
   }
   .sp-select-all:hover {
     color: var(--accent);
     border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .sp-refresh {
     background: none;
     border: none;
-    font-size: 16px;
-    padding: 2px 6px;
+    padding: 3px 5px;
     cursor: pointer;
     color: var(--text-dim);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
+    display: inline-flex;
+    align-items: center;
     transition: background 0.12s, color 0.12s;
   }
   .sp-refresh:hover { background: var(--surface2); color: var(--accent); }
@@ -694,7 +698,7 @@
     flex: 1;
     gap: 8px;
     color: var(--text-dim);
-    font-size: 13px;
+    font-size: 12.5px;
   }
   .sp-empty-icon { font-size: 28px; opacity: 0.5; }
   .sp-ignored-only-hint {
@@ -705,49 +709,51 @@
   .sp-list {
     flex: 1;
     overflow-y: auto;
-    padding: 6px 8px;
+    padding: 4px 6px;
   }
   :global(.sp-item) {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 6px;
+    padding: 2.5px 6px;
     margin-bottom: 1px;
-    font-size: 13px;
+    font-size: 12.5px;
     line-height: 1.3;
-    border-radius: 6px;
-    transition: background 0.12s var(--ease);
+    border-radius: var(--radius-sm);
+    transition: background 0.1s var(--ease);
   }
   :global(.sp-item:hover) { background: var(--surface); }
   :global(.sp-item.sp-dir) { cursor: pointer; }
   /* 整行状态着色：回退改动/已修改=黄、新增=绿、回退删除/已删除=红、未跟踪=灰（hover 加深覆盖默认） */
-  :global(.sp-item.sp-st-m) { background: color-mix(in srgb, var(--warning) 16%, transparent); }
-  :global(.sp-item.sp-st-m:hover) { background: color-mix(in srgb, var(--warning) 26%, transparent); }
-  :global(.sp-item.sp-st-a) { background: color-mix(in srgb, var(--success) 14%, transparent); }
-  :global(.sp-item.sp-st-a:hover) { background: color-mix(in srgb, var(--success) 24%, transparent); }
-  :global(.sp-item.sp-st-d) { background: color-mix(in srgb, var(--error) 12%, transparent); }
-  :global(.sp-item.sp-st-d:hover) { background: color-mix(in srgb, var(--error) 22%, transparent); }
-  :global(.sp-item.sp-st-u) { background: color-mix(in srgb, var(--text-dim) 10%, transparent); }
-  :global(.sp-item.sp-st-u:hover) { background: color-mix(in srgb, var(--text-dim) 18%, transparent); }
+  :global(.sp-item.sp-st-m) { background: color-mix(in srgb, var(--warning) 13%, transparent); }
+  :global(.sp-item.sp-st-m:hover) { background: color-mix(in srgb, var(--warning) 24%, transparent); }
+  :global(.sp-item.sp-st-a) { background: color-mix(in srgb, var(--success) 11%, transparent); }
+  :global(.sp-item.sp-st-a:hover) { background: color-mix(in srgb, var(--success) 21%, transparent); }
+  :global(.sp-item.sp-st-d) { background: color-mix(in srgb, var(--error) 10%, transparent); }
+  :global(.sp-item.sp-st-d:hover) { background: color-mix(in srgb, var(--error) 20%, transparent); }
+  :global(.sp-item.sp-st-u) { background: color-mix(in srgb, var(--text-dim) 9%, transparent); }
+  :global(.sp-item.sp-st-u:hover) { background: color-mix(in srgb, var(--text-dim) 16%, transparent); }
   :global(.sp-check) {
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     margin: 0;
     accent-color: var(--accent);
     cursor: pointer;
     flex-shrink: 0;
   }
-  :global(.sp-icon) { font-size: 12px; width: 18px; text-align: center; flex-shrink: 0; }
-  :global(.sp-file-icon) { font-size: 13px; width: 18px; text-align: center; flex-shrink: 0; }
+  :global(.sp-icon) { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
+  :global(.sp-file-icon) { font-size: 12px; width: 16px; text-align: center; flex-shrink: 0; }
   :global(.sp-ext-badge) {
-    font-size: 9px;
-    font-weight: 600;
+    font-size: 8.5px;
+    font-weight: 700;
     background: var(--tint-soft);
-    padding: 1px 6px;
-    border-radius: 4px;
+    padding: 0 5px;
+    border-radius: 3px;
     color: var(--tint);
     flex-shrink: 0;
     letter-spacing: 0.3px;
+    text-transform: uppercase;
+    line-height: 1.8;
   }
   :global(.sp-path) {
     flex: 1;
@@ -755,7 +761,7 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     font-family: var(--mono);
-    font-size: 12px;
+    font-size: 11.5px;
   }
   :global(.sp-badges) {
     display: flex;
@@ -764,19 +770,20 @@
     flex-shrink: 0;
   }
   :global(.sp-badge) {
-    font-size: 10px;
-    font-weight: 500;
+    font-size: 9.5px;
+    font-weight: 600;
     text-transform: uppercase;
     padding: 0 5px;
-    border-radius: 4px;
+    border-radius: 3px;
     white-space: nowrap;
+    line-height: 1.7;
   }
   :global(.sp-badge.sp-badge-rb) {
-    background: color-mix(in srgb, var(--warning) 22%, transparent);
+    background: color-mix(in srgb, var(--warning) 20%, transparent);
     color: var(--warning);
   }
   :global(.sp-badge.sp-badge-rbd) {
-    background: color-mix(in srgb, var(--error) 16%, transparent);
+    background: color-mix(in srgb, var(--error) 14%, transparent);
     color: var(--error);
   }
   .ctx-backdrop {
@@ -792,19 +799,24 @@
     overflow-y: auto;
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    box-shadow: var(--shadow-md);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-lg);
     padding: 4px;
     font-size: 12px;
+    animation: ctx-in 0.1s var(--ease);
+  }
+  @keyframes ctx-in {
+    from { opacity: 0; transform: scale(0.98) translateY(-2px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
   }
   .ctx-menu button {
     display: block;
     width: 100%;
     text-align: left;
-    padding: 6px 10px;
+    padding: 5px 9px;
     background: none;
     border: none;
-    border-radius: 5px;
+    border-radius: 4px;
     color: var(--text);
     cursor: pointer;
     font-size: 12px;
@@ -835,17 +847,19 @@
   .sp-hidden-block {
     border-top: 1px solid var(--border);
     flex-shrink: 0;
+    background: var(--surface);
   }
   .sp-hidden-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 6px 10px;
+    padding: 5px 10px;
     font-size: 11px;
     font-weight: 600;
     color: var(--text-dim);
     cursor: pointer;
     user-select: none;
+    transition: color 0.1s;
   }
   .sp-hidden-header:hover {
     color: var(--accent);
@@ -854,11 +868,12 @@
     font-size: 9px;
   }
   .sp-hidden-count {
-    font-size: 10px;
+    font-size: 9.5px;
     padding: 0 6px;
     border-radius: 8px;
     background: var(--surface2);
     color: var(--text-dim);
+    line-height: 1.7;
   }
   .sp-hidden-body {
     padding: 0 10px 8px;
@@ -869,7 +884,7 @@
   .sp-hidden-list {
     display: flex;
     flex-direction: column;
-    gap: 3px;
+    gap: 2px;
     max-height: 140px;
     overflow-y: auto;
   }
@@ -878,10 +893,9 @@
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 3px 8px;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 5px;
+    padding: 2px 7px;
+    background: var(--surface2);
+    border-radius: 4px;
     font-size: 11px;
   }
   .sp-hidden-rule {
@@ -914,31 +928,27 @@
   }
   .sp-hidden-input-row {
     display: flex;
-    gap: 6px;
+    gap: 5px;
   }
   .sp-hidden-input-row input {
     flex: 1;
     min-width: 0;
     font-size: 11px;
-    padding: 3px 8px;
-    border: 1px solid var(--border);
-    border-radius: 5px;
-    background: var(--bg);
-    color: var(--text);
+    padding: 2px 7px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
   }
   .sp-hidden-input-row button {
     font-size: 11px;
-    padding: 3px 10px;
-    border-radius: 5px;
+    padding: 2px 9px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    color: var(--text);
     white-space: nowrap;
   }
   .sp-hidden-input-row button:hover:not(:disabled) {
     border-color: var(--accent);
     color: var(--accent);
+    background: var(--accent-soft);
   }
   .sp-hidden-input-row button:disabled {
     opacity: 0.4;

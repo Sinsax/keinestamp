@@ -56,13 +56,13 @@
   .confirm-head {
     display: flex;
     align-items: center;
-    gap: 10px;
-    margin-bottom: 10px;
+    gap: 9px;
+    margin-bottom: 8px;
   }
   .confirm-icon {
-    width: 30px;
-    height: 30px;
-    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -71,10 +71,10 @@
     flex-shrink: 0;
   }
   .confirm-msg {
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: 12.5px;
+    line-height: 1.65;
     color: var(--text);
     white-space: pre-line;
-    margin-bottom: 18px;
+    margin-bottom: 16px;
   }
 </style>

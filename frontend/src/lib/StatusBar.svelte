@@ -23,15 +23,25 @@
     align-items: center;
     justify-content: space-between;
     height: var(--status-h);
-    padding: 0 12px;
+    padding: 0 10px;
     background: var(--surface);
     border-top: 1px solid var(--border);
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-dim);
   }
   .status-left { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .status-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
   .conn-indicator { display: inline-flex; align-items: center; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-dim); transition: background 0.2s var(--ease); }
-  .connected .dot { background: var(--success); }
+  .dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--text-dim);
+    opacity: 0.5;
+    transition: background 0.2s var(--ease), opacity 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  }
+  .connected .dot {
+    background: var(--success);
+    opacity: 1;
+    box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--success) 18%, transparent);
+  }
 </style>

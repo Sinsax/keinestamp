@@ -75,9 +75,11 @@
     display: flex;
     align-items: center;
     gap: 3px;
-    padding: 1px 0;
+    padding: 2px 6px 2px 2px;
+    margin: 0 4px;
     white-space: nowrap;
-    border-radius: 3px;
+    border-radius: 4px;
+    transition: background 0.1s var(--ease);
   }
   .dtn:hover { background: var(--surface2); }
   .arr {

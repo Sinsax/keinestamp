@@ -245,12 +245,13 @@
   }
   .open-btn {
     background: var(--accent-soft);
-    border: 1px solid var(--accent);
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
     color: var(--accent);
     font-size: 11px;
-    padding: 2px 10px;
-    border-radius: 6px;
+    padding: 1px 9px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
+    transition: background 0.12s, color 0.12s;
   }
   .open-btn:hover {
     background: var(--accent);
@@ -263,12 +264,12 @@
     gap: 10px;
   }
   .remote-title {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 650;
     color: var(--text);
   }
   .remote-sub {
-    font-size: 11px;
+    font-size: 10.5px;
     color: var(--text-dim);
     font-family: var(--mono);
     display: flex;
@@ -279,21 +280,22 @@
   .remote-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
   }
   .rl-btn {
     background: none;
-    border: 1px solid var(--border);
+    border: 1px solid var(--border-strong);
     color: var(--text-dim);
     font-size: 11px;
-    padding: 4px 12px;
-    border-radius: 6px;
+    padding: 2px 10px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
-    transition: color 0.12s, border-color 0.12s;
+    transition: color 0.12s, border-color 0.12s, background 0.12s;
   }
   .rl-btn:hover:not(:disabled) {
     color: var(--accent);
     border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .rl-btn:disabled {
     opacity: 0.4;
@@ -313,9 +315,11 @@
   }
   .conn-badge {
     font-size: 10px;
-    padding: 2px 8px;
+    padding: 1px 8px;
     border-radius: 999px;
-    font-family: var(--font-sans, sans-serif);
+    font-family: inherit;
+    font-weight: 600;
+    line-height: 1.7;
   }
   .conn-badge.ok {
     color: var(--success);
@@ -332,9 +336,9 @@
   .remote-empty {
     font-size: 12px;
     color: var(--text-dim);
-    padding: 18px;
-    border: 1px dashed var(--border);
-    border-radius: 10px;
+    padding: 16px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius);
     text-align: center;
   }
   .remote-empty.small {
@@ -344,15 +348,15 @@
   .repo-list {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 3px;
   }
   .repo-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 10px;
+    padding: 6px 10px;
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 12px;
     transition: border-color 0.12s, background 0.12s;
@@ -362,7 +366,7 @@
   }
   .repo-row.selected {
     border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 7%, transparent);
   }
   .repo-check {
     color: var(--accent);
@@ -382,13 +386,14 @@
   }
   .del-btn {
     background: none;
-    border: 1px solid color-mix(in srgb, var(--error) 45%, transparent);
+    border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
     color: var(--error);
     font-size: 10px;
-    padding: 2px 8px;
-    border-radius: 5px;
+    padding: 1px 8px;
+    border-radius: var(--radius-sm);
     cursor: pointer;
     flex-shrink: 0;
+    transition: background 0.12s;
   }
   .del-btn:hover:not(:disabled) {
     background: color-mix(in srgb, var(--error) 12%, transparent);
@@ -407,9 +412,9 @@
     align-items: center;
     gap: 8px;
     font-size: 11px;
-    padding: 4px 8px;
-    border-radius: 6px;
-    background: var(--surface);
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
   }
   .dl-result.ok .dl-icon { color: var(--success); }
   .dl-result:not(.ok) { color: var(--error); }

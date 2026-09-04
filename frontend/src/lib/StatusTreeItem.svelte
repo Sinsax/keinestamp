@@ -187,7 +187,7 @@
     color: var(--text-dim);
   }
   .sp-dir-icon {
-    width: 16px;
+    width: 15px;
     flex-shrink: 0;
     display: inline-flex;
     align-items: center;
@@ -211,15 +211,15 @@
     font-size: 9px;
     font-weight: 600;
     color: var(--text-dim);
-    border: 1px solid var(--border);
-    border-radius: 4px;
+    background: var(--surface2);
+    border-radius: 3px;
     padding: 0 5px;
     flex-shrink: 0;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.3px;
+    line-height: 1.8;
   }
   :global(.sp-badge-3d) {
     color: var(--accent) !important;
-    border-color: var(--accent) !important;
     font-weight: 700 !important;
   }
 </style>
