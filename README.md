@@ -1,12 +1,24 @@
 # Keinestamp
 
-**Blender 项目进度看板** —— 本地优先的记录 / 回退 / 局域网备份 / 网页时间线部署。
+**二进制工程进度看板**（当前深度适配 Blender）—— 面向 `.blend`、贴图、视频、设计稿、
+游戏资产等大文件工程的本地优先记录 / 回退 / 局域网备份 / 网页时间线部署。
 
-后端使用 [Epic Games Lore](https://github.com/EpicGames/lore) 0.8.6（内容寻址、分块去重 VCS），
-大 `.blend` 反复保存不会撑大仓库。GUI（Tauri 2 + Svelte 5）与 CLI 共用同一套后端逻辑，
-纯本地离线可用，备份与网页部署按需开启。
+后端使用 [Epic Games Lore](https://github.com/EpicGames/lore) 0.8.6（内容寻址、分块去重 VCS）：
+同一份大文件反复保存只留一份内容，`.blend` 连存 10 次仓库增量 < 1%（实测 99.9% 去重）。
+GUI（Tauri 2 + Svelte 5）与 CLI 共用同一套后端逻辑，纯本地离线可用，备份与网页部署按需开启。
 
 ![主界面](docs/images/screenshot-main.png)
+
+## 适用范围
+
+- **通用能力**：任意文件 / 目录的记录、时间线、回退恢复、局域网备份与网页部署；
+  网页时间线支持图片、视频封面与 3D（GLB）预览
+- **内建预览**：`.blend` → GLB（Blender 导出）、`.glb/.gltf` 直接预览；
+  PNG/JPG/WebP/TGA/EXR 与 PSD/KRA/Sai 等设计源文件（尽力提取缩略图）；
+  MP4/MOV/WebM 取首帧（需系统安装 ffmpeg）
+- **当前重点**：Blender 工作流 + 网页时间线（GLB 预览、Blender 版本管理、流程 / 标签归类）
+- **其它工程类型**：记录 / 回退 / 备份 / 部署开箱可用，专属预览格式可按预览 Provider 扩展
+  （见 [docs/generalization-plan.md](docs/generalization-plan.md)）
 
 ## 功能
 
@@ -14,6 +26,8 @@
 - **时间线**：搜索 / 按流程筛选、里程碑、文件变动、与上一记录对比
 - **回退 / 恢复 / 顶替**：选择任意记录回退（工作区落到其父版本并检出该记录改动），可撤销回退；回退后继续记录即顶替
 - **去重存储**：Lore 分块去重，`.blend` 连存 10 次仓库增量 < 1%（实测 99.9% 去重）
+- **多类型预览**：3D（`.blend` → GLB、`.glb/.gltf` 直接预览）、图片 / 设计源文件、视频封面，
+  网页时间线中直接查看
 - **3D 预览**：标记的 `.blend` 自动导出 GLB，浏览器内旋转查看
 - **局域网备份**：`备份` = `lore push` 到 loreserver；离线仓库可一键迁移为在线
 - **网页时间线**：多租户 `serve` 一键部署到自建服务器；令牌登录、深浅主题、移动端可用
@@ -29,9 +43,9 @@
 > 便携版 = `Keinestamp.exe` + 同目录 `lore-bin/`（`lore.exe`、`loreserver.exe`、`LICENSE`）。
 > 启动时校验捆绑的 Lore 版本必须为 `0.8.6`。
 
-1. 启动后点「+ 新建项目」，选择 Blender 项目目录（或已含 `.blend` 的目录）
+1. 启动后点「+ 新建项目」，选择工程目录（Blender 项目目录，或任意需要版本管理的目录）
 2. 在左侧「变更」面板勾选要纳入本次记录的文件，点右上「记录」
-3. 填写记录说明，可选流程分类 / 标签 / 是否生成 3D 预览
+3. 填写记录说明，可选流程分类 / 标签 / 是否生成预览
 
 ![设置页](docs/images/screenshot-settings.png)
 

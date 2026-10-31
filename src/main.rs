@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 #[command(
     name = "keinestamp",
     version,
-    about = "Keinestamp - Blender Lore Progress Board"
+    about = "Keinestamp - Binary Project Progress Board (Lore)"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -185,7 +185,7 @@ fn main() -> anyhow::Result<()> {
             Ok(())
         }
         None => {
-            println!("Keinestamp - Blender Lore Progress Board");
+            println!("Keinestamp - Binary Project Progress Board (Lore)");
             println!("用法: keinestamp <子命令> [选项]");
             println!(
                 "子命令: init, record, push, pull, rollback, restore, status, log, config, export, serve, deploy, download-blender, list-blender-versions"

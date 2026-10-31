@@ -1,6 +1,6 @@
 # Keinestamp v2（Lore 后端）
 
-Single-binary CLI + Tauri GUI Blender Git Progress Board，后端为 Epic Games **Lore** 0.8.6（分块去重 VCS）。Rust Edition 2024。
+Single-binary CLI + Tauri GUI **二进制工程进度看板**（Blender 优先），后端为 Epic Games **Lore** 0.8.6（分块去重 VCS）。Rust Edition 2024。
 
 ## Commands
 
