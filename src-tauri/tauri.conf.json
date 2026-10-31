@@ -1,12 +1,12 @@
 {
   "productName": "Keinestamp",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "identifier": "com.keinestamp.desktop",
   "build": {
     "frontendDist": "../frontend/dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build"
+    "beforeDevCommand": "npm --prefix frontend run dev",
+    "beforeBuildCommand": "npm --prefix frontend run build"
   },
   "app": {
     "windows": [

@@ -1,4 +1,4 @@
-﻿/target
+/target
 frontend/node_modules
 frontend/dist
 src-tauri/target
@@ -7,6 +7,7 @@ src-tauri/gen
 *.ico
 *.icns
 /test
+!docs/images/*.png
 # 运行时生成
 serve.toml
 _three/
@@ -21,3 +22,5 @@ src-tauri/resources/lore-bin/
 # ZCode 会话产物（计划/上下文，不入库）
 .zcode/
 
+# 内部评审材料（含本机 token 与审查记录，不发布）
+review/
