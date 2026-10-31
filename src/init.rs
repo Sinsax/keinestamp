@@ -86,8 +86,9 @@ fn perform_init(project_root: &Path) -> Result<()> {
     std::fs::create_dir_all(web_root)
         .with_context(|| format!("failed to create web directory {:?}", web_root))?;
 
-    write_timeline_json(web_root)?;
-    write_index_html(web_root)?;
+    // 只在缺失时写：无条件覆写会把已有的 milestone / tombstone / 回退 marker
+    // 连同整个时间线缓存一起清空（审查 P1-9）
+    ensure_web_structure(web_root)?;
 
     let meta_path = config::meta_path(project_root);
     config::write_meta(&meta_path, &meta)
@@ -102,14 +103,14 @@ fn perform_init(project_root: &Path) -> Result<()> {
 /// branch reset 校验——程序只追踪项目内容；web 产物由磁盘生成、部署 zip 上传，不入库）。
 /// 不覆盖用户已有规则（只补缺失行）。文件被提交（规则随仓库历史，与 gitignore 同语义）。
 fn ensure_loreignore(project_root: &Path) -> Result<()> {
-    let mut rules = crate::hidden::load_ignore_rules(project_root);
+    let rules = crate::hidden::load_ignore_rules(project_root);
     const PRESETS: [&str; 1] = [crate::hidden::PRIVATE_DIR];
     for preset in PRESETS {
         if !rules.iter().any(|r| r == preset) {
-            rules.insert(0, preset.to_string());
+            // 只插入缺失行，保留用户原有注释与顺序（不整体重写）
+            crate::hidden::add_ignore_rule(project_root, preset)?;
         }
     }
-    crate::hidden::save_ignore_rules(project_root, &rules)?;
     Ok(())
 }
 
@@ -137,7 +138,7 @@ fn write_timeline_json(web_root: &Path) -> Result<()> {
         "entries": []
     });
     let content = serde_json::to_string_pretty(&timeline)?;
-    std::fs::write(web_root.join("timeline.json"), &content)
+    crate::process_util::atomic_write(&web_root.join("timeline.json"), content.as_bytes())
         .with_context(|| format!("failed to write timeline.json to {:?}", web_root))?;
     Ok(())
 }
@@ -163,6 +164,28 @@ fn write_index_html(web_root: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn test_reinit_preserves_timeline_cache() {
+        // init 必须幂等：重复初始化不能把已有时间线缓存（含 tombstone/回退 marker）清空
+        let dir = std::env::temp_dir().join(format!("keinestamp_reinit_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        super::init_project(&dir).unwrap();
+
+        let tp = dir.join(".keinestamp").join("web").join("timeline.json");
+        let mut tl = crate::timeline::read_timeline(&tp).unwrap();
+        tl.removed_entries.push("deadbeef".to_string());
+        crate::timeline::write_timeline(&tp, &tl).unwrap();
+
+        super::init_project(&dir).unwrap();
+        let after = crate::timeline::read_timeline(&tp).unwrap();
+        assert!(
+            after.removed_entries.contains(&"deadbeef".to_string()),
+            "重复 init 不得清空时间线缓存（tombstone 丢失）"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     fn tmp_dir(name: &str) -> std::path::PathBuf {

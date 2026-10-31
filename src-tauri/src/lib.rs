@@ -522,13 +522,14 @@ async fn pull(path: String) -> Result<(), String> {
         let meta = read_meta(&p)?;
         eprintln!("[debug] pull: project_root={}", meta.project_root.display());
 
+        // 必须走远程通道：run_lore 强制 --offline，sync --offline 是空操作却 exit 0，
+        // 旧实现会"成功"返回但什么都没拉（审查 P1-3）
         if has_remote_impl(&meta.project_root) {
-            map_err(keinestamp::lore_backend::run_lore(
+            map_err(keinestamp::lore_backend::sync_from_server(
                 &meta.project_root,
-                &["sync"],
             ))?;
         } else {
-            eprintln!("[debug] pull: no lore remote, skipping");
+            return Err("该项目没有配置远端（离线仓库），无法拉取".to_string());
         }
 
         eprintln!("[debug] pull → ok");
@@ -611,12 +612,8 @@ fn add_skip_worktree(project_root: String, path: String) -> Result<(), String> {
     );
     validate_entry(&path)?;
     let root = PathBuf::from(&project_root);
-    let normalized = path.trim_end_matches('/').to_string();
-    let mut rules = keinestamp::hidden::load_ignore_rules(&root);
-    if !rules.iter().any(|r| *r == normalized) {
-        rules.push(normalized);
-    }
-    map_err(keinestamp::hidden::save_ignore_rules(&root, &rules))
+    // 只插入这一条，保留文件里其它注释/顺序（旧实现会整体重写，注释被抹掉）
+    map_err(keinestamp::hidden::add_ignore_rule(&root, &path))
 }
 
 #[tauri::command]
@@ -627,10 +624,7 @@ fn remove_ignore(project_root: String, entry: String) -> Result<(), String> {
     );
     validate_entry(&entry)?;
     let root = PathBuf::from(&project_root);
-    let needle = entry.trim_end_matches('/').to_string();
-    let rules = keinestamp::hidden::load_ignore_rules(&root);
-    let kept: Vec<String> = rules.into_iter().filter(|r| *r != needle).collect();
-    map_err(keinestamp::hidden::save_ignore_rules(&root, &kept))
+    map_err(keinestamp::hidden::remove_ignore_rule(&root, &entry))
 }
 
 fn validate_entry(entry: &str) -> Result<(), String> {
@@ -654,12 +648,7 @@ fn add_to_gitignore(project_root: String, entry: String) -> Result<(), String> {
     );
     validate_entry(&entry)?;
     let root = PathBuf::from(&project_root);
-    let normalized = entry.trim_end_matches('/').to_string();
-    let mut rules = keinestamp::hidden::load_ignore_rules(&root);
-    if !rules.iter().any(|r| *r == normalized) {
-        rules.push(normalized);
-    }
-    map_err(keinestamp::hidden::save_ignore_rules(&root, &rules))
+    map_err(keinestamp::hidden::add_ignore_rule(&root, &entry))
 }
 
 #[tauri::command]
@@ -722,8 +711,11 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
                         // 只有确认 HEAD 已前进（current_revision 读取成功且 != rollback_point）才清理——
                         // 半状态残留（HEAD 已前进但 marker 未清——异常退出/恢复失败等）：
                         // 自动清理（marker + 备份），避免"恢复按钮 disabled + 回退态残留"卡死
-                        eprintln!("[debug] rollback marker 不一致（HEAD 已前进），自动清理回退态");
-                        let _ = keinestamp::lore_project::clear_rollback(&meta.project_root);
+                        eprintln!("[debug] rollback marker 不一致（HEAD 已前进），自动清理回退态标记");
+                        // 只清 marker，**不删备份目录**：这是 10 秒轮询路径，
+                        // 一旦它去删 .keinestamp/rollback-backup-*，恢复失败的唯一副本就没了
+                        // （2026-10 复核 P0）。备份留给下一次回退/恢复或用户手动处理。
+                        let _ = keinestamp::timeline::clear_rollback(&meta.project_root);
                         return Ok(serde_json::json!({
                             "rollback_point": null,
                             "head_matches": true,
@@ -991,6 +983,24 @@ fn get_tag_groups(path: String) -> Result<Vec<keinestamp::tag_groups::TagGroup>,
     let p = PathBuf::from(&path);
     let meta = read_meta(&p)?;
     map_err(keinestamp::tag_groups::load_tag_groups(&meta.project_root))
+}
+
+#[tauri::command]
+fn save_tag_groups(
+    path: String,
+    groups: Vec<keinestamp::tag_groups::TagGroup>,
+) -> Result<Vec<keinestamp::tag_groups::TagGroup>, String> {
+    let p = PathBuf::from(&path);
+    let meta = read_meta(&p)?;
+    map_err(keinestamp::tag_groups::save_tag_groups(
+        &meta.project_root,
+        &groups,
+    ))
+}
+
+#[tauri::command]
+fn get_default_tag_groups() -> Vec<keinestamp::tag_groups::TagGroup> {
+    keinestamp::tag_groups::default_tag_groups()
 }
 
 #[tauri::command]
@@ -1724,7 +1734,8 @@ fn open_site(url: String) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_shell::init())
+        // 不注册 tauri-plugin-shell：全部进程启动都走 std::process::Command 并自带
+        // 参数校验，注册 shell 只会多一条"从 webview 执行命令"的通路（审查 F16）
         .setup(|app| {
             use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -1810,6 +1821,8 @@ pub fn run() {
             export_entry,
             get_timeline,
             get_tag_groups,
+            save_tag_groups,
+            get_default_tag_groups,
             compare_entries,
             get_recent,
             add_recent,

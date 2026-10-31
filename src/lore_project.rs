@@ -42,7 +42,10 @@ pub fn changed_files(project_root: &Path, hidden: &[String]) -> Result<Vec<LoreS
     // 只有当前 HEAD 树中真实存在的路径才算“已删除”；不在树中的删除应静默消失。
     if lines.iter().any(|f| f.state == LoreState::Deleted) {
         if let Ok(head) = lore_backend::current_revision(project_root) {
-            if let Ok(tree_files) = dump_tree_files(project_root, &head) {
+            if head.is_empty() || head.chars().all(|c| c == '0') {
+                // 空仓库（尚无提交）没有 HEAD 树 → 任何 D 都是幻影（2026-10 复核 P2）
+                lines.retain(|f| f.state != LoreState::Deleted);
+            } else if let Ok(tree_files) = dump_tree_files(project_root, &head) {
                 let tree: HashSet<String> = tree_files.into_iter().collect();
                 lines.retain(|f| f.state != LoreState::Deleted || tree.contains(&f.path));
             }
@@ -61,7 +64,7 @@ pub fn record(
     record_with_category(project_root, message, tag, None, None, selected, hidden)
 }
 
-/// 带流程分类和多标签的记录（如 modeling / painting / video）。
+/// 带流程分类和多标签的记录（流程如 blender / 自定义流程）。
 pub fn record_with_category(
     project_root: &Path,
     message: &str,
@@ -160,7 +163,11 @@ pub fn record_with_category(
         }
         lore_backend::commit_files(project_root, message, &meta, &paths)?
     };
-    crate::timeline::rebuild_cache(project_root)?;
+    // 提交已经落库：重建时间线失败不能把整个记录报成失败——否则用户重试会
+    // 产生一条空记录/重复记录（审查 P1-4）。下次记录或打开项目时会再次重建。
+    if let Err(e) = crate::timeline::rebuild_cache(project_root) {
+        eprintln!("[record] 记录已提交（{rev}），但时间线重建失败（将在下次记录时重试）: {e}");
+    }
     Ok(rev)
 }
 
@@ -227,9 +234,7 @@ fn reset_files_to(project_root: &Path, revision: &str, paths: &[String]) -> Resu
             std::fs::create_dir_all(parent)?;
         }
     }
-    let mut args: Vec<&str> = vec!["file", "reset", "--revision", revision];
-    args.extend(paths.iter().map(String::as_str));
-    lore_backend::run_lore(project_root, &args)?;
+    lore_backend::run_lore_paths(project_root, &["file", "reset", "--revision", revision], paths)?;
     Ok(())
 }
 
@@ -299,7 +304,10 @@ pub fn rollback(
         // 首次回退失败：把已备份的 dirty 还原回工作区（否则文件"消失"，
         // 下次回退 backup_dirty_to 清空备份目录会导致数据丢失）；
         // HEAD 可能已被 branch_reset 移动（后续检出步骤失败）→ 尽力还原回 head_before
-        let _ = restore_backup_at(project_root, &rollback_backup_dir(project_root), &[]);
+        if let Err(e) = restore_backup_at(project_root, &rollback_backup_dir(project_root), &[]) {
+            // 还原失败：备份目录仍在（restore 失败不删目录），保留即可重试
+            eprintln!("[rb] 回退失败后自动还原失败（备份已保留，可手动恢复）: {e}");
+        }
         if let Ok(cur) = lore_backend::current_revision(project_root) {
             if cur != head_before {
                 let _ = lore_backend::branch_reset(project_root, &head_before);
@@ -386,11 +394,9 @@ fn rollback_inner(
                 }
                 // stage 全部（含磁盘缺失的——D 状态；全部 remove 成功/缺失才走到这，无"未变更"路径）
                 if !remove_paths.is_empty() {
-                    let mut args: Vec<&str> = vec!["stage"];
-                    for p in &remove_paths {
-                        args.push(p);
-                    }
-                    if let Err(e) = lore_backend::run_lore(project_root, &args) {
+                    if let Err(e) =
+                        lore_backend::run_lore_paths(project_root, &["stage"], &remove_paths)
+                    {
                         for done in &removed_ok {
                             let _ = write_back(project_root, done, revision);
                         }
@@ -543,9 +549,13 @@ pub fn rollback_modified_files(project_root: &Path) -> Result<Vec<String>> {
         }
     }
     for f in all {
-        // 未跟踪不在树 → 不算树的修改（残留/副本/新建不阻碍丢弃/恢复判定；
-        // untracked 检出文件已在 change_files 循环处理）
         if f.state == LoreState::Untracked {
+            // 回退检出的新增（在 change_files 内）= 检出产物，丢弃无需确认；
+            // 但回退期间用户新建的 untracked 是真实工作，必须计入"真修改"——
+            // 否则连续回退的 discard_dirty 会在没有任何提示的情况下把它删掉（审查 P0-1）。
+            if !marker.change_files.contains(&f.path) {
+                out.push(f.path.clone());
+            }
             continue;
         }
         // 回退删除文件（deleted_files）属于回退检出的一部分，不是用户“真修改”，不触发恢复确认
@@ -561,31 +571,82 @@ pub fn rollback_modified_files(project_root: &Path) -> Result<Vec<String>> {
     Ok(out)
 }
 
-/// 丢弃回退期间的未提交更改（连续回退确认后）：Modified/Deleted 还原到 HEAD，untracked 物理删除。
+/// 丢弃回退期间的未提交更改（连续回退确认后）：Modified/Deleted 还原到 HEAD，
+/// untracked 移入 .keinestamp/discard-backup-*（用户已确认丢弃，但留一份可找回的副本）。
 /// staged（Added）与首次回退的 backup_dirty_to 一致：bail（staged state 会阻止 branch reset，不物理删文件）。
 fn discard_dirty(project_root: &Path, hidden: &[String]) -> Result<()> {
     let files = changed_files(project_root, hidden)?;
     let mut reset_paths: Vec<String> = Vec::new();
+    // 丢弃的未跟踪内容不物理删除，移进可找回的丢弃备份（用户确认过"丢弃"，
+    // 但这是唯一不依赖 revision 历史的副本，留一份成本极低）
+    let discard_dir = project_root.join(crate::hidden::PRIVATE_DIR).join(format!(
+        "discard-backup-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
+    let mut discarded = 0usize;
     for f in &files {
         match f.state {
             LoreState::Modified | LoreState::Deleted => reset_paths.push(f.path.clone()),
             LoreState::Untracked => {
-                // 回退期间新建的 untracked（首次回退时工作区 untracked 已被备份移出）——
-                // 确认丢弃 = 物理删除（与弹窗文案一致）
-                let _ = std::fs::remove_file(project_root.join(&f.path));
+                let src = project_root.join(&f.path);
+                if !src.is_file() {
+                    continue;
+                }
+                let dst = discard_dir.join(&f.path);
+                if let Some(parent) = dst.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                std::fs::copy(&src, &dst)?;
+                std::fs::remove_file(&src)?;
+                discarded += 1;
             }
             LoreState::Added => bail!("存在已暂存的改动（staged state），请先处理后回退"),
             _ => {}
         }
     }
     if !reset_paths.is_empty() {
-        let mut args: Vec<&str> = vec!["file", "reset"];
-        for p in &reset_paths {
-            args.push(p);
-        }
-        lore_backend::run_lore(project_root, &args)?;
+        lore_backend::run_lore_paths(project_root, &["file", "reset"], &reset_paths)?;
+    }
+    if discarded > 0 {
+        eprintln!(
+            "[rb] 丢弃的未跟踪文件已移入 {}（{} 个）",
+            discard_dir.display(),
+            discarded
+        );
+        prune_discard_backups(project_root, 5);
     }
     Ok(())
+}
+
+/// 丢弃备份只保留最近 N 份，避免反复回退把磁盘塞满。
+fn prune_discard_backups(project_root: &Path, keep: usize) {
+    prune_prefixed_dirs(project_root, "discard-backup-", keep);
+    // 归档下来的"未消费旧备份"同样限量（正常情况下不会有，只有失败重试才产生）
+    prune_prefixed_dirs(project_root, "rollback-backup-prev-", 3);
+}
+
+fn prune_prefixed_dirs(project_root: &Path, prefix: &str, keep: usize) {
+    let private = project_root.join(crate::hidden::PRIVATE_DIR);
+    let Ok(rd) = std::fs::read_dir(&private) else {
+        return;
+    };
+    let mut dirs: Vec<PathBuf> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with(prefix))
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    // 目录名带纳秒时间戳 → 字典序即时间序
+    dirs.sort();
+    if dirs.len() <= keep {
+        return;
+    }
+    for old in &dirs[..dirs.len() - keep] {
+        let _ = std::fs::remove_dir_all(old);
+    }
 }
 
 /// 取消单个文件的更改（git restore 语义）：`lore file reset <path>` 还原到 HEAD——
@@ -782,8 +843,9 @@ fn finish_rollback_restore(
     }
     if !reset_paths.is_empty() {
         let t_write = std::time::Instant::now();
+        // 写回失败必须中止：继续走下去会清 marker + 删备份，工作区停在半状态且无法重试
         if let Err(e) = reset_files_to(project_root, &marker.head_before, &reset_paths) {
-            eprintln!("[restore] 写回检出文件失败（继续恢复）: {e}");
+            bail!("恢复失败：写回检出文件出错（{}），回退状态与备份已保留，可重试：{e}", reset_paths.len());
         }
         eprintln!(
             "[restore] write_back: {}ms ({} files)",
@@ -793,9 +855,13 @@ fn finish_rollback_restore(
     }
     // 先恢复回退前暂存（全部），再恢复回退期间改动（后写优先；exclude_new = 丢弃项）
     let backup_dir = rollback_backup_dir(project_root);
-    let _ = restore_backup_at(project_root, &backup_dir, &[]);
+    // 还原失败必须向上传播：这是用户回退前未提交改动的唯一副本，
+    // 吞错后继续 remove_dir_all 就是永久数据丢失（审查 P0-2）
+    restore_backup_at(project_root, &backup_dir, &[])
+        .context("恢复失败：回退前暂存的文件无法还原（备份已保留，可修复问题后重试）")?;
     if new_backup {
-        let _ = restore_backup_at(project_root, &new_dir, exclude_new);
+        restore_backup_at(project_root, &new_dir, exclude_new)
+            .context("恢复失败：回退期间的改动无法还原（备份已保留，可重试）")?;
     }
     let _ = std::fs::remove_dir_all(&backup_dir);
     let _ = std::fs::remove_dir_all(&new_dir);
@@ -853,9 +919,21 @@ fn restore_untracked_from_backup(project_root: &Path) -> Result<()> {
 
 /// 清回退标记 + 暂存备份（顶替记录后保留未追踪内容，放弃其余暂存内容）
 pub fn clear_rollback(project_root: &Path) -> Result<()> {
-    // 回退态提交是用户确认过的顶替操作：把之前移出的未追踪内容合并回工作区
-    let _ = restore_untracked_from_backup(project_root);
-    let _ = std::fs::remove_dir_all(rollback_backup_dir(project_root));
+    // 回退态提交是用户确认过的顶替操作：把之前移出的未追踪内容合并回工作区。
+    // 合并失败时**保留备份目录**（宁可留垃圾也不丢唯一副本），下次回退/恢复会处理。
+    let merge_failed = match restore_untracked_from_backup(project_root) {
+        Ok(()) => false,
+        Err(e) => {
+            eprintln!(
+                "[rb] 合并未跟踪内容失败，备份目录已保留（{}）：{e}",
+                rollback_backup_dir(project_root).display()
+            );
+            true
+        }
+    };
+    if !merge_failed {
+        let _ = std::fs::remove_dir_all(rollback_backup_dir(project_root));
+    }
     let _ = std::fs::remove_dir_all(rollback_backup_new_dir(project_root));
     crate::timeline::clear_rollback(project_root)
 }
@@ -920,6 +998,7 @@ fn backup_dirty_to_with_files(
     let mut reset_paths: Vec<String> = Vec::new();
     let mut deleted = Vec::new();
     let mut backup_files = Vec::new();
+    let mut untracked = Vec::new();
     for f in files {
         match f.state {
             LoreState::Modified => {
@@ -930,16 +1009,32 @@ fn backup_dirty_to_with_files(
                 deleted.push(f.path.clone());
                 reset_paths.push(f.path.clone());
             }
-            // 未追踪内容不回退、不移动：Lore branch reset 实测可保留 untracked 在工作区
-            LoreState::Untracked => {}
+            // 未跟踪内容必须移出工作区并备份：它们不在任何 revision 树里，
+            // 一旦后续连续回退走到 discard_dirty 就再也找不回来（2026-10 审查 P0-1）。
+            LoreState::Untracked => untracked.push(f.path.clone()),
             LoreState::Added => bail!("存在已暂存的改动（staged state），请先处理后回退"),
             _ => {}
         }
     }
-    if reset_paths.is_empty() {
+    if reset_paths.is_empty() && untracked.is_empty() {
         return Ok(false);
     }
-    let _ = std::fs::remove_dir_all(dir);
+    // 目录已存在 = 上一次回退/恢复留下但尚未消费的备份（可能正是唯一一份副本）。
+    // 直接 remove_dir_all 会把它删掉——改成挪到旁边保留（2026-10 复核 P0）。
+    if dir.exists() {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let aside = dir.with_file_name(format!("rollback-backup-prev-{stamp}"));
+        std::fs::rename(dir, &aside).with_context(|| {
+            format!(
+                "存在未消费的回退备份且无法归档（{}），已中止以免覆盖：请先恢复或手动清理",
+                dir.display()
+            )
+        })?;
+        eprintln!("[rb] 旧的未消费备份已归档到 {}", aside.display());
+    }
     for p in &backup_files {
         let src = project_root.join(p);
         if src.is_file() {
@@ -950,21 +1045,33 @@ fn backup_dirty_to_with_files(
             std::fs::copy(&src, &dst)?;
         }
     }
-    if !deleted.is_empty() {
-        // 仅删除时目录可能尚未创建
+    // 未跟踪：先复制进备份目录，再移出工作区（Lore branch reset 不接受带本地内容的 untracked）。
+    // 复制成功但删除失败时仍然保留副本，调用方按失败处理更安全。
+    for p in &untracked {
+        let src = project_root.join(p);
+        if !src.is_file() {
+            continue;
+        }
+        let dst = dir.join(p);
+        if let Some(parent) = dst.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::copy(&src, &dst)?;
+        std::fs::remove_file(&src).with_context(|| {
+            format!("未跟踪文件已备份但无法移出工作区（可能被占用）：{}", p)
+        })?;
+    }
+    if !deleted.is_empty() || !untracked.is_empty() {
+        // 仅删除/仅未跟踪时目录可能尚未创建
         std::fs::create_dir_all(dir)?;
-        let meta = serde_json::json!({ "deleted": deleted });
+        let meta = serde_json::json!({ "deleted": deleted, "untracked": untracked });
         std::fs::write(
             dir.join("backup-meta.json"),
             serde_json::to_string_pretty(&meta)?,
         )?;
     }
     if !reset_paths.is_empty() {
-        let mut args: Vec<&str> = vec!["file", "reset"];
-        for p in &reset_paths {
-            args.push(p);
-        }
-        lore_backend::run_lore(project_root, &args)?;
+        lore_backend::run_lore_paths(project_root, &["file", "reset"], &reset_paths)?;
     }
     Ok(true)
 }
@@ -987,8 +1094,9 @@ fn restore_backup_at(project_root: &Path, dir: &Path, exclude: &[String]) -> Res
             }
         }
     }
-    let _ = std::fs::remove_file(&meta_path);
+    // 先复制再删 meta：复制失败时 meta 必须还在，否则重试会丢掉"已删除文件"清单
     copy_tree_excl(dir, project_root, exclude)?;
+    let _ = std::fs::remove_file(&meta_path);
     // 删除清单同样遵守 exclude（冲突解决选"回退前改动"的文件不执行删除）
     for p in &deleted {
         if exclude.iter().any(|e| e == p) {
@@ -1009,6 +1117,11 @@ fn copy_tree_excl(src: &Path, dst: &Path, exclude: &[String]) -> Result<()> {
             .map(|p| p.to_string_lossy().replace('\\', "/"))
             .unwrap_or_default();
         if exclude.iter().any(|e| e == &rel) {
+            continue;
+        }
+        // 备份目录里的元数据文件不是用户内容：复制到工作区会变成"凭空多出来的文件"，
+        // 下一次 record 还会把它提交进历史（2026-10 复核发现的回归）
+        if rel == "backup-meta.json" {
             continue;
         }
         let to = dst.join(entry.file_name());
@@ -1390,17 +1503,13 @@ mod tests {
             "回退前 dirty 暂存移出（工作区 = r1 的 b.txt）"
         );
         assert!(
-            root.join("new.txt").exists(),
-            "untracked 文件应保留在工作区，不回退不移动"
+            !root.join("new.txt").exists(),
+            "untracked 必须移出工作区（否则连续回退会静默丢失——审查 P0-1）"
         );
         assert_eq!(
-            std::fs::read_to_string(root.join("new.txt")).unwrap(),
+            std::fs::read_to_string(root.join(".keinestamp/rollback-backup/new.txt")).unwrap(),
             "n",
-            "untracked 内容不变"
-        );
-        assert!(
-            !root.join(".keinestamp/rollback-backup/new.txt").exists(),
-            "untracked 不应进入备份"
+            "untracked 内容原样进备份"
         );
         assert!(rollback_state(&root).unwrap().active);
         // 撤销回退：HEAD 回 r2 + 暂存 dirty 取回（无冲突自动带回）
@@ -1433,20 +1542,16 @@ mod tests {
 
         // 工作区有未追踪内容
         std::fs::write(root.join("new.txt"), "untracked-content").unwrap();
-        // 回退 r2：未追踪内容应保留在工作区，不进入备份
+        // 回退 r2：未追踪内容移出工作区进入备份（回退态的工作区必须精确等于目标版本）
         rollback(&root, &r2, &vec![".keinestamp/".to_string()], false).unwrap();
         assert!(
-            root.join("new.txt").exists(),
-            "回退后未追踪内容保留在工作区"
+            !root.join("new.txt").exists(),
+            "回退后未追踪内容应移出工作区"
         );
         assert_eq!(
-            std::fs::read_to_string(root.join("new.txt")).unwrap(),
+            std::fs::read_to_string(root.join(".keinestamp/rollback-backup/new.txt")).unwrap(),
             "untracked-content",
-            "未追踪内容不变"
-        );
-        assert!(
-            !root.join(".keinestamp/rollback-backup/new.txt").exists(),
-            "未追踪内容不应进入备份"
+            "未追踪内容原样进备份"
         );
 
         // 回退态直接提交（顶替）→ 未追踪内容继续保留
@@ -1862,8 +1967,9 @@ mod tests {
     }
 
     #[test]
-    fn test_rollback_consecutive_discard_drops_untracked() {
-        // 连续回退确认丢弃：untracked（回退期间新建）也物理删除（与弹窗文案一致）
+    fn test_rollback_consecutive_discard_moves_untracked_to_discard_backup() {
+        // 连续回退：回退期间新建的 untracked 视为真修改（必须先确认）；
+        // 确认丢弃后移入 .keinestamp/discard-backup-*（可找回），不物理删除
         let root = tmp_root("rbconsuntracked");
         create_repo(&root).unwrap();
         std::fs::write(root.join("a.txt"), "v1").unwrap();
@@ -1873,12 +1979,28 @@ mod tests {
         std::fs::write(root.join("a.txt"), "v3").unwrap();
         let r3 = record(&root, "r3", None, None, &vec![".keinestamp/".to_string()]).unwrap();
 
-        // 首次回退 r2 → 回退期间新建 untracked（不在树，不算"真修改"）
+        // 首次回退 r2 → 回退期间新建 untracked（用户真实工作，必须计入真修改）
         rollback(&root, &r2, &vec![".keinestamp/".to_string()], false).unwrap();
         std::fs::write(root.join("new.txt"), "n").unwrap();
-        // 连续回退 r3：untracked 不算修改 → 不弹确认，直接丢弃（discard_dirty 物理删除）
-        rollback(&root, &r3, &vec![".keinestamp/".to_string()], false).unwrap();
-        assert!(!root.join("new.txt").exists(), "丢弃后 untracked 应删除");
+        assert!(
+            rollback_modified_files(&root)
+                .unwrap()
+                .contains(&"new.txt".to_string()),
+            "回退期间新建的 untracked 必须计入真修改"
+        );
+        // 连续回退 r3 未确认 → 拒绝
+        let err = rollback(&root, &r3, &vec![".keinestamp/".to_string()], false).unwrap_err();
+        assert!(err.to_string().contains("需要丢弃确认"), "err: {err}");
+        assert!(root.join("new.txt").exists(), "拒绝时不得动用户文件");
+        // 确认丢弃 → 文件移入 discard-backup，可找回
+        rollback(&root, &r3, &vec![".keinestamp/".to_string()], true).unwrap();
+        assert!(!root.join("new.txt").exists(), "丢弃后工作区不再有该文件");
+        let found = std::fs::read_dir(root.join(".keinestamp"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("discard-backup"))
+            .any(|e| e.path().join("new.txt").is_file());
+        assert!(found, "丢弃的文件必须留在 discard-backup 里可找回");
         let _ = r1;
     }
 
@@ -2342,9 +2464,11 @@ mod tests {
     }
 
     #[test]
-    fn test_rollback_untracked_not_modified() {
-        // 回退后：untracked 残留/新建文件（不在树）不算"真修改"——丢弃/恢复弹窗不列出；
-        // 修改过检出内容（hash≠）仍算
+    fn test_rollback_untracked_semantics() {
+        // 未跟踪文件有两种身份（2026-10 审查 P0-1 修正）：
+        // - 回退检出产物（在 marker.change_files 内）→ 丢弃不需要确认
+        // - 回退期间用户新建（不在 change_files）→ 属于真修改，丢弃前**必须**确认，
+        //   否则连续回退会在没有任何提示的情况下把用户的工作删掉
         let root = tmp_root("rbuntracked");
         create_repo(&root).unwrap();
         std::fs::write(root.join(crate::hidden::LOREIGNORE), ".keinestamp/\n").unwrap();
@@ -2359,12 +2483,12 @@ mod tests {
         std::fs::write(root.join("newfile.txt"), "新文件").unwrap();
         let modified = rollback_modified_files(&root).unwrap();
         assert!(
-            !modified.contains(&"leftover.txt".to_string()),
-            "untracked 残留不算修改: {modified:?}"
+            modified.contains(&"leftover.txt".to_string()),
+            "回退期间新建的 untracked 必须计入真修改: {modified:?}"
         );
         assert!(
-            !modified.contains(&"newfile.txt".to_string()),
-            "untracked 新文件不算修改: {modified:?}"
+            modified.contains(&"newfile.txt".to_string()),
+            "回退期间新建的 untracked 必须计入真修改: {modified:?}"
         );
         // 修改检出内容（a.txt 改为 v3）→ 算修改
         std::fs::write(root.join("a.txt"), "v3").unwrap();
@@ -2373,11 +2497,19 @@ mod tests {
             modified2.contains(&"a.txt".to_string()),
             "修改检出内容算修改: {modified2:?}"
         );
-        // 恢复：untracked 残留不弹确认直接恢复（modified 含 a.txt 时才确认——清回 v2 后恢复）
+        // 未确认时必须拒绝
+        let err = undo_rollback(&root, &vec![".keinestamp/".to_string()], None).unwrap_err();
+        assert!(err.to_string().contains("需要确认"), "err: {err}");
+        // 确认丢弃 → 恢复成功，且用户新建的 untracked 仍然被带回工作区（不是被删）
         std::fs::write(root.join("a.txt"), "v2").unwrap();
-        undo_rollback(&root, &vec![".keinestamp/".to_string()], None).unwrap();
+        undo_rollback(&root, &vec![".keinestamp/".to_string()], Some(true)).unwrap();
         assert_eq!(lore_backend::current_revision(&root).unwrap(), r2);
         assert!(!rollback_state(&root).unwrap().active);
+        assert_eq!(
+            std::fs::read_to_string(root.join("newfile.txt")).unwrap(),
+            "新文件",
+            "恢复不得删除用户新建的未跟踪文件"
+        );
         let _ = r1;
     }
 
@@ -2764,4 +2896,227 @@ mod tests {
         assert_eq!(std::fs::read_to_string(dest.join("a.txt")).unwrap(), "x");
         let _ = r2;
     }
+
+    // ---- PR-1 回归测试：回退链路的 untracked 语义与备份安全 ----
+
+
+    #[test]
+    fn test_restore_does_not_copy_backup_meta_to_project_root() {
+        // 备份目录里的 backup-meta.json 是内部元数据，复制到工作区会凭空多出文件，
+        // 下一次 record 还会把它提交进历史（2026-10 复核发现的回归）
+        let root = tmp_root("rbmeta");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        let r1 = record(&root, "r1", None, None, &hidden).unwrap();
+        std::fs::write(root.join("untracked.txt"), "u").unwrap();
+        rollback(&root, &r1, &hidden, false).unwrap();
+        assert!(
+            rollback_backup_dir(&root).join("backup-meta.json").is_file(),
+            "前置：回退应写入 backup-meta.json"
+        );
+        undo_rollback(&root, &hidden, None).unwrap();
+        assert!(
+            !root.join("backup-meta.json").exists(),
+            "backup-meta.json 不得被还原到项目根"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_tag_category_roundtrip() {
+        // lore 对长键（tag_category，12 字符）不补空格：`tag_category: painting`。
+        // 解析器如果要求「键后有空格」就会把应用自己写的元数据全部读丢（复核 P1 回归）
+        let root = tmp_root("tagcat");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join(crate::hidden::LOREIGNORE), ".keinestamp/\n").unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        record_with_category(
+            &root,
+            "cat",
+            Some("painting"),
+            Some("painting"),
+            None,
+            None,
+            &hidden,
+        )
+        .unwrap();
+        let tl = crate::timeline::read_timeline(&crate::timeline::timeline_cache_path(&root)).unwrap();
+        let e = tl.entries.last().unwrap();
+        assert_eq!(
+            e.tag_category.as_deref(),
+            Some("painting"),
+            "tag_category（长键、无补空格）必须能解析回来"
+        );
+        assert_eq!(e.tag.as_deref(), Some("painting"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_milestone_survives_rebuild() {
+        // ★ 只存在于 timeline.json（lore 无法回写已提交 revision 的 metadata），
+        // 重建缓存必须沿用旧值，否则下一次记录就把里程碑抹掉（审查 P1-7）
+        let root = tmp_root("mskeep");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join(crate::hidden::LOREIGNORE), ".keinestamp/\n").unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        let r1 = record(&root, "r1", None, None, &hidden).unwrap();
+
+        let tp = crate::timeline::timeline_cache_path(&root);
+        crate::timeline::set_entry_milestone(&tp, &r1, true).unwrap();
+
+        std::fs::write(root.join("a.txt"), "v2").unwrap();
+        record(&root, "r2", None, None, &hidden).unwrap();
+
+        let tl = crate::timeline::read_timeline(&tp).unwrap();
+        let e = tl.entries.iter().find(|e| e.id == r1).unwrap();
+        assert!(e.milestone, "里程碑必须跨重建保留");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_record_many_files_batches_argv() {
+        // Windows 命令行 32 KB 上限：一次把上千个路径塞进 lore stage 会 os error 206。
+        // 1200 个约 45 字节的路径 ≈ 54 KB，必须被自动分批（审查 P1-2）。
+        let root = tmp_root("manyfiles");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join(crate::hidden::LOREIGNORE), ".keinestamp/\n").unwrap();
+        std::fs::create_dir_all(root.join("tex")).unwrap();
+        for i in 0..1200 {
+            std::fs::write(
+                root.join(format!("tex/albedo_variant_{:04}_highres.png", i)),
+                b"x",
+            )
+            .unwrap();
+        }
+        let rev = record(&root, "bulk", None, None, &hidden).unwrap();
+        let tree = lore_backend::dump_tree_entries(&root, &rev).unwrap();
+        assert!(
+            tree.len() >= 1200,
+            "全部文件都应入库，实际 {}",
+            tree.len()
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_first_rollback_moves_untracked_into_backup() {
+        let root = tmp_root("rbu");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        record(&root, "r1", None, None, &hidden).unwrap();
+        std::fs::write(root.join("a.txt"), "v2").unwrap();
+        let r2 = record(&root, "r2", None, None, &hidden).unwrap();
+
+        std::fs::write(root.join("my_new_work.txt"), "PRECIOUS").unwrap();
+
+        rollback(&root, &r2, &hidden, false).unwrap();
+
+        assert!(
+            !root.join("my_new_work.txt").exists(),
+            "首次回退必须把 untracked 移出工作区（否则连续回退会静默删除它）"
+        );
+        let stashed = rollback_backup_dir(&root).join("my_new_work.txt");
+        assert!(stashed.is_file(), "untracked 必须备份到 rollback-backup");
+        assert_eq!(std::fs::read_to_string(&stashed).unwrap(), "PRECIOUS");
+
+        undo_rollback(&root, &hidden, None).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(root.join("my_new_work.txt")).unwrap(),
+            "PRECIOUS",
+            "恢复必须把 untracked 带回工作区"
+        );
+    }
+
+    #[test]
+    fn test_continuous_rollback_new_untracked_requires_confirm() {
+        let root = tmp_root("rbnew");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        record(&root, "r1", None, None, &hidden).unwrap();
+        std::fs::write(root.join("a.txt"), "v2").unwrap();
+        let r2 = record(&root, "r2", None, None, &hidden).unwrap();
+        std::fs::write(root.join("a.txt"), "v3").unwrap();
+        let r3 = record(&root, "r3", None, None, &hidden).unwrap();
+
+        rollback(&root, &r2, &hidden, false).unwrap();
+
+        std::fs::write(root.join("work_in_progress.txt"), "WIP").unwrap();
+
+        let modified = rollback_modified_files(&root).unwrap();
+        assert!(
+            modified.iter().any(|p| p == "work_in_progress.txt"),
+            "回退期间新建的 untracked 必须计入真修改（否则丢弃时不弹确认），实际: {:?}",
+            modified
+        );
+
+        let err = rollback(&root, &r3, &hidden, false).unwrap_err();
+        assert!(
+            err.to_string().contains("需要丢弃确认"),
+            "未确认时必须拒绝丢弃，实际: {err}"
+        );
+        assert!(
+            root.join("work_in_progress.txt").exists(),
+            "被拒绝的连续回退不得动用户文件"
+        );
+
+        rollback(&root, &r3, &hidden, true).unwrap();
+        assert!(
+            !root.join("work_in_progress.txt").exists(),
+            "确认丢弃后工作区应不再有该文件"
+        );
+        let discard_root = root.join(".keinestamp");
+        let found = std::fs::read_dir(&discard_root)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with("discard-backup"))
+            .any(|e| e.path().join("work_in_progress.txt").is_file());
+        assert!(
+            found,
+            "确认丢弃的文件必须留在 .keinestamp/discard-backup-* 里可找回"
+        );
+    }
+
+    #[test]
+    fn test_restore_failure_preserves_backup() {
+        // 注意：临时目录名必须全局唯一（tmp_root 只用 pid 区分进程），
+        // 与 test_rollback_failure_restores_dirty 的 "rbfail" 区分开
+        let root = tmp_root("rbfail2");
+        let hidden = vec![".keinestamp/".to_string()];
+        create_repo(&root).unwrap();
+        std::fs::write(root.join("a.txt"), "v1").unwrap();
+        std::fs::write(root.join("b.txt"), "b1").unwrap();
+        let r1 = record(&root, "r1", None, None, &hidden).unwrap();
+        std::fs::write(root.join("b.txt"), "B-DIRTY").unwrap();
+
+        rollback(&root, &r1, &hidden, false).unwrap();
+        let backup = rollback_backup_dir(&root);
+        assert!(backup.join("b.txt").is_file(), "前置：改动已暂存");
+
+        // 备份里把 b.txt 变成目录；工作区 b.txt 是文件 → 还原时 create_dir_all 必失败
+        std::fs::remove_file(backup.join("b.txt")).unwrap();
+        std::fs::create_dir_all(backup.join("b.txt")).unwrap();
+        std::fs::write(backup.join("b.txt").join("x.txt"), "x").unwrap();
+        std::fs::write(backup.join("SENTINEL.txt"), "keep me").unwrap();
+
+        let err = undo_rollback(&root, &hidden, None).unwrap_err();
+        assert!(
+            err.to_string().contains("恢复失败"),
+            "还原失败必须报错而不能静默成功，实际: {err}"
+        );
+        assert!(
+            backup.join("SENTINEL.txt").is_file(),
+            "还原失败时备份必须完整保留（不能吞错后删备份）"
+        );
+        assert!(
+            crate::timeline::read_marker(&root).unwrap().is_some(),
+            "还原失败时不得清除回退 marker"
+        );
+    }
 }
+

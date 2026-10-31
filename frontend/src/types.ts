@@ -37,7 +37,7 @@ export interface TimelineEntry {
   tag?: string | null
   /** 多标签：同一记录可多选多个二级标签 */
   tags?: string[]
-  /** 流程分类：modeling / painting / video（可选） */
+  /** 流程分类：流程 id（默认 blender；旧记录可能是 modeling / painting / video） */
   tag_category?: string | null
   milestone?: boolean
   /** 记录级预览总开关（关闭后该记录所有预览不渲染；文件保留）。后端字段为 snake_case */

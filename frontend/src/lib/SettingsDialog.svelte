@@ -7,11 +7,14 @@
     path = '',
     recentPaths = [],
     onOpenProject = (_path: string) => {},
+    onTagGroupsSaved = (_groups: api.TagGroup[]) => {},
     onClose,
   }: {
     path?: string
     recentPaths?: string[]
     onOpenProject?: (path: string) => void
+    /** 保存流程/标签后回传规范化结果，主界面立即刷新（记录弹窗与时间线筛选） */
+    onTagGroupsSaved?: (groups: api.TagGroup[]) => void
     onClose: () => void
   } = $props()
 
@@ -21,7 +24,7 @@
   let loreServerIp = $state('')
   // 两个端口走一个 IP（勾选时 loreserver IP 灰显，共用部署 IP）
   let sameIp = $state(true)
-  let activeTab = $state<'main' | 'server'>('main')
+  let activeTab = $state<'main' | 'tags' | 'server'>('main')
   let savedLoreUrl = $state('')
   // 服务开关（网页部署 / loreserver；false=关闭，测试与远端列表按此启用）
   let deployEnabled = $state(false)
@@ -54,6 +57,15 @@
   let connectStatus = $state<'none' | 'ok' | 'fail'>('none')
   let loreStatus = $state<'none' | 'ok' | 'fail'>('none')
   let savedFeedback = $state(false)
+  // 保存失败必须可见：整块 catch{} 会让"保存失败"和"保存中"长得一模一样，
+  // 而且前面已成功的项已经落盘（半保存状态），用户完全无法察觉（2026-10 审查 P1）
+  let saveError = $state('')
+  // 流程 / 标签（项目级 .keinestamp/tags.toml；与其他设置一起在「保存」时写入）
+  let tagGroups = $state<api.TagGroup[]>([])
+  let tagDrafts = $state<Record<string, string>>({})
+  let tagLoading = $state(false)
+  let tagError = $state('')
+  let tagsDirty = $state(false)
 
   onMount(() => {
     (async () => {
@@ -94,6 +106,7 @@
     })()
 
     loadInstalled()
+    if (path) void loadTagGroups()
 
     const unlistenPromise = listen<BlenderProgress>('blender-download-progress', (event) => {
       dlPhase = event.payload.phase
@@ -136,6 +149,111 @@
     try {
       currentBlenderVersion = await api.getCurrentBlenderVersion()
     } catch { /* ignore */ }
+  }
+
+  function detailOf(e: any): string {
+    return typeof e === 'string' ? e : (e?.message ?? String(e))
+  }
+
+  async function loadTagGroups() {
+    if (!path) return
+    tagLoading = true
+    tagError = ''
+    try {
+      tagGroups = await api.getTagGroups(path)
+      syncTagDrafts()
+      tagsDirty = false
+    } catch (e: any) {
+      tagError = `读取流程与标签失败：${detailOf(e)}`
+    } finally {
+      tagLoading = false
+    }
+  }
+
+  function syncTagDrafts() {
+    const next: Record<string, string> = {}
+    for (const g of tagGroups) next[g.id] = tagDrafts[g.id] ?? ''
+    tagDrafts = next
+  }
+
+  // 流程 id 写入历史记录的 tag_category；删除流程后不复用旧 id，避免旧记录被错误归属
+  function nextFlowId(): string {
+    const used = new Set(tagGroups.map((g) => g.id))
+    let id = ''
+    do {
+      id = `flow-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`
+    } while (used.has(id))
+    return id
+  }
+
+  function nextFlowLabel(): string {
+    const baseLabel = '新流程'
+    const used = new Set(tagGroups.map((g) => g.label.trim()))
+    if (!used.has(baseLabel)) return baseLabel
+    let n = 2
+    while (used.has(`${baseLabel} ${n}`)) n++
+    return `${baseLabel} ${n}`
+  }
+
+  function addFlow() {
+    const id = nextFlowId()
+    tagGroups = [...tagGroups, { id, label: nextFlowLabel(), tags: [] }]
+    tagDrafts[id] = ''
+    tagsDirty = true
+  }
+
+  function removeFlow(id: string) {
+    if (tagGroups.length <= 1) return
+    tagGroups = tagGroups.filter((g) => g.id !== id)
+    const next = { ...tagDrafts }
+    delete next[id]
+    tagDrafts = next
+    tagsDirty = true
+  }
+
+  function addTag(group: api.TagGroup) {
+    const tag = (tagDrafts[group.id] || '').trim()
+    if (!tag) return
+    if (!group.tags.includes(tag)) group.tags = [...group.tags, tag]
+    tagDrafts[group.id] = ''
+    tagsDirty = true
+  }
+
+  function removeTag(group: api.TagGroup, tag: string) {
+    group.tags = group.tags.filter((t) => t !== tag)
+    tagsDirty = true
+  }
+
+  async function resetTagGroups() {
+    try {
+      const defaults = await api.getDefaultTagGroups()
+      tagGroups = defaults.map((g) => ({ ...g, tags: [...g.tags] }))
+      syncTagDrafts()
+      tagsDirty = true
+    } catch (e: any) {
+      tagError = `恢复默认失败：${detailOf(e)}`
+    }
+  }
+
+  /** 校验并返回可写入的配置；错误信息直接给保存失败提示用 */
+  function collectTagGroups(): api.TagGroup[] {
+    const cleaned = tagGroups.map((g) => ({
+      id: g.id.trim(),
+      label: g.label.trim(),
+      tags: g.tags.map((t) => t.trim()).filter(Boolean),
+    }))
+    if (cleaned.length === 0) throw new Error('至少保留一个流程')
+    const seenIds = new Set<string>()
+    const seenLabels = new Set<string>()
+    for (const g of cleaned) {
+      if (!g.id) throw new Error('流程 ID 不能为空')
+      if (!g.label) throw new Error('流程名称不能为空')
+      if (seenIds.has(g.id)) throw new Error(`流程 ID 重复：${g.id}`)
+      if (seenLabels.has(g.label)) throw new Error(`流程名称重复：${g.label}`)
+      seenIds.add(g.id)
+      seenLabels.add(g.label)
+    }
+    return cleaned
   }
 
   function isInstalled(v: string): boolean {
@@ -232,27 +350,53 @@
 
   async function save() {
     saving = true
+    saveError = ''
     let switched = false
+    // 记录当前步骤：失败时告诉用户「哪一项没存进去」，而不是静默停在"保存"
+    let step = '保存部署令牌'
     try {
       // 选中已安装版本且与当前使用版本不同 → 保存时切换当前 Blender 版本
       if (selectedVersion && isInstalled(selectedVersion) && selectedVersion !== currentBlenderVersion) {
+        step = '切换 Blender 版本'
         await api.setCurrentBlenderVersion(selectedVersion)
         currentBlenderVersion = selectedVersion
         switched = true
       }
+      step = '保存部署令牌'
       await api.setDeployToken(deployToken)
+      step = '保存部署服务器地址'
       await api.setDeployServerUrl(deployUrl())
+      step = '保存备份服务器地址'
       await api.setLoreServerUrl(loreUrl())
+      step = '保存自动恢复设置'
       await api.setAutoRestoreProject(autoRestoreProject)
+      step = '保存提交身份'
       await api.setLoreIdentity(loreIdentity)
+      step = '保存自动连接设置'
       await api.setAutoConnect(autoConnect)
+      step = '保存关闭行为'
       await api.setCloseAction(closeAction === 'tray')
+      step = '保存服务器开关'
       await api.setServerToggles(deployEnabled, loreEnabled)
+      // 项目级流程/标签放在最后：即使写失败，全局设置也已保存（错误提示会注明）
+      if (path && tagsDirty) {
+        step = '保存流程与标签'
+        const saved = await api.saveTagGroups(path, collectTagGroups())
+        tagGroups = saved
+        syncTagDrafts()
+        tagsDirty = false
+        onTagGroupsSaved(saved)
+      }
       savedFeedback = true
       switchNotice = switched ? `当前版本已切换（Blender ${selectedVersion}）` : ''
       setTimeout(() => { savedFeedback = false; switchNotice = '' }, 2500)
-    } catch { /* ignore */ }
-    saving = false
+    } catch (e: any) {
+      const detail = typeof e === 'string' ? e : (e?.message ?? String(e))
+      saveError = `${step}失败：${detail}（此前已成功的项已保存）`
+      console.error('[settings] save failed at', step, e)
+    } finally {
+      saving = false
+    }
   }
 
   interface BlenderProgress {
@@ -278,6 +422,7 @@
 
     <div class="sd-tabs">
       <button class="sd-tab" class:active={activeTab === 'main'} onclick={() => (activeTab = 'main')}>Blender / 通用</button>
+      <button class="sd-tab" class:active={activeTab === 'tags'} onclick={() => (activeTab = 'tags')}>流程 / 标签</button>
       <button class="sd-tab" class:active={activeTab === 'server'} onclick={() => (activeTab = 'server')}>服务器 / 远端仓库</button>
     </div>
 
@@ -335,6 +480,57 @@
           <span class="dl-status error">{dlMessage}</span>
         {/if}
       </div>
+    </div>
+    {/if}
+
+    {#if activeTab === 'tags'}
+    <div class="section">
+      <div class="section-title">流程与标签</div>
+      {#if !path}
+        <div class="tag-empty">先打开一个项目后再配置流程与标签（配置保存在项目内，仅对本项目生效）</div>
+      {:else if tagLoading}
+        <div class="tag-empty">正在读取流程配置...</div>
+      {:else if tagError}
+        <div class="tag-empty error">{tagError}</div>
+        <div class="flow-actions">
+          <button class="mini-btn" onclick={() => void loadTagGroups()}>重试</button>
+        </div>
+      {:else}
+        <span class="hint">流程用于给记录归类，每个流程可维护常用标签；仅对当前项目生效，默认只有一个 Blender 流程。</span>
+        {#each tagGroups as group (group.id)}
+          <div class="flow-card">
+            <div class="flow-head">
+              <input class="flow-label" type="text" bind:value={group.label} oninput={() => (tagsDirty = true)} placeholder="流程名称" aria-label="流程名称" />
+              <button class="mini-btn del" onclick={() => removeFlow(group.id)} disabled={tagGroups.length <= 1} title="至少保留一个流程">删除</button>
+            </div>
+            <div class="flow-tags">
+              {#each group.tags as tag (tag)}
+                <span class="flow-tag">{tag}<button class="tag-x" onclick={() => removeTag(group, tag)} title="移除标签" aria-label="移除标签">×</button></span>
+              {/each}
+              {#if group.tags.length === 0}
+                <span class="flow-tag-empty">暂无标签（记录时仍可输入自定义标签）</span>
+              {/if}
+            </div>
+            <div class="flow-add">
+              <input
+                type="text"
+                bind:value={tagDrafts[group.id]}
+                placeholder="输入标签后回车添加"
+                aria-label="新标签"
+                onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(group) } }}
+              />
+              <button class="mini-btn" onclick={() => addTag(group)} disabled={!(tagDrafts[group.id] || '').trim()}>添加</button>
+            </div>
+          </div>
+        {/each}
+        <div class="flow-actions">
+          <button class="mini-btn" onclick={addFlow}>+ 添加流程</button>
+          <button class="mini-btn" onclick={() => void resetTagGroups()} title="恢复为默认的单个 Blender 流程（点击保存后才写入）">恢复默认</button>
+          {#if tagsDirty}
+            <span class="flow-dirty">有未保存的修改</span>
+          {/if}
+        </div>
+      {/if}
     </div>
     {/if}
 
@@ -421,7 +617,18 @@
         </label>
       </div>
       <div class="field">
-        <label for="sd-lore-identity">提交身份</label>
+        <div class="label-row">
+          <label for="sd-lore-identity">提交身份</label>
+          <button type="button" class="tip" aria-label="提交身份的命名规则">
+            ?
+            <span class="tip-bubble" role="tooltip">
+              <b>命名自由，不要求 @local</b>
+              <span>推荐「名字@主机」形式：para@local / zhangsan@studio-pc</span>
+              <span>留空则回落到默认 keinestamp@local</span>
+              <span>只影响之后的新记录，历史作者不变</span>
+            </span>
+          </button>
+        </div>
         <input id="sd-lore-identity" type="text" bind:value={loreIdentity} placeholder="keinestamp@local" />
         <span class="hint">记录提交的作者标识（程序级全局设置）</span>
       </div>
@@ -437,13 +644,27 @@
     {/if}
 
     <div class="actions">
+      {#if saveError}
+        <span class="save-error" role="alert" title={saveError}>{saveError}</span>
+      {/if}
       <button onclick={onClose}>取消</button>
-      <button class="accent" onclick={save} disabled={saving} title={switchNotice || ''}>{saving ? '保存中…' : switchNotice ? '已切换 ✓' : savedFeedback ? '已保存 ✓' : '保存'}</button>
+      <button class="accent" onclick={save} disabled={saving} title={switchNotice || saveError || ''}>{saving ? '保存中…' : switchNotice ? '已切换 ✓' : savedFeedback ? '已保存 ✓' : '保存'}</button>
     </div>
   </div>
 </div>
 
 <style>
+  /* 保存失败提示：贴在操作区左侧，长文本省略但 title 可完整查看 */
+  .save-error {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11.5px;
+    color: var(--error);
+    text-align: left;
+  }
   .sd-tabs {
     display: flex;
     gap: 2px;
@@ -492,6 +713,51 @@
   .field label { display: block; font-size: 11.5px; color: var(--text-dim); margin-bottom: 4px; }
   .field input[type="text"], .field input[type="password"] { width: 100%; }
   .hint { display: block; font-size: 10px; color: var(--text-dim); margin-top: 3px; }
+  .label-row { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .label-row label { margin-bottom: 0; }
+  /* 提交身份命名说明：悬停/聚焦 ? 显示气泡；面板可滚动，气泡宽度控制在面板内 */
+  .tip {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 14px;
+    height: 14px;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid var(--border-strong);
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 9.5px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: help;
+    flex-shrink: 0;
+  }
+  .tip:hover { border-color: var(--tint); background: transparent; color: var(--tint); }
+  .tip:focus-visible { border-color: var(--tint); color: var(--tint); outline: none; }
+  .tip-bubble {
+    display: none;
+    position: absolute;
+    left: -6px;
+    top: calc(100% + 7px);
+    z-index: 20;
+    width: 316px;
+    padding: 8px 10px;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 10.5px;
+    font-weight: 400;
+    line-height: 1.55;
+    color: var(--text);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-md);
+    pointer-events: none;
+  }
+  .tip-bubble b { font-weight: 650; }
+  .tip:hover .tip-bubble, .tip:focus-visible .tip-bubble { display: flex; }
   .dl-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
   .dl-row button { font-size: 12px; padding: 3px 12px; }
   .dl-row .del {
@@ -590,5 +856,57 @@
   .connect-btn:hover:not(:disabled) { background: var(--surface2); }
   .connect-btn:disabled { opacity: 0.4; cursor: default; }
 .conn-result { display: block; font-size: 11px; margin-top: 4px; color: var(--text-dim); }
+  /* 流程 / 标签设置 */
+  .tag-empty { font-size: 11.5px; color: var(--text-dim); padding: 4px 0; }
+  .tag-empty.error { color: var(--error); }
+  .flow-card {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface2);
+  }
+  .flow-head { display: flex; align-items: center; gap: 8px; }
+  .flow-label { flex: 1; min-width: 0; font-size: 12px; padding: 3px 8px; }
+  .mini-btn {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    color: var(--text);
+    white-space: nowrap;
+  }
+  .mini-btn:hover:not(:disabled) { background: var(--surface3); }
+  .mini-btn:disabled { opacity: 0.4; cursor: default; }
+  .mini-btn.del { color: var(--error); border-color: color-mix(in srgb, var(--error) 35%, transparent); }
+  .flow-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 7px; }
+  .flow-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    padding: 1px 4px 1px 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--text);
+  }
+  .tag-x {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 12px;
+    line-height: 1;
+    padding: 0 3px;
+    border-radius: 50%;
+  }
+  .tag-x:hover { color: var(--error); background: transparent; }
+  .flow-tag-empty { font-size: 10.5px; color: var(--text-dim); }
+  .flow-add { display: flex; gap: 6px; margin-top: 7px; }
+  .flow-add input { flex: 1; min-width: 0; font-size: 11.5px; padding: 2px 8px; }
+  .flow-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+  .flow-dirty { font-size: 10.5px; color: var(--accent); margin-left: auto; }
   .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 16px; }
 </style>

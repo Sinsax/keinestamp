@@ -87,6 +87,16 @@ export async function getTagGroups(path: string): Promise<TagGroup[]> {
   return invoke<TagGroup[]>('get_tag_groups', { path })
 }
 
+/** 保存项目级流程与标签配置（`.keinestamp/tags.toml`），返回后端规范化后的结果 */
+export async function saveTagGroups(path: string, groups: TagGroup[]): Promise<TagGroup[]> {
+  return invoke<TagGroup[]>('save_tag_groups', { path, groups })
+}
+
+/** 内置默认配置（单个 Blender 流程），用于设置页「恢复默认」 */
+export async function getDefaultTagGroups(): Promise<TagGroup[]> {
+  return invoke<TagGroup[]>('get_default_tag_groups')
+}
+
 export interface FileDiff {
   file: string
   diff: string

@@ -35,6 +35,64 @@ pub fn load_ignore_rules(project_root: &Path) -> Vec<String> {
         .collect()
 }
 
+/// 在保留**注释、空行、原有顺序**的前提下插入一条规则（已存在则不动）。
+/// 旧实现是 load(过滤注释) → save(只写规则)：用户写的注释会被静默删掉，
+/// 而 .loreignore 是随历史提交的文件，等于制造无意义 diff（审查 P1-8）。
+pub fn add_ignore_rule(project_root: &Path, rule: &str) -> Result<()> {
+    let rule = rule.trim();
+    if rule.is_empty() {
+        return Ok(());
+    }
+    let path = project_root.join(LOREIGNORE);
+    let existing = std::fs::read_to_string(&path).unwrap_or_default();
+    let existing = existing.strip_prefix('\u{feff}').unwrap_or(&existing).to_string();
+    if existing
+        .lines()
+        .any(|l| l.trim() == rule)
+    {
+        return Ok(());
+    }
+    // 预设规则放最前面（与旧行为一致），其它规则追加到末尾
+    let mut out = String::new();
+    out.push_str(rule);
+    out.push('\n');
+    out.push_str(&existing);
+    if !out.ends_with('\n') {
+        out.push('\n');
+    }
+    crate::process_util::atomic_write(&path, out.as_bytes())?;
+    Ok(())
+}
+
+/// 删除与 rule 完全相等的规则行，其余内容（注释/空行/顺序）逐字保留。
+pub fn remove_ignore_rule(project_root: &Path, rule: &str) -> Result<()> {
+    let needle = rule.trim().trim_end_matches('/').to_string();
+    let path = project_root.join(LOREIGNORE);
+    let content = match std::fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return Ok(()),
+    };
+    let has_bom = content.starts_with('\u{feff}');
+    let body = content.strip_prefix('\u{feff}').unwrap_or(&content);
+    let kept: Vec<&str> = body
+        .lines()
+        .filter(|l| {
+            let t = l.trim();
+            t.is_empty() || t.starts_with('#') || t.trim_end_matches('/') != needle
+        })
+        .collect();
+    let mut out = String::new();
+    if has_bom {
+        out.push('\u{feff}');
+    }
+    out.push_str(&kept.join("\n"));
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    crate::process_util::atomic_write(&path, out.as_bytes())?;
+    Ok(())
+}
+
 /// .loreignore 规则写入（无 BOM；文件被提交，规则随仓库历史——与 gitignore 同语义）
 pub fn save_ignore_rules(project_root: &Path, rules: &[String]) -> Result<()> {
     let mut content = String::new();
@@ -195,6 +253,35 @@ fn wildcard_match(pattern: &str, text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_ignore_rule_edits_preserve_comments_and_order() {
+        let dir = std::env::temp_dir().join(format!("keinestamp_ig_keep_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join(LOREIGNORE), "# 我的注释\n.keinestamp/\n\n*.bak\n").unwrap();
+
+        add_ignore_rule(&dir, "build/").unwrap();
+        let after_add = std::fs::read_to_string(dir.join(LOREIGNORE)).unwrap();
+        assert!(after_add.contains("# 我的注释"), "注释必须保留: {after_add:?}");
+        assert!(after_add.contains("*.bak"), "已有规则必须保留");
+        assert!(after_add.contains("build/"), "新规则必须写入");
+
+        remove_ignore_rule(&dir, "*.bak").unwrap();
+        let after_rm = std::fs::read_to_string(dir.join(LOREIGNORE)).unwrap();
+        assert!(after_rm.contains("# 我的注释"), "删除规则不得动注释");
+        assert!(!after_rm.contains("*.bak"), "规则应被删除");
+        assert!(after_rm.contains("build/"), "其它规则不得受影响");
+
+        add_ignore_rule(&dir, "build/").unwrap();
+        let dup = std::fs::read_to_string(dir.join(LOREIGNORE)).unwrap();
+        assert_eq!(
+            dup.matches("build/").count(),
+            1,
+            "重复添加不应产生重复行: {dup:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn test_load_hidden_presets_include_loreignore() {

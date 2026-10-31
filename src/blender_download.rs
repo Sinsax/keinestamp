@@ -299,6 +299,11 @@ pub fn download_blender_with_progress(
             bytes_total: 0,
         });
 
+        if !is_allowed_download_url(&url) {
+            last_err = Some(anyhow::anyhow!("拒绝非 HTTPS 下载源: {url}"));
+            continue;
+        }
+
         match streaming_download(&url, &archive_path, on_progress) {
             Ok(()) => {
                 if !archive_path.exists() {
@@ -313,6 +318,31 @@ pub fn download_blender_with_progress(
                     ));
                     continue;
                 }
+                // 完整性：至少把 sha256 记下来（写入 <version>.sha256 便于审计），
+                // 若设置了 KEINESTAMP_BLENDER_SHA256 则强制比对——上游没有公布固定哈希，
+                // 因此默认"记录 + 可 pin"，而不是假装校验过。
+                match crate::process_util::file_sha256_hex(&archive_path) {
+                    Ok(digest) => {
+                        eprintln!("[blender] 下载包 sha256 = {digest} ({url})");
+                        if let Ok(expected) = std::env::var("KEINESTAMP_BLENDER_SHA256") {
+                            let expected = expected.trim().to_ascii_lowercase();
+                            if !expected.is_empty() && expected != digest {
+                                let _ = std::fs::remove_file(&archive_path);
+                                last_err = Some(anyhow::anyhow!(
+                                    "Blender 安装包 sha256 不匹配（期望 {expected}，实际 {digest}），已丢弃"
+                                ));
+                                continue;
+                            }
+                        }
+                        let _ = std::fs::write(
+                            app_dir.join(format!("{ver}.sha256")),
+                            format!("{digest}  {url}\n"),
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[blender] 计算下载包 sha256 失败（继续解压）: {e}");
+                    }
+                }
                 return extract_blender(&app_dir, &archive_path, on_progress, ver);
             }
             Err(e) => {
@@ -324,6 +354,13 @@ pub fn download_blender_with_progress(
     }
 
     Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有镜像源均下载失败")))
+}
+
+/// 下载源必须是 HTTPS：压缩包会被解压并执行其中的 blender.exe，
+/// 明文 HTTP 等于把"执行任意二进制"的机会交给链路上的任何人。
+fn is_allowed_download_url(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.starts_with("https://")
 }
 
 fn extract_blender(
@@ -605,6 +642,17 @@ fn set_current_blender_version_at(dir: &Path, version: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_download_url_must_be_https() {
+        // 下载包会被解压并执行其中的 blender.exe：非 HTTPS 一律拒绝
+        assert!(is_allowed_download_url("https://download.blender.org/release/x.zip"));
+        assert!(is_allowed_download_url("HTTPS://mirror.example.com/x.zip"));
+        assert!(!is_allowed_download_url("http://download.blender.org/release/x.zip"));
+        assert!(!is_allowed_download_url("ftp://x/y.zip"));
+        assert!(!is_allowed_download_url("file:///C:/x.zip"));
+        assert!(!is_allowed_download_url(""));
+    }
 
     #[test]
     fn test_default_version() {

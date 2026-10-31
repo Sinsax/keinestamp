@@ -89,6 +89,29 @@ pub fn extract_composite(
     }
 
     // Image data section
+    // 头部宽高来自不受信文件：先做一次总量校验，避免下面 Vec::with_capacity 直接
+    // 按 height*width 申请内存（损坏 PSD 可触发分配失败 → abort，整个 Tauri 后端一起死）。
+    const MAX_PIXELS: usize = 64 * 1024 * 1024; // 64 M 像素 ≈ 8K×8K
+    // PSD 规范本身限 30000×30000；顺带把 with_capacity(height) 的行长度表也约束住
+    const MAX_DIM: usize = 30_000;
+    // 分配总量 = channels × pixels（RLE 放大后还要再乘几倍），必须一起设上限——
+    // 只限 pixels 的话，56 通道的 8K² 构造文件仍能申请 3.6GB（复核 N-2）
+    const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
+    if height == 0 || width == 0 || height > MAX_DIM || width > MAX_DIM {
+        return Ok(None);
+    }
+    let Some(total_pixels) = height.checked_mul(width) else {
+        return Ok(None);
+    };
+    if total_pixels == 0 || total_pixels > MAX_PIXELS {
+        return Ok(None);
+    }
+    let Some(total_bytes) = channels.checked_mul(total_pixels) else {
+        return Ok(None);
+    };
+    if channels == 0 || total_bytes > MAX_TOTAL_BYTES {
+        return Ok(None);
+    }
     let row_bytes = width; // 8-bit
     let mut channel_data: Vec<Vec<u8>> = Vec::new();
     for _ in 0..channels {
@@ -111,7 +134,11 @@ pub fn extract_composite(
                 pos = end;
             }
             1 => {
-                let mut data = Vec::with_capacity(height * row_bytes);
+                // 与上面的 raw 分支一致：用 checked_mul，别裸乘（原实现此处漏改）
+                let Some(cap) = height.checked_mul(row_bytes) else {
+                    return Ok(None);
+                };
+                let mut data = Vec::with_capacity(cap);
                 let mut row_lengths = Vec::with_capacity(height);
                 for _ in 0..height {
                     let Some(l) = read_u16(&bytes, pos).map(|v| v as usize) else {
@@ -344,6 +371,59 @@ mod tests {
         assert_eq!(&bytes[..8], &[137, 80, 78, 71, 13, 10, 26, 10]);
 
         std::fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
+
+    /// 头部声明超大尺寸时必须在分配内存之前拒绝（旧实现在 RLE 分支裸乘
+    /// height*width 做 with_capacity，损坏文件可让进程 abort）
+    #[test]
+    fn test_extract_composite_rejects_huge_dimensions() -> Result<()> {
+        let dir = tmp_dir("huge");
+        // 只造头部：宽高 60000x60000 = 3.6e9 像素
+        let mut psd = Vec::new();
+        psd.extend_from_slice(b"8BPS");
+        psd.extend_from_slice(&1u16.to_be_bytes());
+        psd.extend_from_slice(&[0u8; 6]);
+        psd.extend_from_slice(&3u16.to_be_bytes()); // channels
+        psd.extend_from_slice(&60000u32.to_be_bytes()); // height
+        psd.extend_from_slice(&60000u32.to_be_bytes()); // width
+        psd.extend_from_slice(&8u16.to_be_bytes());
+        psd.extend_from_slice(&3u16.to_be_bytes());
+        psd.extend_from_slice(&0u32.to_be_bytes());
+        psd.extend_from_slice(&0u32.to_be_bytes());
+        psd.extend_from_slice(&0u32.to_be_bytes());
+        // RLE 压缩标记 + 不完整的行长度表 → 旧实现会在 with_capacity 时先炸
+        psd.extend_from_slice(&1u16.to_be_bytes());
+        let path = dir.join("huge.psd");
+        std::fs::write(&path, psd)?;
+        let out = extract_composite(&path, &dir.join("out"), "thumb")?;
+        assert!(out.is_none(), "超大尺寸必须被拒绝，实际: {out:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    /// 通道数同样来自文件头：只限 pixels 不够，channels×pixels 也要设上限
+    #[test]
+    fn test_extract_composite_rejects_many_channels() -> Result<()> {
+        let dir = tmp_dir("channels");
+        let mut psd = Vec::new();
+        psd.extend_from_slice(b"8BPS");
+        psd.extend_from_slice(&1u16.to_be_bytes());
+        psd.extend_from_slice(&[0u8; 6]);
+        psd.extend_from_slice(&56u16.to_be_bytes()); // channels（远超合成所需）
+        psd.extend_from_slice(&7680u32.to_be_bytes()); // height
+        psd.extend_from_slice(&7680u32.to_be_bytes()); // width
+        psd.extend_from_slice(&8u16.to_be_bytes());
+        psd.extend_from_slice(&3u16.to_be_bytes());
+        psd.extend_from_slice(&0u32.to_be_bytes());
+        psd.extend_from_slice(&0u32.to_be_bytes());
+        psd.extend_from_slice(&0u32.to_be_bytes());
+        psd.extend_from_slice(&1u16.to_be_bytes()); // RLE
+        let path = dir.join("channels.psd");
+        std::fs::write(&path, psd)?;
+        let out = extract_composite(&path, &dir.join("out"), "thumb")?;
+        assert!(out.is_none(), "通道数×像素超预算必须拒绝，实际: {out:?}");
+        let _ = std::fs::remove_dir_all(&dir);
         Ok(())
     }
 

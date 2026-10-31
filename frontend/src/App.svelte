@@ -460,10 +460,20 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
     // 回退状态下任何提交都会顶替时间线，先弹警告确认
     if (rollbackState.rollback_point) {
+      // 回退态下「一个都没勾选」不等于空提交：后端会把它补成全部回退检出文件。
+      // 文案必须说清提交范围，否则用户以为什么都没提交（2026-10 审查 P1）
+      const checkedOut = rollbackState.change_files?.length ?? 0
+      const scopeNote =
+        files.length === 0 && checkedOut > 0
+          ? `你没有勾选任何文件，但当前处于回退状态：本次记录将提交全部 ${checkedOut} 个回退检出文件。\n`
+          : files.length > 0
+            ? `本次将提交 ${files.length} 个文件。\n`
+            : ''
       pendingConfirm = {
         kind: 'empty_record',
         title: '确认回退状态记录？',
         message:
+          scopeNote +
           '当前处于回退状态，提交将基于过去的版本创建新记录，并顶替当前时间线结构。\n' +
           '这可能会影响时间线，请确认是否继续？',
         data: { msg, tag, tagCategory, tags, noPreview, files, previewFiles },
@@ -637,10 +647,15 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   }
 
   async function refreshRollbackState() {
-    if (!activePath || projectType !== 'initialized') return
+    const path = activePath
+    if (!path || projectType !== 'initialized') return
     try {
-      rollbackState = await api.getRollbackState(activePath)
+      const st = await api.getRollbackState(path)
+      // 切项目后旧项目的响应不能覆盖新项目状态（否则横幅/恢复按钮会在错误项目上出现）
+      if (path !== activePath) return
+      rollbackState = st
     } catch (e: any) {
+      if (path !== activePath) return
       console.error('[rollbackState] error:', e)
     }
   }
@@ -1042,6 +1057,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
               onExportEntry={handleExportEntry}
               onRollback={handleRollback}
                             rollbackBusy={rollbackBusy}
+              {tagGroups}
             />
           </div>
         {/if}
@@ -1201,6 +1217,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     path={activePath || ''}
     recentPaths={recentProjects.map((r) => r.path)}
     onOpenProject={(p) => { showSettings = false; selectRecent(p) }}
+    onTagGroupsSaved={(groups) => (tagGroups = groups)}
     onClose={() => { showSettings = false; if (activePath) { loadProject(activePath); testConnection() } }} />
 {/if}
 

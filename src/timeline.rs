@@ -76,7 +76,7 @@ pub struct TimelineEntry {
     /// 多标签：同一记录可多选多个二级标签
     #[serde(default)]
     pub tags: Vec<String>,
-    /// 流程分类：modeling / painting / video（可选）
+    /// 流程分类：blender / 自定义流程（可选）
     #[serde(default)]
     pub tag_category: Option<String>,
     #[serde(default)]
@@ -350,6 +350,23 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
                 .collect()
         })
         .unwrap_or_default();
+    // 沿用文件列表：revision 一旦提交，"该记录改动了哪些文件"就永久不变，
+    // 每次重建都重算等于拿 N 次 lore dump 换一个不会变的答案（审查 P1-6）
+    let old_files: std::collections::HashMap<String, Vec<String>> = old_timeline
+        .as_ref()
+        .map(|t| {
+            t.entries
+                .iter()
+                .map(|e| (e.id.clone(), e.files.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+    // 沿用里程碑：★ 只存在于 timeline.json（lore 无法回写已提交 revision 的 metadata），
+    // 不沿用就会在下次记录时丢失（审查 P1-7）
+    let old_milestone: std::collections::HashMap<String, bool> = old_timeline
+        .as_ref()
+        .map(|t| t.entries.iter().map(|e| (e.id.clone(), e.milestone)).collect())
+        .unwrap_or_default();
     // 沿用预览失败诊断（重建缓存时不丢失已记录的失败原因）
     let old_preview_errors: std::collections::HashMap<String, Vec<String>> = old_timeline
         .as_ref()
@@ -361,19 +378,48 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
         })
         .unwrap_or_default();
     let hist = crate::lore_backend::revision_history(project_root)?;
-    let mut entries: Vec<TimelineEntry> = hist
-        .iter()
-        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("web"))
-        .filter(|r| r.metadata.get("kind").map(String::as_str) != Some("init"))
-        .filter(|r| !removed.contains(&r.id))
-        .map(|r| {
+    // 一次重建内按 revision 缓存树：旧实现每条记录都重新 dump 父树+目标树（2N 次），
+    // 现在每棵树最多 dump 一次，且已缓存过的记录直接复用文件列表。
+    let mut tree_cache: std::collections::HashMap<String, std::collections::HashMap<String, String>> =
+        std::collections::HashMap::new();
+    let mut entries: Vec<TimelineEntry> = Vec::new();
+    for (idx, r) in hist.iter().enumerate() {
+        if r.metadata.get("kind").map(String::as_str) == Some("web") {
+            continue;
+        }
+        if r.metadata.get("kind").map(String::as_str) == Some("init") {
+            continue;
+        }
+        if removed.contains(&r.id) {
+            continue;
+        }
+        {
             let old_preview = old_previews.get(&r.id).cloned().unwrap_or_default();
             let old_preview_type = old_preview_types
                 .get(&r.id)
                 .cloned()
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| infer_preview_type(&old_preview));
-            let files = entry_files(project_root, &r.id);
+            // 父 revision = history 序列里的下一条（lore 分支是线性的）；
+            // 这样不必为每条记录再 spawn 一次 `revision info`。
+            // history 若仍被 LENGTH 截断（或分支点），窗口最老一条没有下一条可比：
+            // 回退一次 revision_parent（优先读 timeline 缓存，缺了才 spawn）——否则
+            // files 会退化成整棵树并被旧缓存永久固化（复核 N-1）
+            let parent_id = match hist.get(idx + 1) {
+                Some(p) => Some(p.id.clone()),
+                None => crate::lore_backend::revision_parent(project_root, &r.id).unwrap_or(None),
+            };
+            // 只复用非空缓存：空列表可能是「真空记录」（只有私有 marker），也可能是
+            // 上一次 dump 失败留下的假空——两者无法区分，宁可重算（树缓存多半已命中）。
+            let files = match old_files.get(&r.id).filter(|f| !f.is_empty()) {
+                Some(cached) => cached.clone(),
+                None => entry_files_cached(
+                    project_root,
+                    parent_id.as_deref(),
+                    &r.id,
+                    &mut tree_cache,
+                ),
+            };
             let old_preview_list = old_preview_files.get(&r.id).cloned().unwrap_or_default();
             let previews = if !old_preview_list.is_empty() {
                 old_preview_list
@@ -387,7 +433,7 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
             } else {
                 Vec::new()
             };
-            TimelineEntry {
+            entries.push(TimelineEntry {
                 id: r.id.clone(),
                 timestamp: lore_date_to_iso(&r.date),
                 author: "lore".to_string(),
@@ -412,12 +458,18 @@ pub fn rebuild_cache(project_root: &Path) -> Result<()> {
                     .filter(|v: &Vec<String>| !v.is_empty())
                     .unwrap_or_else(|| r.metadata.get("tag").cloned().into_iter().collect()),
                 tag_category: r.metadata.get("tag_category").cloned(),
-                milestone: r.metadata.get("milestone").map(String::as_str) == Some("true"),
+                // metadata 里显式为 true 才算；否则沿用旧缓存里的 ★（GUI 打的里程碑只存缓存）
+                milestone: r.metadata.get("milestone").map(String::as_str) == Some("true")
+                    || old_milestone.get(&r.id).copied().unwrap_or(false),
                 superseded: false,
                 parent: String::new(),
+            });
+            // 长历史时不要把 N 棵树的路径全留在内存：当前这棵给下一轮当父树就够
+            if tree_cache.len() > 2 {
+                tree_cache.retain(|k, _| k == &r.id);
             }
-        })
-        .collect();
+        }
+    }
     // v1 语义：entries 旧→新（最新在尾部，append 顺序）；revision_history 是最新在前
     entries.reverse();
     // 主线即父链：旧→新顺序下 entries[i].parent = entries[i-1].id（回退时读缓存免 lore 调用）
@@ -470,8 +522,69 @@ fn lore_date_to_iso(date: &str) -> String {
         .unwrap_or_else(|_| date.to_string())
 }
 
-/// 该 revision 相对其父的改动文件列表（`revision diff <parent> --target <sig>` 状态行解析）。
-/// 首条 revision（无父）用 `repository dump` 列全部文件。容错：失败返回空数组。
+/// 该 revision 相对父 revision 的改动文件列表（父/目标两棵 `repository dump` 权威树比较）。
+/// 首条 revision（无父）返回整棵树。容错：dump 失败返回空数组。
+///
+/// 带树缓存：一次重建内每棵 revision 树最多 dump 一次，且父 revision 直接取自
+/// history 序列（不再逐条 spawn `revision info`）。
+fn entry_files_cached(
+    project_root: &Path,
+    parent: Option<&str>,
+    revision: &str,
+    cache: &mut std::collections::HashMap<String, std::collections::HashMap<String, String>>,
+) -> Vec<String> {
+    for rev in [Some(revision), parent].into_iter().flatten() {
+        if !cache.contains_key(rev) {
+            match crate::lore_backend::dump_tree_entries(project_root, rev) {
+                Ok(entries) => {
+                    cache.insert(rev.to_string(), entries.into_iter().collect());
+                }
+                Err(_) => return Vec::new(),
+            }
+        }
+    }
+    let Some(target_tree) = cache.get(revision) else {
+        return Vec::new();
+    };
+    let changed: Vec<String> = match parent {
+        None => target_tree.keys().cloned().collect(),
+        Some(p) => {
+            let Some(parent_tree) = cache.get(p) else {
+                return Vec::new();
+            };
+            let mut changed: Vec<String> = target_tree
+                .iter()
+                .filter(|(path, addr)| parent_tree.get(*path) != Some(*addr))
+                .map(|(path, _)| path.clone())
+                .collect();
+            for path in parent_tree.keys() {
+                if !target_tree.contains_key(path) {
+                    changed.push(path.clone());
+                }
+            }
+            changed
+        }
+    };
+    // 程序私有目录（.keinestamp/，含空记录 marker）与 .loreignore 不进时间线文件列表；
+    // 目录行（dump 里无 addr，解析时已排除）再做一次前缀过滤作双保险。
+    let files: Vec<String> = changed
+        .into_iter()
+        .filter(|p| {
+            !p.starts_with(crate::hidden::PRIVATE_DIR) && p != crate::hidden::LOREIGNORE
+        })
+        .collect();
+    files
+        .iter()
+        .filter(|p| {
+            !files
+                .iter()
+                .any(|q| q != *p && q.starts_with(&format!("{}/", p)))
+        })
+        .cloned()
+        .collect()
+}
+
+#[allow(dead_code)]
 fn entry_files(project_root: &Path, revision: &str) -> Vec<String> {
     let parent = match crate::lore_backend::revision_parent(project_root, revision) {
         Ok(p) => {

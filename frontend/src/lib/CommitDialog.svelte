@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { TagGroup } from '../api'
+  import { resolveTagCategory } from './tags'
 
   let {
     onConfirm,
@@ -24,10 +25,9 @@
     hasPreviewMarked?: boolean
   } = $props()
 
+  // 仅后端读取失败时兜底：默认只有一个 Blender 流程（原「建模流程」改名）
   const DEFAULT_TAG_GROUPS: TagGroup[] = [
-    { id: 'modeling', label: '建模流程', tags: ['建模', 'UV拆分', '绑定', '贴图', '修复'] },
-    { id: 'painting', label: '绘画流程', tags: ['草图', '线稿', '上色', '细化', '完稿'] },
-    { id: 'video', label: '视频流程', tags: ['剪辑', '调色', '特效', '字幕', '导出'] },
+    { id: 'blender', label: 'Blender', tags: ['建模', 'UV拆分', '绑定', '贴图', '修复'] },
   ]
   const TAG_GROUPS = $derived(tagGroups.length > 0 ? tagGroups : DEFAULT_TAG_GROUPS)
 
@@ -67,16 +67,17 @@
     const hasLast = lastTag || (lastTags && lastTags.length > 0)
     // 文件类型建议只作为提示，不再自动选中流程/标签，避免“勾了 png 就被迫选绘画流程”
     if (!hasLast) return
-    if (lastTagCategory) {
-      const known = TAG_GROUPS.some((g) => g.id === lastTagCategory)
-      if (known) category = lastTagCategory
+    const lastCategory = resolveTagCategory(lastTagCategory)
+    if (lastCategory) {
+      const known = TAG_GROUPS.some((g) => g.id === lastCategory)
+      if (known) category = lastCategory
     }
     if (lastTags && lastTags.length > 0) {
-      const group = TAG_GROUPS.find((g) => g.id === lastTagCategory) ?? TAG_GROUPS[0]
+      const group = TAG_GROUPS.find((g) => g.id === lastCategory) ?? TAG_GROUPS[0]
       selectedTags = lastTags.filter((t) => group.tags.includes(t))
       useCustom = false
     } else if (lastTag) {
-      const group = TAG_GROUPS.find((g) => g.id === lastTagCategory) ?? TAG_GROUPS[0]
+      const group = TAG_GROUPS.find((g) => g.id === lastCategory) ?? TAG_GROUPS[0]
       if (group.tags.includes(lastTag)) {
         selectedTags = [lastTag]
         useCustom = false

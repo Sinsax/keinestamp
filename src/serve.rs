@@ -18,6 +18,13 @@ const MAX_AUTH_FAILURES: u32 = 10;
 const AUTH_WINDOW_SECS: u64 = 60;
 const AUTH_BLOCK_SECS: u64 = 120;
 const MAX_CONCURRENT_REQUESTS: usize = 32;
+/// 单次 socket 读/写阻塞上限。tiny_http 0.12 自身不设置任何 socket 超时：
+/// 半开连接（只发头不发 body）会永久占住一个工作线程，几十条就能让整站不可用
+/// （2026-10 审查 P0-3）。这里在监听 socket 上设 SO_RCVTIMEO/SO_SNDTIMEO——
+/// Windows 上 accept 出的连接会继承该选项；Linux 不继承，生产环境需由反代兜底。
+const SOCKET_IO_TIMEOUT: Duration = Duration::from_secs(30);
+/// 槽位占满持续超过该时长就告警（纯观测，不改变行为）
+const STUCK_SLOTS_WARN_AFTER: Duration = Duration::from_secs(120);
 
 // --- Logger ---
 
@@ -127,8 +134,14 @@ pub fn load_config(path: &Path) -> Result<ServeConfig> {
     let mut config: ServeConfig = toml::from_str(&content)
         .with_context(|| format!("failed to parse serve config {:?}", path))?;
 
-    if config.deploy_token.is_none() {
-        anyhow::bail!("serve.toml missing `deploy_token`");
+    match config.deploy_token.as_deref() {
+        None => anyhow::bail!("serve.toml missing `deploy_token`"),
+        // 空/纯空白 token 会让 `Authorization: Bearer `（空 token）直接通过认证 ——
+        // 等于把部署接口完全敞开（2026-10 审查 HTTP-12）
+        Some(t) if t.trim().is_empty() => anyhow::bail!(
+            "serve.toml 的 deploy_token 为空：请填入一个随机 token（空 token 等于没有认证）"
+        ),
+        Some(_) => {}
     }
     if config.web_root.as_os_str().is_empty() {
         anyhow::bail!("serve.toml missing `web_root`");
@@ -265,9 +278,12 @@ fn check_deploy_auth(
         }
     };
 
-    if auth_value.starts_with("Bearer ") {
-        let token = auth_value.trim_start_matches("Bearer ");
-        if deploy_token.map_or(false, |t| t == token) {
+    if let Some(token) = auth_value.strip_prefix("Bearer ") {
+        let token = token.trim();
+        // 服务端 token 或客户端 token 为空都直接拒绝：map_or(false, |t| t == "") 在
+        // 配置为空串时会把空 Bearer 判成已认证（2026-10 审查 HTTP-12）
+        let configured_ok = deploy_token.map(|t| !t.trim().is_empty()).unwrap_or(false);
+        if configured_ok && !token.is_empty() && deploy_token == Some(token) {
             rate_limiter.record_success(&ip);
             return AuthResult::Authenticated;
         }
@@ -1135,10 +1151,7 @@ fn load_versions(web_root: &Path) -> HashMap<String, u64> {
 fn save_versions(web_root: &Path, versions: &HashMap<String, u64>) {
     if let Ok(json) = serde_json::to_string(versions) {
         let path = versions_path(web_root);
-        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, &json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+        let _ = crate::process_util::atomic_write(&path, json.as_bytes());
     }
 }
 
@@ -1161,10 +1174,7 @@ fn save_manifest(web_root: &Path, project_name: &str, manifest: &[crate::push::D
         let dir = manifests_root(web_root);
         let _ = std::fs::create_dir_all(&dir);
         let path = manifest_path(web_root, project_name);
-        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, &json).is_ok() {
-            let _ = std::fs::rename(&tmp, &path);
-        }
+        let _ = crate::process_util::atomic_write(&path, json.as_bytes());
     }
 }
 
@@ -1221,11 +1231,23 @@ fn load_projects(web_root: &Path) -> (HashMap<String, String>, HashMap<String, S
             (tokens, ids)
         }
         Err(e) => {
+            // 解析失败绝不能静默清空：下一次部署会把空表持久化，等于一次性抹掉
+            // 所有站点的 token（丢 token 的站点立即 401，且无法再部署）。
+            // 先把损坏文件留档，运维仍可手工抢救（审查 HTTP-03）。
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            let backup = path.with_file_name(format!(".keinestamp-projects.corrupt-{stamp}"));
+            let saved = std::fs::copy(&path, &backup).is_ok();
             log_error(
                 "PROJECTS",
                 &format!(
-                    "corrupt projects file {:?}: {} — starting with empty project registry",
-                    path, e
+                    "corrupt projects file {:?}: {} — 已备份到 {:?}（{}），以空注册表启动",
+                    path,
+                    e,
+                    backup,
+                    if saved { "成功" } else { "失败" }
                 ),
             );
             (HashMap::new(), HashMap::new())
@@ -1233,31 +1255,73 @@ fn load_projects(web_root: &Path) -> (HashMap<String, String>, HashMap<String, S
     }
 }
 
-fn save_projects(web_root: &Path, tokens: &HashMap<String, String>, ids: &HashMap<String, String>) {
-    if let Ok(json) =
-        serde_json::to_string_pretty(&serde_json::json!({ "tokens": tokens, "ids": ids }))
-    {
-        let path = projects_file(web_root);
-        let tmp = path.with_extension(format!("tmp{}", std::process::id()));
-        if std::fs::write(&tmp, &json).is_ok() {
+/// 注册表/清单/版本号的写盘互斥：这些文件都是"整表重写"，
+/// 并发部署时无锁读-改-写会丢更新（丢 token 的站点直接 401、再部署 403 变砖）。
+static REGISTRY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// 调用方必须已持有 REGISTRY_LOCK（"改内存表 + 落盘"要在同一临界区内完成，
+/// 否则两次并发部署会各写各的快照，后写者覆盖前者的 token → 站点丢身份）
+fn write_projects(
+    web_root: &Path,
+    tokens: &HashMap<String, String>,
+    ids: &HashMap<String, String>,
+) -> bool {
+    let Ok(json) = serde_json::to_string_pretty(&serde_json::json!({ "tokens": tokens, "ids": ids }))
+    else {
+        return false;
+    };
+    let path = projects_file(web_root);
+    // atomic_write：pid+纳秒唯一临时名 + fsync + rename（旧实现固定用 pid 作临时名，
+    // 同进程并发写会互相截断，产出半截 JSON）
+    match crate::process_util::atomic_write(&path, json.as_bytes()) {
+        Ok(()) => {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+                // atomic_write 用 0644 落临时文件再 rename，先 rename 后 chmod 会有一个
+                // 短暂窗口（复核 PR-5 备注）；这里紧随其后收紧，且失败只记日志。
+                let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
             }
-            if std::fs::rename(&tmp, &path).is_err() {
-                log_error(
-                    "PROJECTS",
-                    &format!("failed to save projects file {:?}", path),
-                );
-            }
-        } else {
+            true
+        }
+        Err(e) => {
             log_error(
                 "PROJECTS",
-                &format!("failed to write projects file {:?}", path),
+                &format!("failed to save projects file {:?}: {}", path, e),
             );
+            false
         }
     }
+}
+
+/// 「改内存表 + 落盘」的统一入口：生产路径（handle_upload）与并发测试共用。
+///
+/// 必须在同一临界区内完成「取快照 + 落盘」，否则两次并发部署会各写各的旧快照，
+/// 后写者覆盖前者的 token（丢 token 的站点直接 401）。但**表锁在落盘前就释放**：
+/// 静态请求每回合都要读 project_tokens，不能让它们等 fsync。
+///
+/// 返回 false = 内存表已更新但磁盘没写成功（调用方要告警）。
+fn update_registry(
+    web_root: &Path,
+    project_tokens: &RwLock<HashMap<String, String>>,
+    project_ids: &RwLock<HashMap<String, String>>,
+    project_name: &str,
+    project_id: &str,
+    access_token: Option<&str>,
+) -> bool {
+    let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let (tokens_snapshot, ids_snapshot) = {
+        let mut ids = project_ids.write().unwrap_or_else(|e| e.into_inner());
+        if !project_id.is_empty() {
+            ids.insert(project_name.to_string(), project_id.to_string());
+        }
+        let mut tokens = project_tokens.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(tok) = access_token {
+            tokens.insert(project_name.to_string(), tok.to_string());
+        }
+        (tokens.clone(), ids.clone())
+    };
+    write_projects(web_root, &tokens_snapshot, &ids_snapshot)
 }
 
 fn handle_version(
@@ -1276,25 +1340,36 @@ fn handle_version(
     Ok(())
 }
 
-fn percent_decode(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars();
-    while let Some(c) = chars.next() {
-        if c == '%' {
-            let hex: String = chars.by_ref().take(2).collect();
-            if let Ok(byte) = u8::from_str_radix(&hex, 16) {
-                out.push(byte as char);
-            } else {
-                out.push('%');
-                out.push_str(&hex);
-            }
-        } else if c == '+' {
-            out.push(' ');
-        } else {
-            out.push(c);
-        }
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
     }
-    out
+}
+
+/// 表单/查询串解码：%XX → 字节，加号 → 空格，最后整体按 UTF-8 还原。
+///
+/// 旧实现对着 char 取两个字符、再把字节当成 Latin-1 字符 push：
+/// ① 非 ASCII 的 access_token 永远解不出来（变 mojibake）；② % 后跟多字节 UTF-8 时行为不可预期。
+/// 改成按字节解码（复核 N-11 / HTTP-23）。
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push(hi * 16 + lo);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(if bytes[i] == b'+' { b' ' } else { bytes[i] });
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// 正确解码 URL 路径中的 UTF-8 百分号编码（用于静态文件路径）。
@@ -1305,8 +1380,10 @@ fn percent_decode_path(s: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                decoded.push(b);
+            // 按字节取两位十六进制：直接对 &str 切片会在 % 后跟多字节 UTF-8 时
+            // 切在字符中间而 panic（复核 N-11）
+            if let (Some(hi), Some(lo)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                decoded.push(hi * 16 + lo);
                 i += 3;
                 continue;
             }
@@ -1421,7 +1498,26 @@ fn handle_login_post(
 /// Generate a random hex token (32 bytes from OS CSPRNG)
 pub fn generate_token() -> String {
     let mut bytes = [0u8; 32];
-    getrandom::getrandom(&mut bytes).unwrap_or_default();
+    for _ in 0..3 {
+        if getrandom::getrandom(&mut bytes).is_ok() {
+            return bytes.iter().map(|b| format!("{:02x}", b)).collect();
+        }
+    }
+    // 熵源不可用：绝不能退化成全零（那等于固定口令，2026-10 审查 HTTP-13）。
+    // 用 时间 + pid + 栈地址 做种子的 LCG 兜底——不完美，但每个进程/每次调用都不同。
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let marker = 0u8;
+    let addr = (&marker as *const u8) as usize as u128;
+    let mut seed = nanos ^ (std::process::id() as u128).rotate_left(64) ^ addr.rotate_left(17);
+    for b in bytes.iter_mut() {
+        seed = seed
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        *b = (seed >> 33) as u8;
+    }
     bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
@@ -1653,6 +1749,78 @@ pub fn ensure_loreserver() -> Result<Option<std::process::Child>> {
     anyhow::bail!("loreserver 启动超时（10s）")
 }
 
+/// 自建监听 socket：唯一目的是设置 SO_RCVTIMEO / SO_SNDTIMEO（tiny_http 不提供该能力）。
+/// 端口复用仅在 Unix 打开；Windows 上保持默认独占，避免端口劫持。
+fn bind_listener(host: &str, port: u16) -> Result<std::net::TcpListener> {
+    bind_listener_with_timeout(host, port, SOCKET_IO_TIMEOUT)
+}
+
+/// 可指定超时的版本（测试用短超时，生产用 SOCKET_IO_TIMEOUT）
+fn bind_listener_with_timeout(
+    host: &str,
+    port: u16,
+    timeout: Duration,
+) -> Result<std::net::TcpListener> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    use std::net::ToSocketAddrs;
+
+    let addr = format!("{}:{}", host, port);
+    let sa = addr
+        .to_socket_addrs()
+        .with_context(|| format!("无法解析监听地址：{}", addr))?
+        .next()
+        .with_context(|| format!("监听地址没有可用解析结果：{}", addr))?;
+    let domain = match sa {
+        std::net::SocketAddr::V4(_) => Domain::IPV4,
+        std::net::SocketAddr::V6(_) => Domain::IPV6,
+    };
+    let sock =
+        Socket::new(domain, Type::STREAM, Some(Protocol::TCP)).context("创建监听 socket 失败")?;
+    #[cfg(unix)]
+    {
+        let _ = sock.set_reuse_address(true);
+    }
+    sock.set_read_timeout(Some(timeout))
+        .context("设置 SO_RCVTIMEO 失败")?;
+    sock.set_write_timeout(Some(timeout))
+        .context("设置 SO_SNDTIMEO 失败")?;
+    sock.bind(&sa.into())
+        .with_context(|| format!("绑定 {} 失败", sa))?;
+    sock.listen(128).context("listen 失败")?;
+    Ok(sock.into())
+}
+
+/// 槽位看门狗：只观测不干预。全站卡死时至少能从日志看出来（否则只能看到"页面打不开"）。
+fn spawn_slot_watchdog(active: Arc<AtomicUsize>) {
+    std::thread::spawn(move || {
+        let mut saturated_since: Option<Instant> = None;
+        loop {
+            std::thread::sleep(Duration::from_secs(15));
+            let n = active.load(Ordering::Relaxed);
+            if n >= MAX_CONCURRENT_REQUESTS {
+                match saturated_since {
+                    Some(t) if t.elapsed() >= STUCK_SLOTS_WARN_AFTER => {
+                        log_warn(
+                            "WATCHDOG",
+                            &format!(
+                                "请求槽位已占满 {} 秒（{} 个），疑似半开连接/慢客户端；新请求将超时",
+                                t.elapsed().as_secs(),
+                                n
+                            ),
+                        );
+                        // 每 2 分钟重复一次，避免刷屏
+                        saturated_since = Some(Instant::now());
+                    }
+                    Some(_) => {}
+                    None => saturated_since = Some(Instant::now()),
+                }
+            } else {
+                saturated_since = None;
+            }
+        }
+    });
+}
+
 pub fn start(config: ServeConfig) -> Result<()> {
     // 前置依赖检测：Lore v0.8.6 缺失/版本不符 → 拒绝启动
     crate::lore_backend::check_lore_env().context("Lore 前置依赖检查失败")?;
@@ -1672,7 +1840,9 @@ pub fn start(config: ServeConfig) -> Result<()> {
         }
     }
     let addr = format!("{}:{}", config.host, config.port);
-    let server = Server::http(&addr)
+    let listener = bind_listener(&config.host, config.port)
+        .with_context(|| format!("failed to bind {}: {}", addr, addr))?;
+    let server = Server::from_listener(listener, None)
         .map_err(|e| anyhow::anyhow!("failed to start server on {}: {}", addr, e))?;
 
     let web_root = config.web_root.clone();
@@ -1692,6 +1862,13 @@ pub fn start(config: ServeConfig) -> Result<()> {
     log_info(
         "STARTUP",
         &format!("Keinestamp serve listening on http://{}", addr),
+    );
+    // SO_RCVTIMEO 只在 Windows 上随 accept 继承；Unix 不会继承，
+    // 进程内没有可用的 per-connection 钩子，只能靠反代兜底。
+    #[cfg(not(windows))]
+    log_warn(
+        "STARTUP",
+        "非 Windows 平台：监听 socket 的读超时不会继承给已接受的连接，         请务必在反向代理（Caddy/nginx）上配置 request read timeout，         否则半开连接可以耗尽工作线程",
     );
     log_warn("STARTUP", "HTTP mode — data is sent in plaintext.");
     log_warn(
@@ -1717,10 +1894,17 @@ pub fn start(config: ServeConfig) -> Result<()> {
     let browser_limiter = Arc::new(RateLimiter::new());
 
     let active_requests = Arc::new(AtomicUsize::new(0));
+    spawn_slot_watchdog(active_requests.clone());
     for request in server.incoming_requests() {
         if active_requests.load(Ordering::Relaxed) >= MAX_CONCURRENT_REQUESTS {
-            let _ = request
-                .respond(Response::from_string("503 Too Many Requests").with_status_code(503));
+            // 配额满时明确关闭连接：带着未读 body 进入 keep-alive 会让 tiny_http
+            // 在 Request::drop 里做阻塞式"排水"，反而把仅剩的线程也拖住。
+            let close = Header::from_bytes(&b"Connection"[..], &b"close"[..]).unwrap();
+            let _ = request.respond(
+                Response::from_string("503 Too Many Requests")
+                    .with_status_code(503)
+                    .with_header(close),
+            );
             continue;
         }
         active_requests.fetch_add(1, Ordering::Relaxed);
@@ -2127,17 +2311,17 @@ fn handle_upload(
         return Ok(());
     }
 
-    // Conflict check: verify project_id matches
-    let project_id = request
+    // Conflict check: verify project_id matches（只读校验，不落盘）
+    let project_id: String = request
         .headers()
         .iter()
         .find(|h| h.field.equiv("X-Project-Id"))
-        .map(|h| h.value.as_str())
-        .unwrap_or("");
+        .map(|h| h.value.as_str().to_string())
+        .unwrap_or_default();
     {
         let ids = project_ids.read().unwrap();
         if let Some(stored_id) = ids.get(&project_name) {
-            if stored_id != project_id {
+            if stored_id != &project_id {
                 log_warn(
                     "DEPLOY",
                     &format!(
@@ -2164,35 +2348,14 @@ fn handle_upload(
             return Ok(());
         }
     }
-    if !project_id.is_empty() {
-        project_ids
-            .write()
-            .unwrap()
-            .insert(project_name.clone(), project_id.to_string());
-    }
-
-    if let Some(access_token) = request
+    // 身份与口令**先不落盘**：zip 非法或落盘失败时，旧实现已经轮换了口令并永久占坑，
+    // 客户端拿旧 token 再也部署不进来（审查 HTTP-04）。这里只捕获，成功后再写。
+    let access_token: Option<String> = request
         .headers()
         .iter()
         .find(|h| h.field.equiv("X-Access-Token"))
-        .map(|h| h.value.as_str())
-        .filter(|v| !v.is_empty())
-    {
-        project_tokens
-            .write()
-            .unwrap()
-            .insert(project_name.clone(), access_token.to_string());
-        log_info(
-            "DEPLOY",
-            &format!("{} project={} stored access_token", ip, project_name),
-        );
-    }
-
-    {
-        let tokens = project_tokens.read().unwrap().clone();
-        let ids = project_ids.read().unwrap().clone();
-        save_projects(&web_root, &tokens, &ids);
-    }
+        .map(|h| h.value.as_str().to_string())
+        .filter(|v| !v.is_empty());
 
     log_info(
         "DEPLOY",
@@ -2387,6 +2550,34 @@ fn handle_upload(
         save_versions(web_root, &snapshot);
     }
 
+    // 产物已经落盘，此时才写入项目身份/口令（失败部署不改变注册表）。
+    let had_token = access_token.is_some();
+    let persisted = update_registry(
+        &web_root,
+        &project_tokens,
+        &project_ids,
+        &project_name,
+        &project_id,
+        access_token.as_deref(),
+    );
+    if had_token {
+        log_info(
+            "DEPLOY",
+            &format!("{} project={} stored access_token", ip, project_name),
+        );
+    }
+    if !persisted {
+        // 部署本身已经成功（页面能访问），但身份没落盘：重启后这个站点会 401，
+        // 而且因为目录已存在又会拒绝接管（403）→ 自锁。必须显式告警。
+        log_error(
+            "DEPLOY",
+            &format!(
+                "{} project={} deployed but FAILED to persist identity — 重启后该站点将无法登录/重新部署，请检查磁盘",
+                ip, project_name
+            ),
+        );
+    }
+
     let body = format!(r#"{{"status":"ok","prefix":"/{}"}}"#, project_name);
     let hdr = Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..]).unwrap();
     let response = Response::from_string(body).with_header(hdr);
@@ -2447,6 +2638,16 @@ pub(crate) fn mime_type(path: &Path) -> &'static str {
     }
 }
 
+/// URL 路径 → 静态文件相对路径（解码 + 反斜杠归一化）。
+fn normalize_url_path(raw: &str) -> String {
+    percent_decode_path(raw.trim_start_matches('/')).replace('\\', "/")
+}
+
+/// 是否属于必须拒绝的路径：点开头（含 '.'/'..' 段）、或显式 '..' 段。
+fn is_unsafe_static_path(path: &str) -> bool {
+    path.starts_with('.') || path.contains("/.") || path.split('/').any(|seg| seg == "..")
+}
+
 fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &str) -> Result<()> {
     let ip = request_ip_trusted(&request);
     let method = request.method().to_string();
@@ -2459,14 +2660,28 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
     let clean_path = if without_prefix == "/" || without_prefix.is_empty() {
         "index.html".to_string()
     } else {
-        percent_decode_path(without_prefix.trim_start_matches('/'))
+        // 反斜杠在 URL 里没有合法用途，统一当分隔符处理，避免 Windows 上
+        // `..\..\x` 绕过只检查 '/' 的过滤（2026-10 审查 HTTP-10）
+        normalize_url_path(without_prefix)
     };
 
     let access_msg = format!("{} {} {} → ", ip, method, raw_path);
 
-    if clean_path.starts_with('.') || clean_path.contains("/.") {
-        log_warn("ACCESS", &format!("{}404 (dotfile)", access_msg));
-        let response = Response::from_string("404 Not Found").with_status_code(404);
+    // 点开头文件 → 404；显式 '..' 段 → 403（逐段检查，反斜杠已归一化）
+    if is_unsafe_static_path(&clean_path) {
+        let traversal = clean_path.split('/').any(|seg| seg == "..");
+        let (code, label) = if traversal {
+            (403, "403 (traversal)")
+        } else {
+            (404, "404 (dotfile)")
+        };
+        log_warn("ACCESS", &format!("{}{}", access_msg, label));
+        let response = Response::from_string(if traversal {
+            "403 Forbidden"
+        } else {
+            "404 Not Found"
+        })
+        .with_status_code(code);
         request.respond(response)?;
         return Ok(());
     }
@@ -2484,13 +2699,16 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
         .canonicalize()
         .unwrap_or_else(|_| canonical_base.to_path_buf());
     if file_path.exists() {
-        if let Ok(canonical_file) = file_path.canonicalize() {
-            if !canonical_file.starts_with(&canonical_web_root) {
-                log_warn("ACCESS", &format!("{}403", access_msg));
-                let response = Response::from_string("403 Forbidden").with_status_code(403);
-                request.respond(response)?;
-                return Ok(());
-            }
+        // fail-closed：canonicalize 失败也拒绝（旧实现失败就放行）
+        let allowed = match file_path.canonicalize() {
+            Ok(cf) => cf.starts_with(&canonical_web_root),
+            Err(_) => false,
+        };
+        if !allowed {
+            log_warn("ACCESS", &format!("{}403 (outside root)", access_msg));
+            let response = Response::from_string("403 Forbidden").with_status_code(403);
+            request.respond(response)?;
+            return Ok(());
         }
     }
 
@@ -2499,7 +2717,11 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
             Ok(content) => {
                 let mime = mime_type(&file_path);
                 let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
-                let response = Response::from_data(content).with_header(hdr);
+                let nosniff =
+                    Header::from_bytes(&b"X-Content-Type-Options"[..], &b"nosniff"[..]).unwrap();
+                let response = Response::from_data(content)
+                    .with_header(hdr)
+                    .with_header(nosniff);
                 log_info("ACCESS", &format!("{}200 ({})", access_msg, mime));
                 request.respond(response)?;
             }
@@ -2511,8 +2733,13 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
             }
         }
     } else {
+        // 只有"看起来不是文件"的路径才回退到 index.html。
+        // 带扩展名的请求一律 404——否则部署缺文件会被伪装成 200 HTML，
+        // 页面白屏但服务器日志一片 200，排查成本极高（审查 HTTP-07）。
+        let last_seg = clean_path.rsplit('/').next().unwrap_or(&clean_path);
+        let looks_like_file = last_seg.contains('.');
         let fallback = serve_dir.join("index.html");
-        if fallback.exists() {
+        if !looks_like_file && fallback.exists() {
             match std::fs::read(&fallback) {
                 Ok(content) => {
                     let mime = mime_type(&fallback);
@@ -2656,7 +2883,9 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
         tokens.insert("site-a".to_string(), "tok123".to_string());
         let mut ids = HashMap::new();
         ids.insert("site-a".to_string(), "id456".to_string());
-        save_projects(&web_root, &tokens, &ids);
+        let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        assert!(write_projects(&web_root, &tokens, &ids));
+        drop(_guard);
         let (t2, i2) = load_projects(&web_root);
         assert_eq!(t2.get("site-a").map(String::as_str), Some("tok123"));
         assert_eq!(i2.get("site-a").map(String::as_str), Some("id456"));
@@ -2895,5 +3124,200 @@ web_root = "/tmp/web"
 
         rl.record_success(&ip);
         assert!(rl.check(&ip));
+    }
+
+    /// PR-5 回归：注册表并发写不能产出半截 JSON（旧实现固定用 pid 当临时名，
+    /// 同进程内并发部署会互相截断临时文件）
+    #[test]
+    fn test_concurrent_registry_updates_do_not_lose_projects() {
+        // 走生产路径（update_registry = 改内存表 + 取快照 + 落盘，全程持 REGISTRY_LOCK）。
+        // 把 REGISTRY_LOCK 去掉，落盘快照就会互相覆盖 —— 这个断言会红（旧测试只校验 JSON 合法，测不到锁）。
+        let dir = std::env::temp_dir().join(format!("ks_reg_concurrent_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let web = dir.join("web-root");
+        std::fs::create_dir_all(&web).unwrap();
+
+        let tokens: std::sync::Arc<RwLock<HashMap<String, String>>> =
+            std::sync::Arc::new(RwLock::new(HashMap::new()));
+        let ids: std::sync::Arc<RwLock<HashMap<String, String>>> =
+            std::sync::Arc::new(RwLock::new(HashMap::new()));
+        let total = 8 * 30;
+
+        let mut handles = Vec::new();
+        for t in 0..8 {
+            let web = web.clone();
+            let tokens = tokens.clone();
+            let ids = ids.clone();
+            handles.push(std::thread::spawn(move || {
+                for round in 0..30 {
+                    let name = format!("p{}_{}", t, round);
+                    assert!(update_registry(
+                        &web,
+                        &tokens,
+                        &ids,
+                        &name,
+                        &format!("id-{name}"),
+                        Some(&format!("tok-{name}")),
+                    ));
+                }
+            }));
+        }
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        assert_eq!(tokens.read().unwrap().len(), total, "内存表不该丢项目");
+        let content = std::fs::read_to_string(projects_file(&web)).unwrap();
+        let v: serde_json::Value =
+            serde_json::from_str(&content).expect("并发写之后注册表必须仍是合法 JSON");
+        let file_tokens = v["tokens"].as_object().expect("必须有 tokens");
+        assert_eq!(
+            file_tokens.len(),
+            total,
+            "落盘快照不能丢项目（说明锁没罩住「取快照 + 写盘」）"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// 复核 N-11 回归：百分号解码必须按字节处理
+    /// ① % 后跟多字节 UTF-8 不能 panic（旧实现对 &str 切片，切在字符中间）
+    /// ② 非 ASCII token 必须能正常解出（旧实现按 Latin-1 逐字符 push）
+    #[test]
+    fn test_percent_decode_is_byte_based() {
+        assert_eq!(percent_decode_path("%E6%97%A5"), "日");
+        assert_eq!(percent_decode_path("%日"), "%日", "非法编码原样保留，且不得 panic");
+        assert_eq!(percent_decode_path("%"), "%");
+        assert_eq!(percent_decode_path("%A"), "%A");
+        assert_eq!(percent_decode("a%20b+c"), "a b c");
+        assert_eq!(percent_decode("%E4%B8%AD%E6%96%87"), "中文");
+        assert_eq!(percent_decode("tok%2Ben"), "tok+en");
+    }
+
+    /// PR-7 回归：路径归一化 + 危险路径识别（反斜杠、编码穿越、点文件）
+    #[test]
+    fn test_static_path_safety() {
+        // 反斜杠一律归一化：Windows 上 `..\..\x` 曾被当作单个文件名绕过过滤
+        assert_eq!(normalize_url_path("/a\\b\\c"), "a/b/c");
+        assert_eq!(normalize_url_path("a%2Fb"), "a/b", "百分号编码的分隔符也要解码后判");
+        assert!(is_unsafe_static_path(&normalize_url_path("..\\..\\secret.txt")));
+        assert!(is_unsafe_static_path(&normalize_url_path("%2e%2e%2fsecret.txt")));
+        assert!(is_unsafe_static_path(".env"));
+        assert!(is_unsafe_static_path("a/.git/config"));
+        // 正常路径必须放行
+        for ok in ["index.html", "previews_glb/a.glb", "three/three.cjs", "中文/图.png"] {
+            assert!(!is_unsafe_static_path(ok), "{ok} 不应被判定为危险");
+        }
+        assert_eq!(normalize_url_path("/%E4%B8%AD%E6%96%87/x.png"), "中文/x.png");
+    }
+
+    /// PR-7 回归：空 deploy_token 必须被拒绝（旧行为会让空 Bearer 直接通过认证）
+    #[test]
+    fn test_load_config_rejects_empty_token() {
+        let dir = std::env::temp_dir().join(format!("ks_cfg_empty_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let web = dir.join("web");
+        std::fs::create_dir_all(&web).unwrap();
+        let cfg = dir.join("serve.toml");
+        std::fs::write(
+            &cfg,
+            format!(
+                "host = '127.0.0.1'\nport = 1\ndeploy_token = ''\nweb_root = '{}'\n",
+                web.display()
+            ),
+        )
+        .unwrap();
+        let err = load_config(&cfg).expect_err("空 deploy_token 必须报错");
+        assert!(
+            format!("{err}").contains("deploy_token"),
+            "错误信息应指明 deploy_token: {err}"
+        );
+        // 纯空白同样拒绝
+        std::fs::write(
+            &cfg,
+            format!(
+                "host = '127.0.0.1'\nport = 1\ndeploy_token = '   '\nweb_root = '{}'\n",
+                web.display()
+            ),
+        )
+        .unwrap();
+        assert!(load_config(&cfg).is_err(), "纯空白 token 也必须拒绝");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// PR-7 回归：熵源失败时不能生成全零 token（等于固定口令）
+    #[test]
+    fn test_generate_token_is_random() {
+        let a = generate_token();
+        let b = generate_token();
+        assert_eq!(a.len(), 64);
+        assert_eq!(b.len(), 64);
+        assert_ne!(a, b, "两次生成必须不同");
+        assert!(a.chars().any(|c| c != '0'), "不得退化成全零 token");
+    }
+
+    /// 跨平台：自建监听 socket 能正常绑定并对外服务（端口 0 = 由系统分配）。
+    #[test]
+    fn test_bind_listener_serves() {
+        use std::io::{Read, Write};
+        let listener =
+            bind_listener_with_timeout("127.0.0.1", 0, Duration::from_millis(500)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        assert!(addr.port() != 0, "应拿到系统分配的端口");
+        let h = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 4];
+            let _ = sock.read(&mut buf);
+            let _ = sock.write_all(b"pong");
+        });
+        let mut client = std::net::TcpStream::connect(addr).unwrap();
+        client.write_all(b"ping").unwrap();
+        let mut buf = [0u8; 4];
+        let n = client.read(&mut buf).unwrap();
+        assert_eq!(&buf[..n], b"pong");
+        h.join().unwrap();
+    }
+
+    /// PR-2 回归：Windows 上 accept 出的连接必须继承 SO_RCVTIMEO
+    /// （否则半开连接永久占住工作线程 → 全站超时）。
+    ///
+    /// 只在 Windows 断言：Unix 的 SO_RCVTIMEO 不随 accept 继承，
+    /// 进程内也没有 per-connection 钩子，只能由反向代理兜底（启动时会打 WARN）。
+    /// 该测试用 channel + 超时收结果，任何平台都不会挂死。
+    #[cfg(windows)]
+    #[test]
+    fn test_accepted_socket_inherits_read_timeout() {
+        use std::io::Read;
+        use std::sync::mpsc;
+        let listener =
+            bind_listener_with_timeout("127.0.0.1", 0, Duration::from_millis(300)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (tx, rx) = mpsc::channel();
+        let h = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1];
+            let started = Instant::now();
+            let res = sock.read(&mut buf);
+            let _ = tx.send((res.is_err(), started.elapsed()));
+        });
+        // 客户端连上但不发送任何数据（模拟半开连接）；保持连接直到断言完成
+        let mut client = Some(std::net::TcpStream::connect(addr).unwrap());
+        let got = rx.recv_timeout(Duration::from_secs(5));
+        if got.is_err() {
+            // 放开服务端读，避免线程泄漏（Unix 上本测试不编译，这里只做兜底）
+            client.take();
+        }
+        let (is_err, elapsed) = got.expect("accept 出的连接没有继承读超时（5s 内没有任何返回）");
+        assert!(
+            is_err,
+            "accept 出的连接必须带读超时，否则半开连接会永久占住工作线程"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "读超时必须真的生效（实际 {:?}）",
+            elapsed
+        );
+        client.take();
+        let _ = h.join();
     }
 }

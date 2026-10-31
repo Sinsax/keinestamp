@@ -5,7 +5,7 @@ Single-binary CLI + Tauri GUI Blender Git Progress Board，后端为 Epic Games 
 ## Commands
 
 ```powershell
-cargo test                          # 99 unit + 11 integration
+cargo test                          # 224 unit + 12 integration + doctest
 cargo test --lib <module>           # Single module (config/detect/init/lore_backend/lore_project/...)
 cargo test --test cli_tests         # Integration only
 cargo run -- init <path>            # CLI entry
@@ -54,16 +54,16 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
   - **选 X 回退 = 回退到 X 的父（X-1）**：`branch reset X-1`；X 相对 X-1 的改动（`revision diff` 解析 A/M/D）检出为**真实未提交修改**：
     - M/A 文件：`lore file reset --revision X` 检出（状态"回退改动"，可勾选可记录）
     - D 文件：磁盘保留（状态"回退删除"，只读；**记录时算删除**——record 前物理删除提交）
-  - 回退前未提交改动暂存（`.keinestamp/rollback-backup/` + backup-meta.json，移出工作区）；**只备份首次回退**
+  - 回退前未提交改动暂存（`.keinestamp/rollback-backup/` + backup-meta.json，移出工作区）；**只备份首次回退**；**未跟踪文件同样移出并记录在 backup-meta.json 的 `untracked` 里**（2026-10：不移出会导致连续回退静默删除用户新建文件）
   - **回退失败（首次）自动还原**：备份取回 + HEAD 若已被 branch reset 移动则还原回 head_before（防半状态）
   - 时间线灰显：**仅 X（superseded_point）灰显不可回退**；其余记录（含 X 之后、被顶替出主线的折叠记录）均可回退；回退任意记录会覆盖 marker（连续回退视为新回退）
-  - **已检出 vs 已修改**：检出文件内容与检出时一致（marker `change_hashes` 判定）→ 标签「已检出」（不阻碍连续回退）；用户修改过（内容不符）→ 标签「已修改」；**untracked（不在树）不算树的修改**（`rollback_modified_files` 跳过——残留/副本/新建不进丢弃/恢复弹窗；丢弃时仍由 `discard_dirty` 物理删除）
-  - **连续回退**（已有回退态再次回退）：**只备份首次回退**；判定"真修改"（`rollback_modified_files`：change_files 工作区 hash ≠ 检出 hash（marker `change_hashes`，检出时算 DefaultHasher），或非检出文件有改动）——仅真修改才弹「丢弃并跳转 / 留下」（`rollback` 带 discard 参数；未确认报"回退需要丢弃确认"）；**纯检出自动丢弃不弹窗**（只显示"已检出"不阻碍回退）；丢弃 = `discard_dirty`（M/D 还原 HEAD + **untracked 物理删除**（回退期间新建，首次回退时工作区 untracked 已被备份移出，不误伤）+ staged 报错）；**head_before 始终沿用首次回退**（恢复始终回到最初回退前，无中间态残留）；CLI 走「先 undo 再回退」自动恢复路径（main.rs cmd_rollback）
+  - **已检出 vs 已修改**：检出文件内容与检出时一致（marker `change_hashes` 判定）→ 标签「已检出」（不阻碍连续回退）；用户修改过（内容不符）→ 标签「已修改」；**untracked 分两种**（2026-10 修正）：①在 `change_files` 内 = 检出产物，不算修改；②回退期间新建 = 用户真实工作，**必须计入"真修改"**（否则丢弃时不弹确认）
+  - **连续回退**（已有回退态再次回退）：**只备份首次回退**；判定"真修改"（`rollback_modified_files`：change_files 工作区 hash ≠ 检出 hash（marker `change_hashes`，检出时算 DefaultHasher），或非检出文件有改动）——仅真修改才弹「丢弃并跳转 / 留下」（`rollback` 带 discard 参数；未确认报"回退需要丢弃确认"）；**纯检出自动丢弃不弹窗**（只显示"已检出"不阻碍回退）；丢弃 = `discard_dirty`（M/D 还原 HEAD + **untracked 移入 `.keinestamp/discard-backup-*`（可找回，保留最近 5 份）** + staged 报错）；**head_before 始终沿用首次回退**（恢复始终回到最初回退前，无中间态残留）；CLI 走「先 undo 再回退」自动恢复路径（main.rs cmd_rollback）
   - **首条记录（无父）回退特例**：新项目 init 时自动创建 **init 提交**（`.loreignore` only，metadata `kind=init`，GUI 时间线/log 过滤不显示——`init_commit` 幂等：有历史/无 .loreignore 跳过）→ **首条用户记录总有父（init）** → 回退首条 = `branch reset` 到 init（工作区只剩 .loreignore，用户文件检出为 **untracked**，changes 区可重新勾选/修改——初次提交可修改）；**旧项目（无 init 提交）首条回退**：`revision_parent` 无父 → reset 自身后**补创建 init 提交**（`force_init_commit`：物理删除树内用户文件 → stage D → commit（kind=init，父 = 首条，树 = 仅 .loreignore）→ `file write` 从首条写回 → 文件变 **untracked**；change_files = 写回列表（"已检出"、恢复不弹确认））——**新旧项目语义统一，无需重建**；恢复（undo）`branch reset` 回首条还原（补的 init 提交留作孤儿，--no-gc 保护不清理）。**None 分支要点**（实测踩坑）：① `repository dump` **必须带 `--revision`**（不带会受 `status --scan` 持久化的 untracked 标志污染——含已移出的文件，导致误删用户文件/写回 file not found）；② 物理删除：NotFound（磁盘无此树文件，用户改名/移动）视为已删（stage D 正常），其他错误（占用/权限）→ 明确报错并还原；③ 任一步失败 → `unstage_all` + `branch reset` 回 head_before（工作区完整恢复，不丢文件）
   - **幽灵删除 + scan 污染**（2026-08-16 定稿，k02 事故真正根因）：未跟踪目录先被 `status --scan` 记录 → 用户从磁盘删除 → 又 scan 一次后，Lore 会留下 D/A 脏标志；此时 `lore commit` 会把已删除的未跟踪文件写进新树（dump 中 `addr 000...-000...` 幽灵文件，commit 统计不显示它们），且 `revision diff` 会把它们输出为 A → 修复：① `commit_files` 提交前调 `ghost_deletion_paths`（status --scan 的 D 路径 ∩ 不在 HEAD 树 → 随本次提交 stage 为 D，commit 后新树不含幽灵）；② `revision_changes` 不再用 `revision diff`，改为 dump 父/目标两棵权威树比较 A/M/D；③ timeline `entry_files` 同样改为父/目标 `dump_tree_entries` 树比较（`revision diff`/`parse_diff_paths` 不再用于时间线）
   - **撤销回退（恢复）** = `branch reset <head_before>` + 取回暂存；检出文件（change_files）默认丢弃；
     回退前暂存 ∩ 当前改动冲突 → 弹窗逐文件选择「当前版本改动 / 回退前改动」→ resolve 后恢复；
-    **恢复确认**（2026-08-12）：changes 区有**真修改**（用户改过/删过内容）→ `undo_rollback(confirm: Option<bool>)`——None=报"恢复需要确认"、Some(true)=丢弃（修改与回退删除内容不取回）、Some(false)=留下（已修改检出取回）；**回退删除标记（deleted_files）属检出的一部分**（不触发确认，恢复自动处理）；纯检出直接执行；GUI 统一 pendingConfirm 弹窗「丢弃并恢复 / 留下」（空白区=取消不操作，弹窗显示修改文件列表）；**恢复失败（半状态）防御**：finish 失败且 HEAD 已移动 → 尽力还原回 rollback_point（marker 保留）；`get_rollback_state` 检测 marker 不一致（HEAD ≠ rollback_point，异常残留）→ 自动 clear_rollback（**回退/恢复操作进行中跳过自动清理**，避免恢复把 HEAD reset 回头退前、最后才清 marker 的中间窗口被轮询误判并发清理）
+    **恢复确认**（2026-08-12）：changes 区有**真修改**（用户改过/删过内容）→ `undo_rollback(confirm: Option<bool>)`——None=报"恢复需要确认"、Some(true)=丢弃（修改与回退删除内容不取回）、Some(false)=留下（已修改检出取回）；**回退删除标记（deleted_files）属检出的一部分**（不触发确认，恢复自动处理）；纯检出直接执行；GUI 统一 pendingConfirm 弹窗「丢弃并恢复 / 留下」（空白区=取消不操作，弹窗显示修改文件列表）；**恢复失败（半状态）防御**：finish 失败且 HEAD 已移动 → 尽力还原回 rollback_point（marker 保留）；`get_rollback_state` 检测 marker 不一致（HEAD ≠ rollback_point，异常残留）→ **只清 marker、不删备份目录**（2026-10：轮询路径删备份等于"等 10 秒就没"）；**回退/恢复操作进行中跳过自动清理**
   - 顶替 = 回退状态下 record（新 revision 父 = X-1）；被顶替记录保留时间线（superseded 折叠灰显，时间序插入）
   - marker 存 timeline.json：rollback_point/superseded_point/head_before/deleted_files/change_files
   - `lore revision restore` 在 0.8.6 不可用（Invalid head）→ 弃用；`revert` = 撤销某 revision 改动（非撤销回退），冲突用 `resolve mine|theirs`
@@ -72,7 +72,7 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
 - **MetaConfig** (`.keinestamp/.keinestamp.toml`)：`version`, `init_time`, `project_root`, `web_root`, `access_token`, `project_id`, `site_name`, `site_locked`（结构与 v1 相同；位于 `.keinestamp/` 私有目录，被 loreignore 排除，不参与提交）
 - **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`)：`blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`, `close_to_tray`, `lore_server_url`
 - **web 产物**：`.keinestamp/web/` 子目录（程序私有，loreignore 整体隔离），html_gen 输出 + timeline.json 缓存；**不入库**（commit_web 已删除）；zip 打包上传（push.rs）；web 版本号 = `.keinestamp/web-version` 本地计数器（`web_revision_count`/`bump_web_version`）
-- **Atomic writes**: Temp file + rename (name includes PID + target filename)
+- **Atomic writes**: Temp file + fsync + rename（`process_util::atomic_write`，临时名 = PID + 纳秒 + 目标名）。`timeline.json` / `.keinestamp.toml` / 部署注册表 / `.loreignore` 都走它；入口页 index.html 与 init 首次写入例外（写失败重建即可）
 - **init idempotent**: Re-init fills gaps, does not overwrite `init_time`
 - **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands
 - **Export**: `lore repository dump` 解析文件树 + 逐文件 `lore file write`（不支持目录级 write）
@@ -82,7 +82,7 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
 - **备份**（2026-08-11 实测定稿）：GUI 备份 = `push_to_server`：读配置地址（app-config `lore_server_url`，默认 `lore://127.0.0.1:41337`）→ health 探测（`http://host:41339/health_check`）→ **仓库必须在线创建**（`lore repository create lore://host:port/<名>`，remote_url 自动绑定；**离线仓库 push 输出"Pushed"但数据不到服务器**，备份报"该项目为离线创建"）→ `lore push`（首推自动建分支，增量推送）。CLI `push` 同流程；`lore commit <MESSAGE>` 是位置参数（`-m` 不存在）；`lore repository config set` 不存在（remote_url 改 config.toml）。**loreserver 无认证（auth: None）**——仅限可信局域网，设置 UI 已标注
 - **离线仓库迁移**（`migrate_offline_to_online`，实测）：离线仓库无法直接备份——`repository create <url>/<名> --id <同ID>` 预注册（空目录，服务器按 ID 绑定名字，**本地 store/hash/历史全保留**）→ 设 remote_url → push 全量；失败清理服务器残留。GUI：备份时检测离线 → 弹窗「迁移并备份」引导；校验：无回退态
 - **3D 预览**：preview 路径存 timeline.json（不在 revision metadata）——rebuild_cache 从旧缓存沿用同 id 条目的 preview（记录后旧记录 3D 标签不丢）；`clean_old_glb_previews` **只删未被 timeline 引用的孤儿 GLB**（被引用文件即使超 max 也保留）；**GLB 形态键移除**（2026-08-16）：不能直接删 `reference_key`（Basis），否则 Blender 可能拒绝或把 active/last 形态键烘进网格；先删所有非 Basis key block，再整体 `bpy.data.shape_keys.remove(key, do_unlink=True)`，并 bump `GLB_EXPORT_VERSION` 让旧 GLB 重新导出
-- **启动空态 + 远端仓库**（GUI）：**启动空态**（无项目打开时：一行提示 + 新建项目按钮，无卡片页）；**远端仓库管理在设置内**（SettingsDialog 第 4 Tab「远端仓库」，Remote.svelte `embedded` 紧凑模式，地址用已保存的 lore URL）：连接状态 + 自动刷新（进入页面拉取）+ 仓库列表（`list_server_repos` = `lore repository list` 解析 `name (id)`）+ **已下载行显示「跳转」按钮**（recent 目录名 == 仓库名 → 点击打开本地项目）替代下载勾选 + 未下载多选下载（`clone_server_repo` = `lore clone <url>/<name> <父目录>/<name>` + 重名检测 + `init_project` 补 .keinestamp 补洞 + add_recent）+ 删除（`delete_server_repo` = `lore repository delete <url>/<name>`，**弹窗输入 DELETE 确认**（输入自动转大写），删 = 备份数据丢失）；`localStorage.keinestamp_last_project` + AppConfig `auto_restore_project` 开关自动恢复上次项目；**部署连接独立于部署状态**（autoConn 时打开项目即探测服务器，未部署项目可首次部署）
+- **启动空态 + 远端仓库**（GUI）：**启动空态**（无项目打开时：一行提示 + 新建项目按钮，无卡片页）；**远端仓库管理在设置内**（SettingsDialog「服务器 / 远端仓库」页，Remote.svelte `embedded` 紧凑模式，地址用已保存的 lore URL）：连接状态 + 自动刷新（进入页面拉取）+ 仓库列表（`list_server_repos` = `lore repository list` 解析 `name (id)`）+ **已下载行显示「跳转」按钮**（recent 目录名 == 仓库名 → 点击打开本地项目）替代下载勾选 + 未下载多选下载（`clone_server_repo` = `lore clone <url>/<name> <父目录>/<name>` + 重名检测 + `init_project` 补 .keinestamp 补洞 + add_recent）+ 删除（`delete_server_repo` = `lore repository delete <url>/<name>`，**弹窗输入 DELETE 确认**（输入自动转大写），删 = 备份数据丢失）；`localStorage.keinestamp_last_project` + AppConfig `auto_restore_project` 开关自动恢复上次项目；**部署连接独立于部署状态**（autoConn 时打开项目即探测服务器，未部署项目可首次部署）
 
 ## serve.rs
 
@@ -162,7 +162,7 @@ All in `frontend/src/`（组件在 `lib/`）。Key files:
 
 - `App.svelte` — 主布局、状态、**10s 轮询**（**不因 `document.hidden` 跳过**——用户常年在资源管理器删文件，窗口在后台；改用 `pollStatus` 单飞去重防叠加，并在 window focus / visibilitychange 立即补一次刷新）；`lore status` 实测 ~4s 是**在线仓库 + loreserver 离线时 remote 连接超时**——`run_lore` 统一强制 `--offline` 后本地操作全部毫秒级；push/sync/clone/list/delete/migrate create 等远程命令用 `run_lore_remote` 不带）；`status`/`get_rollback_state`/`get_project_log`/`check_lore_env` 均 **async + spawn_blocking**（同步命令会阻塞主线程导致 UI 冻结）；**run_lore 全局串行锁 + 分级超时**（只读命令 60s；stage/unstage/commit/status --scan 等会写 `.lore/mutable` 的命令 30min——1GB+ 资源慢盘写入超 60s 被 kill 会造成 mutable state 半写损坏 `Not found deserializing state`）；**record 的 Blender 预览只在 `preview_files` 实际包含可预览目标时准备 Blender**（`Some([])` = 无预览标记，不碰 Blender，避免下载/启动被误认为记录卡死）；**`revision_parent` 读 timeline 缓存**（`TimelineEntry.parent` 主线推导，零 lore 调用；旧缓存 fallback lore info）；`lore service` 0.8.6 实测不可用；GUI 回退/恢复**命令完成即清遮罩 + toast**（loadProject 后台刷新，避免"完成提示后转圈"）。恢复按钮（`rollback_point && head_matches` 时可用）；备份按钮接线；无冲突对话框（v2 已删 ConflictDialog）
 - **store GC 语义**（2026-08-12 实测）：lore 分块 store 会清理「远端已有副本的本地孤儿块」——**在线仓库（push 过）** 的孤儿/历史块可被 `repository gc`/维护清理 → 回退被顶替记录报 `Address not found`（36_mine2 事故）；**离线仓库 GC 不删块**（本地唯一副本）；`run_lore` 统一带 **`--no-gc`** 阻止自动增量 GC（只读命令无副作用；显式 `repository gc` 仍可跑）；`Address not found` 由 `translate_lore_error` 转译为中文（"数据已不在本地存储：可能被清理或尚未从服务器下载"）；**clone 只下载最新状态** → `clone_repo_to` 后 `fetch_full_history`（逐 revision `repository dump` 在线拉全历史块，尽力而为）；**回退失败（首次）自动还原备份**（rollback_inner 失败 → `restore_backup_at`，避免 dirty 文件"消失"后下次回退清空备份目录丢数据）；**web 产物 dirty 卡 branch reset**：跳 web 父后 diff 含 web 提交改动 → 回退检出 `.keinestamp/web/` 文件（index.html/glb）→ 应用层 hidden 过滤看不到、lore 校验 tracked dirty 拒绝 reset → 修复：`revision_changes` 过滤 `.keinestamp/web/` 路径（不检出 web 产物）+ `reset_hidden_dirty`（branch reset 前从 HEAD 树 dump 取隐藏 tracked 清单 `file reset --force` 还原，loreignore 文件如 timeline.json status 不可见但 reset 仍校验，须 --force）接入 rollback_inner 与 finish_rollback_restore
-- `lib/SettingsDialog.svelte` — 服务器/Blender 设置 + **隐藏路径管理**（列表 + 添加 + 删除，预设 web/、.keinestamp.toml 不可删）
+- `lib/SettingsDialog.svelte` — **Blender / 通用 · 流程 / 标签 · 服务器 / 远端仓库**三页。流程 / 标签为项目级（`.keinestamp/tags.toml`）：流程增删改名、每个流程的标签增删、恢复默认；默认仅 Blender 流程（原「建模流程」改名）；保存后 `onTagGroupsSaved` 回传主界面，记录弹窗与时间线筛选即时刷新
 - `lib/ActionBar.svelte` — 记录 / 恢复 / 备份 / 部署
 - `lib/EntryList.svelte` — 时间线卡片（id = lore revision sig）、★ milestone、右键导出/回退、回退点灰显；**「文本改动」区块已删除**（2026-08-12：diff 展示依赖 file_status（后端恒空）导致 A 状态误显，直接移除——只需「文件变动」；`get_file_diff`/`file_diff` 后端命令同步删除）
 - `lib/StatusPanel.svelte` — 变更面板（lore status 中文格式解析），勾选提交（files 参数），右键忽略/隐藏
@@ -186,7 +186,7 @@ All in `frontend/src/`（组件在 `lib/`）。Key files:
 
 ## Integration tests
 
-At `tests/cli_tests.rs`. Create real lore repos in `$env:TEMP/keinestamp_int_*`. Require loreserver 在线（127.0.0.1:41339）。Binary via `CARGO_BIN_EXE_keinestamp`。
+At `tests/cli_tests.rs`. Create real lore repos in `$env:TEMP/keinestamp_int_*`. **不需要 loreserver**（全部离线仓库；需要服务器的用例以 `#[ignore]` 标出）。Binary via `CARGO_BIN_EXE_keinestamp`。整套约 15s。
 
 ## Test gaps (high-risk)
 

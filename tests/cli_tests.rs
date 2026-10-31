@@ -533,7 +533,12 @@ fn html_gen_contains_daynight_theme() {
     );
     assert!(html.contains("theme-toggle"), "missing toggle button id");
     assert!(html.contains("color-mix"), "missing color-mix badge styles");
-    assert!(html.contains("--bg: #151719"), "night palette drifted");
+    // 夜间底色是设计令牌，改动属于有意变更：调色板变了就同步更新这里，
+    // 不要为了让测试通过而把模板改回去。
+    assert!(
+        html.contains(r#"[data-theme="night"]"#) && html.contains("--bg: #101114"),
+        "night palette drifted（模板的夜间 --bg 已变更，请同步更新本断言）"
+    );
     assert!(
         html.contains("localStorage.getItem('keinestamp_web_theme')"),
         "missing pre-read script"

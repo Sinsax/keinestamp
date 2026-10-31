@@ -74,6 +74,22 @@ fn join_drain(
     }
 }
 
+/// 文件 SHA-256（流式读取，大文件不整块进内存）。用于第三方下载产物的完整性记录/校验。
+pub fn file_sha256_hex(path: &std::path::Path) -> std::io::Result<String> {
+    use sha2::Digest;
+    let mut f = std::fs::File::open(path)?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    loop {
+        let n = std::io::Read::read(&mut f, &mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex::encode(hasher.finalize()))
+}
+
 /// 原子写：同目录唯一临时文件（pid + nanos 后缀，防并发写同一目标时临时名碰撞）+ fsync + rename。
 pub fn atomic_write(path: &std::path::Path, content: &[u8]) -> std::io::Result<()> {
     use std::io::Write;
@@ -107,5 +123,23 @@ pub fn atomic_write(path: &std::path::Path, content: &[u8]) -> std::io::Result<(
             let _ = std::fs::remove_file(&tmp);
             Err(e)
         }
+    }
+}
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_file_sha256_hex_known_vector() {
+        let dir = std::env::temp_dir().join(format!("ks_sha_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("abc.txt");
+        std::fs::write(&f, b"abc").unwrap();
+        let got = super::file_sha256_hex(&f).unwrap();
+        assert_eq!(
+            got,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "SHA-256 必须与标准实现一致（否则 pin 机制形同虚设）"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

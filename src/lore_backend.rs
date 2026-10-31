@@ -454,11 +454,7 @@ pub fn unstage_all(project_root: &Path) -> Result<()> {
     if staged.is_empty() {
         return Ok(());
     }
-    let mut args: Vec<&str> = vec!["unstage"];
-    for p in &staged {
-        args.push(p);
-    }
-    run_lore(project_root, &args)?;
+    run_lore_paths(project_root, &["unstage"], &staged)?;
     // 关键校验：`lore unstage` 对无法匹配的路径会静默 exit 0（实测传入 `dir/ (M)` 这类
     // 被标记污染的路径时，合法部分被 unstage、残留目录行仍在 staged 区）。不校验的话，
     // 下一次 commit 会把残留 staged 一并提交——"没勾选/已删除的文件也进了记录"的直接原因。
@@ -468,6 +464,39 @@ pub fn unstage_all(project_root: &Path) -> Result<()> {
             "清理残留 staged 失败，仍处于 staged 状态：{}",
             remaining.join(", ")
         );
+    }
+    Ok(())
+}
+
+/// Windows 命令行（CreateProcess）上限 32767 字节：一次把几千个路径塞进
+/// `lore stage/unstage/file reset` 会直接 `os error 206（文件名或扩展名太长）`，
+/// 记录整条失败（审查 P1-2，实测 1500 个文件 / 126 KB argv 必现）。
+/// 这里按字节预算分批，每批单独 spawn 一次 lore。
+pub fn run_lore_paths(project_root: &Path, prefix: &[&str], paths: &[String]) -> Result<()> {
+    /// 预留余量：exe 路径、--offline/--no-gc、环境变量都会挤进同一命令行
+    const MAX_ARGV_BYTES: usize = 24 * 1024;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    let prefix_bytes: usize = prefix.iter().map(|a| a.len() + 1).sum();
+    let mut batch: Vec<&str> = Vec::new();
+    let mut bytes = prefix_bytes;
+    for p in paths {
+        let need = p.len() + 1;
+        if !batch.is_empty() && bytes + need > MAX_ARGV_BYTES {
+            let mut args: Vec<&str> = prefix.to_vec();
+            args.extend(batch.iter().copied());
+            run_lore(project_root, &args)?;
+            batch.clear();
+            bytes = prefix_bytes;
+        }
+        batch.push(p.as_str());
+        bytes += need;
+    }
+    if !batch.is_empty() {
+        let mut args: Vec<&str> = prefix.to_vec();
+        args.extend(batch.iter().copied());
+        run_lore(project_root, &args)?;
     }
     Ok(())
 }
@@ -523,9 +552,7 @@ fn ensure_only_expected_staged(
         if unexpected.is_empty() {
             return Ok(());
         }
-        let mut args: Vec<&str> = vec!["unstage"];
-        args.extend(unexpected.iter().map(String::as_str));
-        run_lore(project_root, &args)?;
+        run_lore_paths(project_root, &["unstage"], &unexpected)?;
     }
     let unexpected = staged_unexpected(project_root, expected_files, always_allowed)?;
     if !unexpected.is_empty() {
@@ -614,10 +641,10 @@ pub fn commit_files(
             );
         }
         if !file_paths.is_empty() || !ghost_deletes.is_empty() {
-            let mut args: Vec<&str> = vec!["stage"];
-            args.extend(file_paths.clone());
-            args.extend(ghost_deletes.iter().map(String::as_str));
-            run_lore(project_root, &args)?;
+            let mut stage_paths: Vec<String> =
+                file_paths.iter().map(|s| s.to_string()).collect();
+            stage_paths.extend(ghost_deletes.iter().cloned());
+            run_lore_paths(project_root, &["stage"], &stage_paths)?;
         }
         // .loreignore 自动记录：UI 隐藏它，但每次提交强制携带其变更进历史（点开头 --force）
         let _ = run_lore(
@@ -711,30 +738,84 @@ pub fn revision_metadata(project_root: &Path, revision: &str) -> Result<HashMap<
         project_root,
         &["revision", "metadata", "get", "--revision", revision],
     )?;
+    Ok(parse_metadata_output(&out))
+}
+
+/// 解析 revision metadata get 的输出。真实格式（lore 0.8.6）：
+///
+/// ```text
+/// kind      : user
+/// Branch    : e726318b...
+/// Date      : Thu, 29 Oct 2026 13:46:38 +0000
+///     third                      <- 提交消息体（缩进，4 空格）
+/// Creator   : para@local
+/// ```
+///
+/// 消息体是**缩进**的，内容完全由用户决定（"kind: init" / "tag: x" 都是合法提交说明）。
+/// 旧实现先 trim 再按第一个冒号切分，会把消息行当成 metadata：消息以 kind: init 开头时
+/// 覆盖真实的 kind，记录随即被 timeline 过滤、从界面上"消失"（审查 P1-1）。
+fn parse_metadata_output(out: &str) -> HashMap<String, String> {
     let mut map = HashMap::new();
     for line in out.lines() {
-        let l = line.trim();
-        if l.is_empty() {
+        // 缩进行 = 提交消息体/续行，不是 metadata
+        if line.starts_with(' ') || line.starts_with('\t') {
             continue;
         }
-        let Some((k, v)) = l.split_once(':') else {
+        let Some((key, val)) = split_meta_line(line) else {
             continue;
         };
-        let key = k.trim();
         if META_SKIP.contains(&key) {
             continue;
         }
-        map.insert(key.to_string(), v.trim().to_string());
+        map.insert(key.to_string(), val.to_string());
     }
-    Ok(map)
+    map
 }
+
+/// 识别 lore 的 metadata 行：`kind      : user` / `tag_category: painting`。
+///
+/// 注意 lore 只把**短键**补齐到 10 列；`tag_category`（12 字符）这类长键后面
+/// **没有空格**，直接写 `tag_category: painting`。所以不能用"键后有空格"判断
+/// （那会让应用自己写入的 tag_category 全部读不回来——2026-10 复核发现）。
+///
+/// 真正可靠的判据是**缩进**：提交消息体永远缩进，metadata 永远在列首。
+/// 这里再收窄一层：键必须是简单标识符（无空白、以字母/下划线开头）。
+fn split_meta_line(line: &str) -> Option<(&str, &str)> {
+    let (k, v) = line.split_once(':')?;
+    let key = k.trim();
+    if key.is_empty() {
+        return None;
+    }
+    let mut chars = key.chars();
+    let first = chars.next()?;
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return None;
+    }
+    if !chars.all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.') {
+        return None;
+    }
+    Some((key, v.trim()))
+}
+
+/// `lore history` 的条目上限（默认 100 会把大项目的历史截断）
+const HISTORY_LIMIT: &str = "100000";
 
 /// 全部 revision 历史（最新在前）。解析 `lore history`（非 --oneline）输出块：
 /// 每块含 Revision/Signature/Date/message 行，message 为 Date 后缩进行。
 pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
-    let out = run_lore(project_root, &["history"])?;
-    let mut revs: Vec<(u32, String, String, Vec<String>, String)> = Vec::new();
-    let mut cur: Option<(u32, String, String, Vec<String>, String)> = None;
+    // lore history 默认只返回 100 条：时间线重建要全量，否则窗口最老一条会被当成
+    // "没有父"→ files 退化成整棵树，并被旧缓存固化（2026-10 复核 N-1）
+    let out = run_lore(project_root, &["history", HISTORY_LIMIT])?;
+    type Cur = (
+        u32,
+        String,
+        String,
+        Vec<String>,
+        String,
+        HashMap<String, String>,
+    );
+    let mut revs: Vec<Cur> = Vec::new();
+    let mut cur: Option<Cur> = None;
     let mut in_message = false;
     for line in out.lines() {
         let t = line.trim_end();
@@ -750,26 +831,44 @@ pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
                     String::new(),
                     Vec::new(),
                     String::new(),
+                    HashMap::new(),
                 ));
             }
-        } else if let Some(c) = cur.as_mut() {
-            if let Some(rest) = t.strip_prefix("Signature") {
-                c.1 = rest.trim_start_matches([' ', ':']).trim().to_string();
-            } else if let Some(rest) = t.strip_prefix("Date") {
-                c.2 = rest.trim_start_matches([' ', ':']).trim().to_string();
-                in_message = true;
-            } else if in_message {
-                let trimmed = t.trim();
-                // lore 配置身份后会在 message 块附加 Creator/Committer 行 → 过滤（保留真实 message），
-                // Creator 值捕获进 metadata（CLI log 可显示作者）
-                if let Some(rest) = trimmed.strip_prefix("Creator:") {
-                    c.4 = rest.trim().to_string();
-                } else if !trimmed.is_empty()
-                    && !trimmed.starts_with("Creator")
-                    && !trimmed.starts_with("Committer")
-                {
-                    c.3.push(trimmed.to_string());
+            continue;
+        }
+        let Some(c) = cur.as_mut() else { continue };
+        if let Some(rest) = t.strip_prefix("Signature") {
+            c.1 = rest.trim_start_matches([' ', ':']).trim().to_string();
+            continue;
+        }
+        if let Some(rest) = t.strip_prefix("Date") {
+            c.2 = rest.trim_start_matches([' ', ':']).trim().to_string();
+            in_message = true;
+            continue;
+        }
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if in_message && indented {
+            // 缩进行 = 提交消息体（内容完全由用户决定，绝不参与 metadata 解析）
+            let trimmed = t.trim();
+            if !trimmed.is_empty() {
+                c.3.push(trimmed.to_string());
+            }
+            continue;
+        }
+        if let Some((key, val)) = split_meta_line(t) {
+            match key {
+                // 配置身份后 lore 会在 message 块附加 Creator/Committer：只取作者，不进 message
+                "Creator" => c.4 = val.to_string(),
+                "Committer" => {}
+                k if META_SKIP.contains(&k) => {}
+                k => {
+                    c.5.insert(k.to_string(), val.to_string());
                 }
+            }
+        } else if in_message {
+            let trimmed = t.trim();
+            if !trimmed.is_empty() {
+                c.3.push(trimmed.to_string());
             }
         }
     }
@@ -777,8 +876,9 @@ pub fn revision_history(project_root: &Path) -> Result<Vec<LoreRevision>> {
         revs.push(prev);
     }
     let mut out_revs = Vec::new();
-    for (number, id, date, msg_lines, creator) in revs {
-        let mut metadata = revision_metadata(project_root, &id).unwrap_or_default();
+    // metadata 直接从 history 输出里解析：旧实现每条 revision 单独 spawn 一次
+    // `revision metadata get`，N 条历史就是 N 个进程（审查 P2 性能）。
+    for (number, id, date, msg_lines, creator, mut metadata) in revs {
         if !creator.is_empty() {
             metadata.insert("creator".to_string(), creator);
         }
@@ -919,10 +1019,16 @@ pub fn ghost_deletion_paths(project_root: &Path) -> Result<Vec<String>> {
         return Ok(Vec::new());
     }
     let head = current_revision(project_root)?;
-    let head_files: HashSet<String> = dump_tree_entries(project_root, &head)?
-        .into_iter()
-        .map(|(p, _)| p)
-        .collect();
+    // 空仓库（尚无提交）时 HEAD 是全零签名，dump 会报 revision not found。
+    // 此时"HEAD 树"就是空集——任何 D 都是幽灵删除，不能让整个记录流程失败。
+    let head_files: HashSet<String> = if head.is_empty() || head.chars().all(|c| c == '0') {
+        HashSet::new()
+    } else {
+        dump_tree_entries(project_root, &head)?
+            .into_iter()
+            .map(|(p, _)| p)
+            .collect()
+    };
     Ok(deleted
         .into_iter()
         .filter(|p| !head_files.contains(p))
@@ -1379,6 +1485,43 @@ mod tests {
         let _ = std::fs::remove_dir_all(&cl_parent);
         // 清理服务器仓库
         delete_server_repo(&url, &name).unwrap();
+    }
+
+    #[test]
+    fn test_history_limit_is_large_enough() {
+        // lore history 默认只回 100 条；时间线重建依赖全量历史（复核 N-1）。
+        // 谁把这个值调小，窗口最老记录的 files 就会退化成整棵树。
+        let n: usize = HISTORY_LIMIT.parse().expect("HISTORY_LIMIT 必须是数字");
+        assert!(n >= 10_000, "HISTORY_LIMIT 太小：{n}");
+    }
+
+    #[test]
+    fn test_parse_metadata_output_ignores_indented_message() {
+        let out = "\
+kind      : user
+Branch    : e726318bbc3fd75ac8733a7e030cc35b
+Date      : Thu, 29 Oct 2026 13:46:38 +0000
+    kind: init
+    tag: 假的
+Creator   : para@local
+tag       : 建模
+";
+        let m = parse_metadata_output(out);
+        assert_eq!(
+            m.get("kind").map(String::as_str),
+            Some("user"),
+            "提交消息体绝不能覆盖真实 metadata（否则记录会从时间线消失）"
+        );
+        assert_eq!(
+            m.get("tag").map(String::as_str),
+            Some("建模"),
+            "列首 tag 是真实 metadata"
+        );
+        assert!(
+            !m.contains_key("Branch") && !m.contains_key("Date"),
+            "内置字段应被过滤"
+        );
+        assert_eq!(m.get("Creator").map(String::as_str), Some("para@local"));
     }
 
     #[test]

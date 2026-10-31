@@ -101,6 +101,14 @@
     if (firstCloned) onOpenProject(firstCloned)
   }
 
+  // 操作反馈自动消失：serverMsg 原先只在「列表为空 / 连接失败」分支渲染，
+  // 仓库列表非空时删除成功/失败都看不到（2026-10 审查 P1）
+  $effect(() => {
+    if (!serverMsg) return
+    const t = setTimeout(() => { serverMsg = '' }, 8000)
+    return () => clearTimeout(t)
+  })
+
   // 删除远端仓库：弹窗输入 DELETE 确认（删服务器仓库 = 备份数据丢失）
   async function performDelete(name: string) {
     if (!loreServerUrl) return
@@ -153,6 +161,13 @@
       {/if}
     </div>
   </div>
+
+  {#if serverMsg && serverRepos.length > 0}
+    <div class="remote-note" role="status">
+      <span>{serverMsg}</span>
+      <button class="rl-link" onclick={() => (serverMsg = '')} title="关闭提示">×</button>
+    </div>
+  {/if}
 
   {#if serverConn === 'fail'}
     <div class="remote-empty">{serverMsg || 'loreserver 不可达'}</div>
@@ -227,6 +242,19 @@
 {/if}
 
 <style>
+  .remote-note {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin: 0 0 8px;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: var(--surface2, #f1f3f5);
+    color: var(--text-2, #506070);
+    font-size: 12px;
+    word-break: break-all;
+  }
   .remote {
     display: flex;
     flex-direction: column;

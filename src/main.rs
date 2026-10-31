@@ -235,7 +235,12 @@ fn cmd_push(path: &Path) -> anyhow::Result<()> {
 fn cmd_pull(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    keinestamp::lore_backend::run_lore(&meta.project_root, &["sync"])
+    // 必须走远程通道：run_lore 会强制追加 --offline，lore sync --offline 会
+    // 直接 exit 0 且完全不连服务器——旧实现在这里恒报"已从远端拉取"（假成功，审查 P1-3）
+    if !keinestamp::lore_backend::has_remote_url(&meta.project_root) {
+        anyhow::bail!("该项目没有配置远端（离线仓库），无法拉取；请先在备份设置里迁移为在线仓库");
+    }
+    keinestamp::lore_backend::sync_from_server(&meta.project_root)
         .map_err(|e| anyhow::anyhow!("同步失败: {}", e))?;
     println!("已从远端拉取");
     Ok(())

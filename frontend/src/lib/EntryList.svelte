@@ -1,9 +1,9 @@
 <script lang="ts">
   import DirTree from './DirTree.svelte'
   import type { PreviewFile, TimelineEntry } from '../types'
-  import { setEntryMilestone, setEntryPreview, setEntryPreviewFile, updateConfig, compareEntries, type FileDiff } from '../api'
+  import { setEntryMilestone, setEntryPreview, setEntryPreviewFile, updateConfig, compareEntries, type FileDiff, type TagGroup } from '../api'
   import { previewTypeOf } from './preview'
-  import { tagCategoryLabel, tagColor } from './tags'
+  import { resolveTagCategory, tagCategoryLabel, tagColor } from './tags'
 
   let {
     entries,
@@ -23,6 +23,7 @@
     onExportEntry = (entry: TimelineEntry) => {},
     onRollback = (entry: TimelineEntry) => {},
     rollbackBusy = false,
+    tagGroups = [] as TagGroup[],
   }: {
     entries: TimelineEntry[]
     selectedId: string
@@ -41,6 +42,8 @@
     onExportEntry?: (entry: TimelineEntry) => void
     onRollback?: (entry: TimelineEntry) => void
     rollbackBusy?: boolean
+    /** 项目配置的流程（用于筛选与显示名称；空时按旧版内置名称显示） */
+    tagGroups?: TagGroup[]
   } = $props()
 
   let milestoneBusy = $state('')
@@ -279,16 +282,46 @@
     groupColor: string
   }
 
+  // 流程显示名：配置里有就用配置名称，旧记录走兼容名称（modeling → Blender）
+  function categoryLabel(category?: string | null): string {
+    return tagCategoryLabel(category, tagGroups)
+  }
+
+  // 筛选下拉：当前配置的流程 + 记录里出现但已无配置的历史分类（保证旧记录仍可筛选）
+  const categoryOptions = $derived.by(() => {
+    const options = tagGroups.map((g) => ({ id: g.id, label: g.label }))
+    for (const entry of entries) {
+      const raw = entry.tag_category
+      if (!raw) continue
+      const resolved = resolveTagCategory(raw)
+      if (!options.some((o) => o.id === resolved)) {
+        options.push({ id: resolved, label: categoryLabel(raw) })
+      }
+    }
+    return options
+  })
+
+  // 设置里改过流程后，若当前筛选值已不存在则回到「全部流程」
+  $effect(() => {
+    if (filterCategory && !categoryOptions.some((o) => o.id === filterCategory)) filterCategory = ''
+  })
+
+  function matchesCategory(entryCategory: string | null | undefined, filter: string): boolean {
+    if (!entryCategory) return false
+    if (entryCategory === filter) return true
+    return resolveTagCategory(entryCategory) === resolveTagCategory(filter)
+  }
+
   let filteredEntries = $derived(
     entries.filter((e) => {
       const q = searchText.trim().toLowerCase()
       if (q) {
-        const hay = [e.message, e.tag || '', ...(e.tags || []), e.tag_category || '', ...e.files]
+        const hay = [e.message, e.tag || '', ...(e.tags || []), e.tag_category || '', categoryLabel(e.tag_category), ...e.files]
           .join(' ')
           .toLowerCase()
         if (!hay.includes(q)) return false
       }
-      if (filterCategory && e.tag_category !== filterCategory) return false
+      if (filterCategory && !matchesCategory(e.tag_category, filterCategory)) return false
       return true
     }),
   )
@@ -323,12 +356,12 @@
 <div class="entries">
   <div class="entries-toolbar">
     <span class="tl-title">时间线</span>
-    <input type="search" placeholder="搜索记录 / 标签 / 文件..." bind:value={searchText} />
+    <input type="search" placeholder="搜索记录 / 流程 / 标签 / 文件..." bind:value={searchText} />
     <select bind:value={filterCategory} title="按流程筛选">
       <option value="">全部流程</option>
-      <option value="modeling">建模流程</option>
-      <option value="painting">绘画流程</option>
-      <option value="video">视频流程</option>
+      {#each categoryOptions as g (g.id)}
+        <option value={g.id}>{g.label}</option>
+      {/each}
     </select>
     <button class="tl-local-btn" onclick={onOpenLocalView} title="在浏览器中打开本地时间线页面">
       <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 1.8 2.7 3.8 2.7 6S9.8 12.2 8 14M8 2c-1.8 1.8-2.7 3.8-2.7 6s.9 4.2 2.7 6"/></svg>
@@ -415,7 +448,7 @@
         <div class="msg">
           {entry.message}
           {#if entry.tag_category}
-            <span class="tag-category-badge">{tagCategoryLabel(entry.tag_category)}</span>
+            <span class="tag-category-badge">{categoryLabel(entry.tag_category)}</span>
           {/if}
           {#if entry.tags && entry.tags.length > 0}
             {#each entry.tags as t}
@@ -436,7 +469,7 @@
           <div class="section-body details-body">
             <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">{entry.id}</span></div>
             <div class="detail-row"><span class="detail-label">时间</span><span class="detail-value">{entry.timestamp}</span></div>
-            <div class="detail-row"><span class="detail-label">流程</span><span class="detail-value">{tagCategoryLabel(entry.tag_category) || '未分类'}</span></div>
+            <div class="detail-row"><span class="detail-label">流程</span><span class="detail-value">{categoryLabel(entry.tag_category) || '未分类'}</span></div>
             <div class="detail-row"><span class="detail-label">标签</span><span class="detail-value">{(entry.tags && entry.tags.length > 0 ? entry.tags.join(', ') : entryTag) || '无'}</span></div>
             <div class="detail-row"><span class="detail-label">文件</span><span class="detail-value">{entry.files.length} 个</span></div>
             <div class="detail-row"><span class="detail-label">预览</span><span class="detail-value">{previewsOf(entry).length} 个</span></div>
