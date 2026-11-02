@@ -114,14 +114,16 @@ Non-recursive `*.blend` scan. File path → error.
 
 ## Tauri GUI (src-tauri/)
 
-`frontend/` — Svelte 5 + Vite + TypeScript (port 1420). `src-tauri/` — Tauri v2 crate wrapping lib.
+`frontend/` — Svelte 5 + Vite + TypeScript (port 5173，与 tauri.conf.json 的 devUrl 一致). `src-tauri/` — Tauri v2 crate wrapping lib.
 
 ```powershell
-cargo tauri dev                   # Run dev (port 1420)
+cargo tauri dev                   # Run dev (port 5173)
 cargo tauri build                 # Production
 cd frontend; npm install          # Install JS deps (three.js)
 cd src-tauri; cargo build         # Backend only
 ```
+
+> **before*Command 的 cwd = frontend 目录**（tauri-cli 从 cwd 往下找最近的 `package.json` 定位 frontend_dir，本仓库命中 `frontend/`），命令只能是 `npm run dev` / `npm run build`。**不要再写 `npm --prefix frontend run dev`**——会解析成 `frontend/frontend/package.json` 直接 ENOENT（v0.5.0 曾误改，2026-11-02 修复）。
 
 ### Tauri commands
 
@@ -154,6 +156,8 @@ cd src-tauri; cargo build         # Backend only
 | `set_entry_milestone` | `()` | 写 timeline.json milestone 字段（revision metadata 回写不可行，实测 `metadata set --revision` 报错）+ 重建页面 + bump_web_version |
 | `get_tracked_files` | `String[]` | walks dir（skips hidden/node_modules/target/web） |
 | `get_file_diff` | `String` | `lore file diff --source <父> --target <rev>` |
+| `get_about_info` | `AboutInfo` | 设置 → 关于：版本 / 平台 / Lore 运行时 / 程序与配置目录（本地读取；lore 检测的 spawn 放 spawn_blocking） |
+| `check_app_update` | `UpdateInfo` | 设置 → 关于：GitHub Releases 检查更新（API → releases/latest 跳转兜底；离线/限流返回 `unknown`，不抛错） |
 | blender / settings / close_action 命令 | 同 v1 | |
 
 ### Frontend components
@@ -162,7 +166,7 @@ All in `frontend/src/`（组件在 `lib/`）。Key files:
 
 - `App.svelte` — 主布局、状态、**10s 轮询**（**不因 `document.hidden` 跳过**——用户常年在资源管理器删文件，窗口在后台；改用 `pollStatus` 单飞去重防叠加，并在 window focus / visibilitychange 立即补一次刷新）；`lore status` 实测 ~4s 是**在线仓库 + loreserver 离线时 remote 连接超时**——`run_lore` 统一强制 `--offline` 后本地操作全部毫秒级；push/sync/clone/list/delete/migrate create 等远程命令用 `run_lore_remote` 不带）；`status`/`get_rollback_state`/`get_project_log`/`check_lore_env` 均 **async + spawn_blocking**（同步命令会阻塞主线程导致 UI 冻结）；**run_lore 全局串行锁 + 分级超时**（只读命令 60s；stage/unstage/commit/status --scan 等会写 `.lore/mutable` 的命令 30min——1GB+ 资源慢盘写入超 60s 被 kill 会造成 mutable state 半写损坏 `Not found deserializing state`）；**record 的 Blender 预览只在 `preview_files` 实际包含可预览目标时准备 Blender**（`Some([])` = 无预览标记，不碰 Blender，避免下载/启动被误认为记录卡死）；**`revision_parent` 读 timeline 缓存**（`TimelineEntry.parent` 主线推导，零 lore 调用；旧缓存 fallback lore info）；`lore service` 0.8.6 实测不可用；GUI 回退/恢复**命令完成即清遮罩 + toast**（loadProject 后台刷新，避免"完成提示后转圈"）。恢复按钮（`rollback_point && head_matches` 时可用）；备份按钮接线；无冲突对话框（v2 已删 ConflictDialog）
 - **store GC 语义**（2026-08-12 实测）：lore 分块 store 会清理「远端已有副本的本地孤儿块」——**在线仓库（push 过）** 的孤儿/历史块可被 `repository gc`/维护清理 → 回退被顶替记录报 `Address not found`（36_mine2 事故）；**离线仓库 GC 不删块**（本地唯一副本）；`run_lore` 统一带 **`--no-gc`** 阻止自动增量 GC（只读命令无副作用；显式 `repository gc` 仍可跑）；`Address not found` 由 `translate_lore_error` 转译为中文（"数据已不在本地存储：可能被清理或尚未从服务器下载"）；**clone 只下载最新状态** → `clone_repo_to` 后 `fetch_full_history`（逐 revision `repository dump` 在线拉全历史块，尽力而为）；**回退失败（首次）自动还原备份**（rollback_inner 失败 → `restore_backup_at`，避免 dirty 文件"消失"后下次回退清空备份目录丢数据）；**web 产物 dirty 卡 branch reset**：跳 web 父后 diff 含 web 提交改动 → 回退检出 `.keinestamp/web/` 文件（index.html/glb）→ 应用层 hidden 过滤看不到、lore 校验 tracked dirty 拒绝 reset → 修复：`revision_changes` 过滤 `.keinestamp/web/` 路径（不检出 web 产物）+ `reset_hidden_dirty`（branch reset 前从 HEAD 树 dump 取隐藏 tracked 清单 `file reset --force` 还原，loreignore 文件如 timeline.json status 不可见但 reset 仍校验，须 --force）接入 rollback_inner 与 finish_rollback_restore
-- `lib/SettingsDialog.svelte` — **Blender / 通用 · 流程 / 标签 · 服务器 / 远端仓库**三页。流程 / 标签为项目级（`.keinestamp/tags.toml`）：流程增删改名、每个流程的标签增删、恢复默认；默认仅 Blender 流程（原「建模流程」改名）；保存后 `onTagGroupsSaved` 回传主界面，记录弹窗与时间线筛选即时刷新
+- `lib/SettingsDialog.svelte` — 四页：**Blender · 标签 · 服务器 · 关于**（标签文字从「Blender / 通用」「流程 / 标签」「服务器 / 远端仓库」简化，2026-11-02）。关于页切过去才读取：版本 / Lore 运行时 / 程序与配置目录 / 更新检查，失败如实显示、不弹窗；无新版/离线不阻塞；只读页无底部按钮（点遮罩关闭），有新版时状态行版本号可点击打开发布页。流程 / 标签为项目级（`.keinestamp/tags.toml`）：流程增删改名、每个流程的标签增删、恢复默认；默认仅 Blender 流程（原「建模流程」改名）；保存后 `onTagGroupsSaved` 回传主界面，记录弹窗与时间线筛选即时刷新
 - `lib/ActionBar.svelte` — 记录 / 恢复 / 备份 / 部署
 - `lib/EntryList.svelte` — 时间线卡片（id = lore revision sig）、★ milestone、右键导出/回退、回退点灰显；**「文本改动」区块已删除**（2026-08-12：diff 展示依赖 file_status（后端恒空）导致 A 状态误显，直接移除——只需「文件变动」；`get_file_diff`/`file_diff` 后端命令同步删除）
 - `lib/StatusPanel.svelte` — 变更面板（lore status 中文格式解析），勾选提交（files 参数），右键忽略/隐藏

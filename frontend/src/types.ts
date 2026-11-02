@@ -88,3 +88,31 @@ export interface RollbackState {
 }
 
 export type RollbackChoice = [string, 'current' | 'stashed']
+
+/** 设置 → 关于：一次性读取的元信息（后端 keinestamp::about::AboutInfo） */
+export interface AboutInfo {
+  name: string
+  version: string
+  platform: string
+  /** 捆绑 / 要求的 Lore 版本 */
+  lore_expected: string
+  project_url: string
+  license: string
+  /** 捆绑 Lore 版本号（检测失败时为 null） */
+  lore: string | null
+  lore_error: string | null
+  exe_dir: string
+  config_dir: string
+}
+
+export type UpdateState = 'up_to_date' | 'available' | 'unknown'
+
+/** 设置 → 关于：检查更新结果（unknown 是正常状态，不是异常） */
+export interface UpdateInfo {
+  state: UpdateState
+  current: string
+  latest: string | null
+  url: string
+  message: string
+  checked_at: string
+}

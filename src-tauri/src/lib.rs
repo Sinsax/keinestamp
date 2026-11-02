@@ -1580,6 +1580,21 @@ async fn check_lore_env() -> Result<serde_json::Value, String> {
     handle.await.map_err(|e| e.to_string())?
 }
 
+/// 设置 → 关于：版本 / 平台 / Lore 运行时 / 程序与配置目录（本地操作）
+#[tauri::command]
+async fn get_about_info() -> Result<keinestamp::about::AboutInfo, String> {
+    // check_lore_env 会 spawn 一次 lore --version，放阻塞线程池避免卡主线程
+    let handle = tokio::task::spawn_blocking(keinestamp::about::about_info);
+    Ok(handle.await.map_err(|e| e.to_string())?)
+}
+
+/// 设置 → 关于：检查更新（GitHub Releases；失败按 unknown 返回，不作为错误）
+#[tauri::command]
+async fn check_app_update() -> Result<keinestamp::about::UpdateInfo, String> {
+    let handle = tokio::task::spawn_blocking(keinestamp::about::check_update);
+    Ok(handle.await.map_err(|e| e.to_string())?)
+}
+
 #[tauri::command]
 async fn delete_server_repo(url: String, name: String) -> Result<(), String> {
     // 远程命令（连接可能超时）→ async 防主线程阻塞
@@ -1875,6 +1890,8 @@ pub fn run() {
             get_close_action,
             set_close_action,
             resolve_close_action,
+            get_about_info,
+            check_app_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

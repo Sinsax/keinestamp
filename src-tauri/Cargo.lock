@@ -1885,7 +1885,7 @@ dependencies = [
 
 [[package]]
 name = "keinestamp"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1907,7 +1907,7 @@ dependencies = [
 
 [[package]]
 name = "keinestamp-tauri"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "anyhow",
  "chrono",

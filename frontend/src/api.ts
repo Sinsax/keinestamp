@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { MetaConfig, Timeline, RecentEntry, StatusResult, ProjectType, RollbackState, RollbackChoice } from './types'
+import type { MetaConfig, Timeline, RecentEntry, StatusResult, ProjectType, RollbackState, RollbackChoice, AboutInfo, UpdateInfo } from './types'
 
 export async function detect(path: string): Promise<ProjectType> {
   return invoke<ProjectType>('detect', { path })
@@ -290,4 +290,14 @@ export async function resolveCloseAction(closeToTray: boolean): Promise<void> {
 
 export async function getDeployStatus(serverUrl: string, deployToken: string | null, path: string): Promise<{ local: number; remote: number | null }> {
   return invoke('get_deploy_status', { serverUrl, deployToken, path })
+}
+
+/** 设置 → 关于：版本 / 平台 / Lore 运行时 / 程序与配置目录（本地读取，不含网络） */
+export async function getAboutInfo(): Promise<AboutInfo> {
+  return invoke<AboutInfo>('get_about_info')
+}
+
+/** 设置 → 关于：检查更新（GitHub Releases；离线/限流返回 state=unknown，不抛错） */
+export async function checkAppUpdate(): Promise<UpdateInfo> {
+  return invoke<UpdateInfo>('check_app_update')
 }

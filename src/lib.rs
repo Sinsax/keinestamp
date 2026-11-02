@@ -1,3 +1,4 @@
+pub mod about;
 pub mod app_config;
 pub mod blender_download;
 pub mod blender_render;

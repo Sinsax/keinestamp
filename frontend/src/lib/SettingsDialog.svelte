@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { listen } from '@tauri-apps/api/event'
   import * as api from '../api'
+  import type { AboutInfo, UpdateInfo } from '../types'
 
   let {
     path = '',
@@ -24,7 +25,7 @@
   let loreServerIp = $state('')
   // 两个端口走一个 IP（勾选时 loreserver IP 灰显，共用部署 IP）
   let sameIp = $state(true)
-  let activeTab = $state<'main' | 'tags' | 'server'>('main')
+  let activeTab = $state<'main' | 'tags' | 'server' | 'about'>('main')
   let savedLoreUrl = $state('')
   // 服务开关（网页部署 / loreserver；false=关闭，测试与远端列表按此启用）
   let deployEnabled = $state(false)
@@ -66,6 +67,14 @@
   let tagLoading = $state(false)
   let tagError = $state('')
   let tagsDirty = $state(false)
+  // 关于页：版本 / Lore 运行时 / 路径 / 更新检查（进入该页才读取，避免每次开设置都 spawn lore）
+  let about = $state<AboutInfo | null>(null)
+  let aboutLoading = $state(false)
+  let aboutError = $state('')
+  let pathError = $state('')
+  let update = $state<UpdateInfo | null>(null)
+  let updateLoading = $state(false)
+  let updateError = $state('')
 
   onMount(() => {
     (async () => {
@@ -348,6 +357,66 @@
     testing = false
   }
 
+  // ---- 关于页 ----
+
+  /** 切到关于页：首次进入才读数据 / 检查更新（按钮上不预先发网络请求） */
+  function openAbout() {
+    activeTab = 'about'
+    if (!about && !aboutLoading) void loadAbout()
+    if (!update && !updateLoading) void loadUpdate()
+  }
+
+  async function loadAbout() {
+    aboutLoading = true
+    aboutError = ''
+    pathError = ''
+    try {
+      about = await api.getAboutInfo()
+    } catch (e: any) {
+      aboutError = detailOf(e)
+    } finally {
+      aboutLoading = false
+    }
+  }
+
+  async function loadUpdate() {
+    if (updateLoading) return
+    updateLoading = true
+    updateError = ''
+    try {
+      update = await api.checkAppUpdate()
+    } catch (e: any) {
+      updateError = detailOf(e)
+    } finally {
+      updateLoading = false
+    }
+  }
+
+  function checkedAtText(rfc: string): string {
+    const d = new Date(rfc)
+    return Number.isNaN(d.getTime()) ? rfc : d.toLocaleString()
+  }
+
+  async function openPath(target: string) {
+    if (!target) return
+    pathError = ''
+    try {
+      await api.openFolder(target)
+    } catch (e: any) {
+      pathError = detailOf(e)
+    }
+  }
+
+  async function openLink(url: string) {
+    if (!url) return
+    pathError = ''
+    try {
+      await api.openSite(url)
+    } catch (e: any) {
+      pathError = detailOf(e)
+    }
+  }
+
   async function save() {
     saving = true
     saveError = ''
@@ -421,9 +490,13 @@
     <h3>设置</h3>
 
     <div class="sd-tabs">
-      <button class="sd-tab" class:active={activeTab === 'main'} onclick={() => (activeTab = 'main')}>Blender / 通用</button>
-      <button class="sd-tab" class:active={activeTab === 'tags'} onclick={() => (activeTab = 'tags')}>流程 / 标签</button>
-      <button class="sd-tab" class:active={activeTab === 'server'} onclick={() => (activeTab = 'server')}>服务器 / 远端仓库</button>
+      <button class="sd-tab" class:active={activeTab === 'main'} onclick={() => (activeTab = 'main')}>Blender</button>
+      <button class="sd-tab" class:active={activeTab === 'tags'} onclick={() => (activeTab = 'tags')}>标签</button>
+      <button class="sd-tab" class:active={activeTab === 'server'} onclick={() => (activeTab = 'server')}>服务器</button>
+      <button class="sd-tab" class:active={activeTab === 'about'} onclick={openAbout}>
+        关于
+        {#if update?.state === 'available'}<span class="sd-dot" title="有新版本" aria-label="有新版本"></span>{/if}
+      </button>
     </div>
 
     {#if activeTab === 'main'}
@@ -607,6 +680,102 @@
     </div>
     {/if}
 
+    {#if activeTab === 'about'}
+    <div class="section">
+      <div class="section-title">软件</div>
+      {#if aboutLoading && !about}
+        <div class="about-empty">正在读取版本信息…</div>
+      {:else if about}
+        <div class="about-row">
+          <span class="about-label">版本</span>
+          <span class="about-value">
+            <span>{about.name} <b>v{about.version}</b></span>
+          </span>
+        </div>
+        <div class="about-row">
+          <span class="about-label">平台</span>
+          <span class="about-value">{about.platform}</span>
+        </div>
+        <div class="about-row">
+          <span class="about-label">Lore</span>
+          <span class="about-value">
+            {#if about.lore}
+              <span class="about-inline ok">{@render iconOk()} v{about.lore}</span>
+            {:else}
+              <span class="about-inline bad">{@render iconFail()} 不可用</span>
+            {/if}
+          </span>
+        </div>
+        {#if about.lore_error}
+          <div class="about-error" role="alert">{about.lore_error}</div>
+        {/if}
+        <span class="hint">Keinestamp 以 {about.license} 许可发布；随包分发的 Lore v{about.lore_expected} 同属 MIT（© Epic Games, Inc.）</span>
+      {:else if aboutError}
+        <div class="about-empty error">{aboutError}</div>
+        <div class="flow-actions">
+          <button class="mini-btn" onclick={() => void loadAbout()}>重试</button>
+        </div>
+      {/if}
+    </div>
+
+    <div class="section">
+      <div class="section-title">位置</div>
+      {#if about}
+        <div class="about-row">
+          <span class="about-label">程序目录</span>
+          <span class="about-path" title={about.exe_dir}>{about.exe_dir}</span>
+          <button class="mini-btn" onclick={() => void openPath(about?.exe_dir || '')}>打开</button>
+        </div>
+        <div class="about-row">
+          <span class="about-label">配置目录</span>
+          <span class="about-path" title={about.config_dir}>{about.config_dir}</span>
+          <button class="mini-btn" onclick={() => void openPath(about?.config_dir || '')}>打开</button>
+        </div>
+      {/if}
+      {#if pathError}
+        <div class="about-error" role="alert">{pathError}</div>
+      {/if}
+    </div>
+
+    <div class="section">
+      <div class="section-title">更新</div>
+      <div class="about-row">
+        <span class="about-label">源码仓库</span>
+        <span class="about-path" title={about?.project_url}>{about?.project_url}</span>
+        <button class="mini-btn" onclick={() => void openLink(about?.project_url || '')}>打开</button>
+      </div>
+      <div class="about-row">
+        <span class="about-label">状态</span>
+        <span class="about-value">
+          {#if updateLoading}
+            正在检查…
+          {:else if update}
+            {#if update.state === 'available'}
+              <button class="about-link" onclick={() => void openLink(update?.url || '')} title="打开发布页">
+                发现新版本 v{update.latest} ↗
+              </button>
+              <span>当前 v{update.current}</span>
+            {:else if update.state === 'up_to_date'}
+              <span class="about-inline ok">{@render iconOk()} {update.message}</span>
+            {:else}
+              <span class="about-unknown">{update.message}</span>
+            {/if}
+          {:else if updateError}
+            <span class="about-unknown">检查失败：{updateError}</span>
+          {:else}
+            尚未检查
+          {/if}
+        </span>
+      </div>
+      <div class="about-actions">
+        <button class="mini-btn" onclick={() => void loadUpdate()} disabled={updateLoading}>{updateLoading ? '检查中…' : '检查更新'}</button>
+      </div>
+      {#if update?.checked_at}
+        <span class="hint">上次检查：{checkedAtText(update.checked_at)}</span>
+      {/if}
+    </div>
+    {/if}
+
     {#if activeTab === 'main'}
     <div class="section">
       <div class="section-title">通用</div>
@@ -643,6 +812,7 @@
     </div>
     {/if}
 
+    {#if activeTab !== 'about'}
     <div class="actions">
       {#if saveError}
         <span class="save-error" role="alert" title={saveError}>{saveError}</span>
@@ -650,6 +820,7 @@
       <button onclick={onClose}>取消</button>
       <button class="accent" onclick={save} disabled={saving} title={switchNotice || saveError || ''}>{saving ? '保存中…' : switchNotice ? '已切换 ✓' : savedFeedback ? '已保存 ✓' : '保存'}</button>
     </div>
+    {/if}
   </div>
 </div>
 
@@ -908,5 +1079,49 @@
   .flow-add input { flex: 1; min-width: 0; font-size: 11.5px; padding: 2px 8px; }
   .flow-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
   .flow-dirty { font-size: 10.5px; color: var(--accent); margin-left: auto; }
+  /* 关于页 */
+  .sd-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 4px;
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: 2px;
+  }
+  .about-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; min-height: 20px; }
+  .about-label { flex: 0 0 56px; font-size: 11px; color: var(--text-dim); }
+  .about-value { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 11.5px; }
+  .about-path {
+    flex: 1;
+    min-width: 0;
+    font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .about-path:hover { color: var(--text); }
+  .about-inline { display: inline-flex; align-items: center; gap: 4px; }
+  .about-inline.ok { color: var(--success); }
+  .about-inline.bad { color: var(--error); }
+  .about-link {
+    font-size: 11.5px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: var(--accent);
+    cursor: pointer;
+    white-space: nowrap;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+  .about-link:hover { color: var(--text); }
+  .about-unknown { color: var(--text-dim); }
+  .about-empty { font-size: 11.5px; color: var(--text-dim); padding: 4px 0; }
+  .about-empty.error { color: var(--error); }
+  .about-error { font-size: 10.5px; color: var(--error); margin-top: 4px; word-break: break-word; }
+  .about-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
   .actions { display: flex; gap: 6px; justify-content: flex-end; margin-top: 16px; }
 </style>

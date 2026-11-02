@@ -2,6 +2,25 @@
 
 版本号遵循语义化版本；本项目自 v0.5.0 起公开发布。
 
+## [0.5.1] - 2026-11-02
+
+### 新增
+
+- **设置 → 关于**：显示程序版本（构建时注入）、运行平台、捆绑 Lore 版本、
+  程序目录与配置目录（可一键打开），并通过 GitHub Releases 检查新版本
+  （有新版时状态行的版本号可点击打开发布页，标签页另有小圆点；
+  离线或接口限流按「无法判断」显示，不阻塞其它设置）
+
+### 变更
+
+- **设置页标签简化为四页简写**：Blender · 标签 · 服务器 · 关于
+- 关于页只显示 Lore 版本（不再列可执行文件路径），去掉本地仓库 / 项目路径与独立「链接」段
+  （合并进「更新」并删除发布页条目）；只读页不再有底部按钮，点对话框外关闭
+
+### 修复
+
+- **`cargo tauri dev` 启动失败**：`beforeDevCommand` / `beforeBuildCommand` 的 cwd 已是 `frontend/`，v0.5.0 又写成 `npm --prefix frontend run dev`，解析成 `frontend/frontend/package.json` 报 ENOENT
+
 ## [0.5.0] - 2026-10-31
 
 首个公开版本，汇总自 v0.3.0 以来的主要变化。
@@ -42,4 +61,5 @@
 
 - Epic Games Lore 0.8.6（Windows x86_64），MIT 许可，随发行包分发
 
+[0.5.1]: https://github.com/Sinsax/keinestamp/releases/tag/v0.5.1
 [0.5.0]: https://github.com/Sinsax/keinestamp/releases/tag/v0.5.0
