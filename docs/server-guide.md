@@ -1,68 +1,77 @@
-# 服务端部署指南
+# Server deployment guide
 
-`keinestamp serve` 提供两类能力：
+**English** | [简体中文](zh-CN/server-guide.md)
 
-1. **网页时间线部署**（多租户）：客户端把网页产物 zip 上传到服务器，浏览器通过 `/<项目名>/` 访问
-2. **局域网备份服务器**（可选）：`enable_loreserver = true` 时拉起内置 `loreserver`，供 `备份` 使用
+`keinestamp serve` provides two capabilities:
 
-> 所有路径均为占位符：`<程序目录>` = serve 的数据目录；实际部署请替换为你的路径 / 域名 / 令牌，勿照抄示例。
+1. **Web timeline deployment** (multi-tenant): the client uploads a zip of the web output to the
+   server and browsers access it at `/<project-name>/`
+2. **LAN backup server** (optional): with `enable_loreserver = true` a bundled `loreserver` is
+   started for `Backup`
+
+> All paths below are placeholders: `<program-dir>` is serve's data directory. Replace them with
+> your own paths / domain / tokens; do not copy the examples verbatim.
 
 ---
 
-## 1. 程序目录基准
+## 1. Program directory base
 
-serve 的配置与数据以**程序目录**为基准：
+serve's configuration and data are relative to the **program directory**:
 
-- 优先级：`KEINESTAMP_BASE_DIR` 环境变量 > exe 所在目录
-- **软链部署必须设置 `KEINESTAMP_BASE_DIR`**：`current_exe()` 会把软链解析到真实路径
-  （如 `源码目录/target/release/`），否则配置会散落到构建产物里，`cargo clean` 即丢失
+- Priority: `KEINESTAMP_BASE_DIR` environment variable > the directory containing the exe
+- **Symlink deployments must set `KEINESTAMP_BASE_DIR`**: `current_exe()` resolves symlinks to
+  the real path (e.g. `source-dir/target/release/`), otherwise configuration scatters into build
+  artifacts and is lost on `cargo clean`
 
 ```
-<程序目录>/
-├── keinestamp(.exe)          # 主程序（可为软链指向构建产物）
-├── lore-bin/                 # Lore 运行时（构建时自动拷贝到 exe 同目录）
-├── serve.toml                # 服务配置（首次 serve 可自动生成）
-├── web-root/                 # 部署数据
-│   ├── <项目名>/             # 每个项目的网页产物
-│   ├── .versions.json        # 各站点版本计数
-│   ├── .manifests/           # 各站点文件清单
-│   └── _three/               # 共享 three.js 资源（启动时生成）
-├── .keinestamp-projects.json # 项目令牌 / 身份注册表（web_root 的父目录）
-├── lore-server-config/       # 仅 enable_loreserver = true 时生成
-└── lore-server-store/        # loreserver 备份数据
+<program-dir>/
+├── keinestamp(.exe)          # main program (may be a symlink to build output)
+├── lore-bin/                 # Lore runtime (copied next to the exe at build time)
+├── serve.toml                # service config (auto-generated on first serve)
+├── web-root/                 # deployment data
+│   ├── <project-name>/       # web output per project
+│   ├── .versions.json        # version counter per site
+│   ├── .manifests/           # file manifest per site
+│   └── _three/               # shared three.js assets (generated at startup)
+├── .keinestamp-projects.json # project token / identity registry (parent of web_root)
+├── lore-server-config/       # generated only when enable_loreserver = true
+└── lore-server-store/        # loreserver backup data
 ```
 
 ---
 
 ## 2. serve.toml
 
-查找顺序：`--config` 指定 > `<程序目录>/serve.toml` > 命令参数目录（旧位置兼容）> 自动生成。
+Lookup order: `--config` > `<program-dir>/serve.toml` > command argument directory (legacy
+location) > auto-generate.
 
 ```toml
-host = "127.0.0.1"            # 默认只监听本机，对外走反代
+host = "127.0.0.1"            # listen on localhost by default; expose via a reverse proxy
 port = 7799
-deploy_token = "<随机长令牌>"  # 必填：上传 / 健康检查认证；为空直接拒绝启动
-web_root = "web-root"         # 相对 = 相对程序目录；也可写绝对路径
-trust_proxy = true            # 反代场景：信任 X-Forwarded-For / X-Forwarded-Proto
-enable_loreserver = false     # 可选：拉起内置 loreserver（局域网备份）
-site_name = "My Studio"       # 可选：网页首页标题（默认 Keinestamp）
+deploy_token = "<random-long-token>"  # required: upload / health-check auth; empty refuses to start
+web_root = "web-root"         # relative = relative to the program dir; absolute paths allowed
+trust_proxy = true            # behind a reverse proxy: trust X-Forwarded-For / X-Forwarded-Proto
+enable_loreserver = false     # optional: spawn the bundled loreserver (LAN backup)
+site_name = "My Studio"       # optional: landing page title (default Keinestamp)
 ```
 
-> `deploy_token` 为空或纯空白会让 `Authorization: Bearer ` 直接通过认证，serve 会拒绝启动。
+> An empty or whitespace-only `deploy_token` would let `Authorization: Bearer ` authenticate
+> blindly, so serve refuses to start.
 
 ---
 
-## 3. 启动方式
+## 3. Starting
 
-### Windows（手动 / 计划任务）
+### Windows (manual / scheduled task)
 
 ```powershell
 .\keinestamp.exe serve . --port 7799
 ```
 
-### Linux + systemd（推荐）
+### Linux + systemd (recommended)
 
-仓库自带 unit 模板 [deploy/keinestamp.service](../deploy/keinestamp.service)：
+The repository ships a unit template:
+[deploy/keinestamp.service](../deploy/keinestamp.service)
 
 ```bash
 cp deploy/keinestamp.service ~/.config/systemd/user/
@@ -70,33 +79,37 @@ systemctl --user daemon-reload
 systemctl --user enable --now keinestamp.service
 ```
 
-部署前请修改 unit 中的：
+Before deploying, edit the unit:
 
-- `ExecStart` / `WorkingDirectory`：指向程序目录
-- `Environment=KEINESTAMP_BASE_DIR=...`（软链部署必填）
-- `ReadWritePaths`：**必须包含整个程序目录**（见下方坑 1）
-
----
-
-## 4. 多租户与令牌
-
-- 部署地址：`http://<host>:<port>/<项目名>/`，项目名即客户端设置的「网页名称」
-- **`deploy_token`**：客户端上传 / 健康检查使用（`Authorization: Bearer <token>`）
-- **项目 `access_token`**：浏览器登录使用；部署时客户端通过 `X-Access-Token` 注册到服务器
-- 登录 Cookie 按 `/<项目名>/` 路径隔离，多个项目互不干扰
-- 站点名在首次部署后**锁定**，作为访问路径；需要改名时请在服务器侧清理对应项目目录与注册表
+- `ExecStart` / `WorkingDirectory`: point at the program directory
+- `Environment=KEINESTAMP_BASE_DIR=...` (required for symlink deployments)
+- `ReadWritePaths`: **must include the whole program directory** (see pitfall 1 below)
 
 ---
 
-## 5. 反向代理与 HTTPS
+## 4. Multi-tenancy and tokens
 
-推荐链路：
+- Deploy URL: `http://<host>:<port>/<project-name>/`, where the project name is the “site name”
+  configured in the client
+- **`deploy_token`**: used by the client for upload / health checks
+  (`Authorization: Bearer <token>`)
+- **Project `access_token`**: used for browser login; the client registers it with the server via
+  `X-Access-Token` during deployment
+- Login cookies are isolated per `/<project-name>/`, so multiple projects do not interfere
+- The site name is **locked** after the first deployment (it is the URL path); to rename it, clean
+  up the project directory and the registry on the server
+
+---
+
+## 5. Reverse proxy and HTTPS
+
+Recommended chain:
 
 ```
-浏览器 → Cloudflare(强制 HTTPS) → cloudflared 隧道 → Caddy(TLS) → serve(127.0.0.1:7799, 明文)
+browser → Cloudflare (force HTTPS) → cloudflared tunnel → Caddy (TLS) → serve (127.0.0.1:7799, plain)
 ```
 
-Caddy 示例：
+Caddy example:
 
 ```caddyfile
 keinestamp.example.com {
@@ -104,100 +117,108 @@ keinestamp.example.com {
 }
 ```
 
-要点：
+Key points:
 
-- `serve.toml` 中 `trust_proxy = true`，否则拿不到真实客户端 IP 与来源协议
-- Caddy 会按**入口协议**自动设置 `X-Forwarded-Proto`；
-  **不要**手动 `header_up X-Forwarded-Proto https`，否则局域网 HTTP 入口也会被标成 https
-- serve 对 HTTPS 来源的登录 Cookie 加 `Secure`，堵住 `http → https` 跳转前的明文盲区；
-  局域网明文直连不受影响
+- Set `trust_proxy = true` in `serve.toml`, otherwise the real client IP and origin scheme are lost
+- Caddy sets `X-Forwarded-Proto` automatically from the **incoming** protocol;
+  **do not** add `header_up X-Forwarded-Proto https` manually, or plain LAN HTTP entries would be
+  marked as https too
+- serve marks login cookies from HTTPS origins as `Secure`, closing the plaintext gap during the
+  `http → https` redirect; plain LAN access is unaffected
 
 ---
 
-## 6. 局域网备份服务器（loreserver）
+## 6. LAN backup server (loreserver)
 
 ```toml
 enable_loreserver = true
 ```
 
-- serve 启动时探测 `41339` 健康检查；不在线则拉起 `loreserver`
-- 首次启动生成 `lore-server-config/local.toml`，store 持久化到 `lore-server-store/`
-- 监听 `41337`（Lore gRPC/QUIC）+ `41339`（HTTP 健康检查）
-- serve 退出时结束自己拉起的实例（外部已在线的不动）
-- **loreserver 无认证（`auth: None`）——仅限可信局域网**
+- On startup serve probes the `41339` health endpoint; if offline it spawns `loreserver`
+- The first start generates `lore-server-config/local.toml`; the store persists under
+  `lore-server-store/`
+- Listens on `41337` (Lore gRPC/QUIC) + `41339` (HTTP health check)
+- serve terminates instances it spawned on exit (external instances are left alone)
+- **loreserver has no authentication (`auth: None`) — trusted LAN only**
 
-客户端（GUI）在 设置 → 服务器 填写 loreserver 的 IP / 端口（默认 `41337`），
-点「备份」即可 `lore push`。离线仓库会引导「迁移并备份」。
+In the client (GUI) enter the loreserver IP / port in Settings → Server (default `41337`) and click
+“Backup” to `lore push`. Offline repositories are guided through “Migrate and back up”.
 
 ---
 
-## 7. 客户端配置
+## 7. Client configuration
 
 ### GUI
 
-设置 → 服务器 / 远端仓库：
+Settings → Server / Remote repositories:
 
-- 服务器 IP / 端口（网页部署）
-- loreserver IP / 端口（可勾选与部署共用 IP）
-- 部署令牌（= 服务端 `deploy_token`）
-- 开启服务开关后点「测试连接」
+- Server IP / port (web deployment)
+- loreserver IP / port (can optionally share the deployment IP)
+- Deploy token (= the server's `deploy_token`)
+- Turn on the service switches and click “Test connection”
 
-部署：时间线右侧设置「网页名称」「访问令牌」→ 底部「部署」。
+Deploy: set the “site name” and “access token” on the right of the timeline → click “Deploy” in the
+bottom bar.
 
 ### CLI
 
 ```powershell
-# 启动服务
-keinestamp serve <程序目录> --port 7799
+# start the service
+keinestamp serve <program-dir> --port 7799
 
-# 部署项目
-keinestamp deploy <项目目录> --server http://127.0.0.1:7799 --deploy-token <deploy_token>
+# deploy a project
+keinestamp deploy <project-dir> --server http://127.0.0.1:7799 --deploy-token <deploy_token>
 ```
 
 ---
 
-## 8. 升级与备份
+## 8. Upgrading and backup
 
-- 升级：停止服务 → 用新版本整目录替换（保留 `serve.toml`、`web-root/`、`.keinestamp-projects.json`、
-  `lore-server-*`）→ 启动
-- 备份：至少备份 `web-root/`、`.keinestamp-projects.json`、`serve.toml`；
-  启用 loreserver 时再备份 `lore-server-store/`
-- `.keinestamp-projects.json` 丢失会导致所有站点 token 失效（401），务必纳入备份
-
----
-
-## 9. 安全建议
-
-- `deploy_token` 使用随机长串；泄漏等于任何人都能上传/覆盖站点
-- 公网部署请走 HTTPS（Caddy + Cloudflare 隧道），不要直接暴露明文 7799
-- 项目访问令牌明文存储（服务器注册表 / 客户端项目配置），服务器安全依赖主机本身
-- loreserver 无认证，不要暴露到公网
+- Upgrading: stop the service → replace the whole directory with the new version (keep
+  `serve.toml`, `web-root/`, `.keinestamp-projects.json`, `lore-server-*`) → start
+- Backup: at minimum back up `web-root/`, `.keinestamp-projects.json` and `serve.toml`; when
+  loreserver is enabled also back up `lore-server-store/`
+- Losing `.keinestamp-projects.json` invalidates every site token (401) — always include it in
+  backups
 
 ---
 
-## 10. 故障排查
+## 9. Security recommendations
 
-| 现象 | 原因 | 处理 |
+- Use a long random `deploy_token`; leaking it means anyone can upload / overwrite sites
+- For public deployments use HTTPS (Caddy + Cloudflare tunnel); never expose plaintext 7799 directly
+- Project access tokens are stored in plaintext (server registry / client project config); server
+  security depends on the host itself
+- loreserver has no authentication — never expose it to the internet
+
+---
+
+## 10. Troubleshooting
+
+| Symptom | Cause | Fix |
 |---|---|---|
-| 启动报 `serve.toml 的 deploy_token 为空` | `deploy_token` 为空/纯空白（空 token = 无认证） | 填入随机长令牌后重启 |
-| 上传 200 但 `.keinestamp-projects.json` 不存在 | systemd `ReadWritePaths` 未放开注册表目录 | 修正 unit → `daemon-reload` → `restart` → 重新部署 |
-| 上传 403 `existing project has no identity` | 项目目录已存在但注册表无身份（防劫持） | 备份移走目录 → GUI 首次部署重新注册 |
-| 登录 302 `login?error=1` | 用了 `deploy_token` 而非项目 `access_token` | 浏览器登录使用项目访问令牌 |
-| 局域网 IP 无法访问 | 默认只监听 `127.0.0.1` | 改 `host = "0.0.0.0"` 或配置反代 |
-| 公网 Cookie 未加 Secure | `trust_proxy` 未开启，或反代未透传协议 | `trust_proxy = true`，检查反代入口协议 |
-| 重启后站点全部 401 | 注册表写盘失败或丢失 | 检查 `ReadWritePaths` 与备份 |
+| Startup: `serve.toml deploy_token is empty` | `deploy_token` empty or whitespace (an empty token means no auth) | Set a long random token and restart |
+| Upload returns 200 but `.keinestamp-projects.json` is missing | systemd `ReadWritePaths` does not allow the registry directory | Fix the unit → `daemon-reload` → `restart` → deploy again |
+| Upload 403 `existing project has no identity` | The project directory exists but the registry has no identity (anti-hijack) | Move the directory away → deploy again from the GUI to re-register |
+| Login 302 `login?error=1` | Used `deploy_token` instead of the project `access_token` | Use the project access token for browser login |
+| LAN IP unreachable | Only `127.0.0.1` is bound by default | Set `host = "0.0.0.0"` or configure a reverse proxy |
+| Public cookie missing Secure | `trust_proxy` off, or the proxy does not forward the scheme | Set `trust_proxy = true` and check the proxy's incoming scheme |
+| All sites return 401 after a restart | Registry write failed or was lost | Check `ReadWritePaths` and your backups |
 
 ---
 
-## 11. 界面语言
+## 11. UI language
 
-- **网页产物恒为英文**：部署页、登录页与根路径落地页全部英文（含空态与错误提示），`<html lang="en">`。
-  这是产品决策——网页面向外部访客，不跟随服务器的语言设置
-- **服务器控制台输出**跟随界面语言（同 CLI：`KEINESTAMP_LOCALE` → 配置 → 系统语言）
-- **用户数据不翻译**：项目名、流程名、标签名、文件名、提交信息按原样显示
+- **Web output is always English**: the deployment page, login page and root landing page are all
+  English (including empty states and errors), `<html lang="en">`. This is a product decision —
+  web pages face external visitors and do not follow the server's language setting
+- **Server console output** follows the UI language (same as the CLI: `KEINESTAMP_LOCALE` → config
+  → system language)
+- **User data is not translated**: project names, process names, tag names, file names and commit
+  messages are shown verbatim
 
-## 12. 相关文档
+## 12. Related documentation
 
-- [GUI 使用指南](gui-guide.md)
-- [CLI 参考](cli.md)
-- [Lore 0.8.6 命令速查（开发用）](lore-commands.md)
+- [GUI guide](gui-guide.md)
+- [CLI reference](cli.md)
+- [Lore 0.8.6 command cheat sheet (development, Chinese)](lore-commands.md)

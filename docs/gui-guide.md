@@ -1,263 +1,300 @@
-# GUI 使用指南
+# GUI guide
 
-本指南面向日常使用：从新建项目到记录、回退、备份与网页部署。
-服务端与命令行用法见 [服务端部署指南](server-guide.md) 和 [CLI 参考](cli.md)。
+**English** | [简体中文](zh-CN/gui-guide.md)
 
-> Keinestamp 是通用的二进制工程进度看板，当前以 Blender 工作流为重点。
-> 贴图、视频、设计源文件等其它工程的使用流程一致（记录 / 回退 / 备份 / 部署）；
-> 不同类型文件的预览能力见 [README 的「适用范围」](../README.md#适用范围)。
+This guide covers day-to-day use: from creating a project to recording, rolling back, backing up and
+deploying the web timeline. For the server and the command line see the
+[server deployment guide](server-guide.md) and the [CLI reference](cli.md).
 
----
-
-## 1. 安装与启动
-
-- 系统要求：Windows 10/11 x64
-- 两种使用方式：
-  - **安装包**：运行 `Keinestamp_<版本>_x64-setup.exe`
-  - **便携版**：解压 `Keinestamp-<版本>-windows-x64-portable.zip` 到任意目录，运行 `Keinestamp.exe`
-
-> 便携版必须保持 `Keinestamp.exe` 与 `lore-bin/` 同目录。
-> 程序启动时会校验捆绑的 Lore 版本，必须为 `0.8.6`；缺失或不匹配会弹窗提示，
-> 并禁用记录 / 回退等操作。
-
-**关闭窗口**：首次关闭会询问一次，之后可按设置执行「后台驻留（通知区域）」或「退出」。
-托盘图标左键打开窗口，右键可退出。
+> Keinestamp is a general-purpose progress board for binary projects, currently focused on Blender
+> workflows. Other project types (textures, videos, design sources, …) follow the same flow
+> (record / rollback / backup / deploy); preview support per file type is listed in the
+> [Scope section of the README](../README.md#scope).
 
 ---
 
-## 2. 项目
+## 1. Install and launch
 
-### 新建项目
+- Requirements: Windows 10/11 x64
+- Two ways to install:
+  - **Installer**: run `Keinestamp_<version>_x64-setup.exe`
+  - **Portable**: extract `Keinestamp-<version>-windows-x64-portable.zip` anywhere and run
+    `Keinestamp.exe`
 
-点击标题栏最右侧的 `+` → 选择目录：
+> The portable build requires `Keinestamp.exe` and `lore-bin/` in the same directory.
+> At startup the app verifies the bundled Lore version and requires `0.8.6`; if it is missing or
+> mismatched a dialog appears and actions such as record / rollback are disabled.
 
-- 空目录：初始化一个全新项目
-- 已含 `.blend` 的目录：直接接管（不会移动或删除文件）
-- 已初始化过的项目会被识别并直接打开，不会重复初始化
+**Closing the window**: the first close asks once; afterwards the app follows your setting —
+“stay in the background (notification area)” or “quit”.
+Left-click the tray icon to reopen the window; right-click to quit.
 
-初始化会创建：
+---
+
+## 2. Projects
+
+### New project
+
+Click `+` at the far right of the title bar and pick a directory:
+
+- Empty directory: initializes a brand-new project
+- Directory containing `.blend` files: adopted as-is (files are never moved or deleted)
+- An already initialized project is detected and opened directly, without re-initializing
+
+Initialization creates:
 
 ```
-<项目>/
-├── .lore/                  # Lore 仓库（历史、对象存储）
-├── .keinestamp/            # 程序私有目录（不入库）：网页产物、备份、配置
-└── .loreignore             # 忽略规则（默认忽略 .keinestamp/）
+<project>/
+├── .lore/                  # Lore repository (history, object store)
+├── .keinestamp/            # app-private directory (not versioned): web output, backups, config
+└── .loreignore             # ignore rules (ignores .keinestamp/ by default)
 ```
 
-### 打开已有项目
+### Opening an existing project
 
-- 已打开过的项目会出现在标题栏的**项目标签**里，点击切换
-- 设置 → 通用 → 「启动时自动打开上次的项目」可让下次启动自动恢复
-- 从远端下载的项目：设置 → 服务器 / 远端仓库 → 下载后点「跳转」
+- Projects opened before appear as **project tabs** in the title bar; click to switch
+- Settings → General → “Open the last project on startup” restores it on the next launch
+- Projects downloaded from a remote: Settings → Server / Remote repositories → after downloading
+  click “Open”
 
 ---
 
-## 3. 主界面
+## 3. Main window
 
 ```
-┌ 标题栏：项目标签 / 主题切换 / 设置 / 窗口按钮 ─────────────┐
-│ 变更面板（左）                │ 时间线（右）                │
-│  勾选 / 全选 / 刷新            │  搜索 / 流程筛选 / 记录卡片 │
-│  忽略规则                      │  详情：文件变动 / 预览      │
-├ 底部操作条：记录 · 恢复 · 备份 · 部署 ────────────────────┤
-└ 状态栏：连接状态 / 项目信息 ─────────────────────────────┘
+┌ Title bar: project tabs / theme toggle / settings / window buttons ──────┐
+│ Changes panel (left)             │ Timeline (right)                     │
+│  tick / select all / refresh     │  search / process filter / cards     │
+│  ignore rules                    │  details: file changes / previews    │
+├ Bottom action bar: Record · Restore · Backup · Deploy ──────────────────┤
+└ Status bar: connection state / project info ────────────────────────────┘
 ```
 
-- **变更面板**：列出工作区未提交的变更。左侧勾选框决定「本次记录纳入哪些文件」；
-  目录勾选 = 整个目录。被忽略的文件仍会显示（灰显），可右键取消忽略。
-- **时间线**：每条记录是一张卡片，显示说明、时间、流程 / 标签、文件数与 3D 预览徽章。
-- **底部操作条**：记录 / 恢复 / 备份 / 部署。不可用时悬停可看到原因。
+- **Changes panel**: lists uncommitted changes in the workspace. The checkboxes decide which files
+  are included in this record; ticking a directory includes everything under it. Ignored files are
+  still shown (greyed out) and can be un-ignored from the context menu.
+- **Timeline**: each record is a card showing the message, time, process / tags, file count and 3D
+  preview badge.
+- **Bottom action bar**: Record / Restore / Backup / Deploy. Hover a disabled action to see why.
 
 ---
 
-## 4. 记录一次进度
+## 4. Recording progress
 
-1. 在**变更面板**勾选本次要记录的文件（至少一个；也可只记录说明）
-2. 点击底部 **记录**
-3. 在弹窗中填写：
-   - **记录说明**（必填）
-   - **流程分类**（可选）：来自项目配置的流程
-   - **标签**（可选）：选预设标签，或点「自定义」输入
-   - **生成预览**（可选）：为本次记录生成网页 3D 预览（需要 Blender）
-4. 确认后等待完成，时间线顶部会出现新记录
+1. In the **Changes** panel tick the files for this record (at least one; a message-only record is
+   also allowed)
+2. Click **Record** in the bottom bar
+3. In the dialog fill in:
+   - **Message** (required)
+   - **Process category** (optional): processes from the project configuration
+   - **Tags** (optional): pick presets or click “Custom” to type one
+   - **Generate preview** (optional): build web 3D previews for this record (requires Blender)
+4. Confirm and wait; the new record appears at the top of the timeline
 
-### 3D 预览标记
+### Marking 3D previews
 
-- 在变更面板右键 `.blend` 文件 → 「3D 预览」，该行出现蓝色 3D 徽章
-- 记录时只对**已标记**的 `.blend` 导出 GLB（未标记不生成，节省时间）
-- 标记状态只影响之后的新记录；时间线卡片上的 3D 徽章可查看预览，右键可开启 / 关闭该条记录
+- Right-click a `.blend` file in the Changes panel → “3D preview”; a blue 3D badge appears on that
+  row
+- Only **marked** `.blend` files are exported to GLB during a record (unmarked ones are skipped to
+  save time)
+- Marking only affects future records; the 3D badge on a timeline card opens the preview, and
+  right-clicking it toggles the preview for that record
 
-### 丢弃单个文件改动
+### Discarding changes of a single file
 
-变更面板右键文件 → 「取消更改」，把文件恢复到最近一次记录的内容（会二次确认）。
-未跟踪文件不支持此操作，可直接删除。
+Right-click a file in the Changes panel → “Discard changes” restores it to the latest record
+(with a confirmation). Untracked files are not supported here — just delete them.
 
-### 忽略
+### Ignoring
 
-- 右键文件 / 目录 / 扩展名 → 「忽略文件 / 忽略目录 / 忽略格式」
-- 规则写入项目根目录 `.loreignore`（随仓库历史保存，与 `.gitignore` 同语义）
-- 已忽略文件仍显示为灰色，可直接右键「取消忽略」
-- 变更面板下方的「忽略规则」区域可手工添加、删除规则
-
----
-
-## 5. 时间线
-
-- **搜索**：匹配记录说明、流程、标签、文件名
-- **流程筛选**：顶部下拉框按流程过滤
-- **里程碑**：卡片上的 ★ 可标记 / 取消里程碑
-- **详情**：点击卡片，右侧显示 ID、时间、流程、标签、文件数、预览数与文件变动
-- **右键菜单**：
-  - 导出（导出该记录版本到指定目录）
-  - 对比上一记录（查看文件差异）
-  - 回退
-  - 预览开关
-- **打开本地时间线页面**：在浏览器中查看当前项目的网页时间线（无需部署）
+- Right-click a file / directory / extension → “Ignore file / Ignore directory / Ignore format”
+- Rules are written to `.loreignore` in the project root (versioned with the repository, gitignore
+  semantics)
+- Ignored files stay visible in grey; right-click → “Unignore” to undo
+- The “Ignore rules” section under the Changes panel lets you add or remove rules by hand
 
 ---
 
-## 6. 回退与恢复
+## 5. Timeline
 
-Keinestamp 的回退是「把工作区退到某条记录之前」，而不是删除历史。
-
-### 回退
-
-选择记录 **X** 右键 → 回退：
-
-1. 工作区回到 **X 的父版本**（X 之前的状态）
-2. **X 的改动**被检出为未提交修改：
-   - 修改 / 新增文件：状态「回退改动」，可勾选、可再编辑、可重新记录
-   - 删除文件：状态「回退删除」，只读；重新记录时按删除提交
-3. 回退前未提交的改动会暂存到 `.keinestamp/rollback-backup/`，恢复时取回
-4. 未跟踪的新文件也会一并移出暂存，不会丢失
-
-### 连续回退
-
-已有回退状态时再次回退，只备份**首次回退**的内容。
-若检出文件被你改过（「已修改」），会弹窗确认「丢弃并跳转 / 留下」；
-纯检出（「已检出」）则自动跳过，不打扰。
-
-### 恢复（撤销回退）
-
-底部 **恢复**：
-
-- 工作区回到回退前的 HEAD，暂存内容取回
-- 若当前改动与回退前暂存冲突，会逐文件询问保留「当前版本改动」还是「回退前改动」
-- 若有真实修改，会确认是否丢弃
-
-### 顶替
-
-回退状态下继续记录：新记录的父版本是回退点，原时间线中 X 之后的记录会被顶替出主线
-（仍在数据中，折叠显示），这是正常行为。
+- **Search**: matches record messages, processes, tags and file names
+- **Process filter**: the dropdown at the top filters by process
+- **Milestones**: the ★ on a card marks / unmarks a milestone
+- **Details**: clicking a card shows ID, time, process, tags, file count, preview count and file
+  changes on the right
+- **Context menu**:
+  - Export (extract that record's version to a directory)
+  - Compare with previous record (file differences)
+  - Roll back
+  - Toggle preview
+- **Open the local timeline page**: view this project's web timeline in a browser (no deployment
+  needed)
 
 ---
 
-## 7. 备份（局域网 loreserver）
+## 6. Rollback and restore
 
-备份 = `lore push` 到局域网 loreserver。
+Rollback in Keinestamp means “move the workspace back to before a record”; history is not deleted.
 
-1. 设置 → 服务器：填写 loreserver 的 **IP / 端口**（默认 `41337`），保存
-2. 点底部 **备份**
-3. 若项目是离线创建（没有远端），会提示「迁移并备份」：
-   程序会把仓库注册到服务器并全量推送，然后恢复为在线仓库
+### Rolling back
 
-> - 备份服务器无认证（`auth: None`），**仅限可信局域网**
-> - 处于回退状态时不允许迁移；请先恢复
-> - 备份服务器由 `serve` 的可选 loreserver 或独立 `loreserver` 提供，见服务端指南
+Right-click a record **X** → Roll back:
 
----
+1. The workspace goes back to **X's parent version** (the state before X)
+2. **X's changes** are checked out as uncommitted modifications:
+   - Modified / added files: state “rollback change”; they can be ticked, edited and re-recorded
+   - Deleted files: state “rollback deletion”, read-only; re-recording commits them as deletions
+3. Uncommitted changes that existed before the rollback are stashed in
+   `.keinestamp/rollback-backup/` and restored when you restore
+4. New untracked files are moved out and stashed too, so nothing is lost
 
-## 8. 网页部署
+### Consecutive rollbacks
 
-把时间线发布成网页（浏览器访问，带登录）。
+Rolling back again while already in a rollback state only backs up the **first** rollback.
+If a checked-out file was edited by you (“record version · edited”), a dialog asks
+“Discard and continue / Keep”; pure checkouts (“record version”) are skipped silently.
 
-1. 设置 → 服务器：开启「网页部署服务」，填写服务器地址 / 端口，保存
-2. 时间线右侧「站点」区域：
-   - **网页名称**：仅英文、数字、`-`、`_`，部署后锁定（即访问路径 `/<名称>/`）
-   - **访问令牌**：浏览器登录用；可随机生成，保存后生效
-3. 点底部 **部署**，等待上传完成
-4. 部署成功后可点「打开网页」在浏览器中查看
+### Restore (undo rollback)
 
-> 部署连接独立于部署状态：未部署过的项目也可以第一次部署。
-> 本地有改动未部署时，按钮会提示「有新版本可部署」。
+The **Restore** button in the bottom bar:
 
----
+- The workspace returns to the HEAD from before the rollback, and the stash is restored
+- If current changes conflict with the pre-rollback stash, you are asked per file whether to keep
+  the “workspace version after rollback” or the “stashed version before rollback”
+- If there are real modifications, you are asked to confirm discarding them
 
-## 9. 设置
+### Superseding
 
-四个标签页：**Blender · 标签 · 服务器 · 关于**（标签文字为简写，内容见下）。
-
-### 9.1 Blender（含通用）
-
-- **Blender**：版本列表、下载并安装、删除、切换当前版本
-- **通用**：
-  - 启动时自动打开上次的项目
-  - 提交身份（记录作者标识，程序级全局；命名自由，不要求 `@local`）
-  - 关闭窗口时的行为（驻留托盘 / 退出）
-
-### 9.2 标签（流程 / 标签，项目级）
-
-- 每个流程有名称与一组标签；默认只有一个「Blender」流程
-- 可添加 / 删除流程、增删标签、恢复默认
-- 保存后立即影响记录弹窗与时间线筛选
-- 配置保存在项目内 `.keinestamp/tags.toml`，**仅当前项目生效**；未打开项目时不可编辑
-
-### 9.3 服务器（含远端仓库）
-
-- 服务开关：网页部署服务、loreserver 服务
-- 地址 / 端口：网页部署与 loreserver 可共用 IP
-- 部署令牌：上传与健康检查认证
-- 测试连接：分别探测两个服务
-- 远端仓库：列出服务器上的仓库，可下载、删除、跳转到已下载的本地项目
-- 打开项目时自动测试连接
-
-### 9.4 关于
-
-- **版本 / 平台**：读取程序构建时注入的版本号（与 `Cargo.toml`、`tauri.conf.json` 同源），显示运行平台
-- **Lore**：只显示捆绑的 `lore` 版本；缺失或版本不是 0.8.6 时标红并给出原因（错误信息里带实际路径）
-- **位置**：程序目录与配置目录，可一键在资源管理器中打开
-- **更新**：显示源码仓库地址；进入关于页自动检查一次（GitHub Releases），也可点「检查更新」重试。
-  有新版本时状态行显示可点击的「发现新版本 vX.Y.Z ↗」，点击直接打开该版本的发布页；
-  「关于」标签旁另有小圆点提示
-- 离线 / 接口限流时如实显示「无法判断」，不影响其它设置项
-- 关于页只读，没有底部按钮（点对话框外关闭）
+Recording while in a rollback state: the new record's parent is the rollback point, and records
+after X are superseded out of the mainline (still kept in the data, shown collapsed). This is
+expected behaviour.
 
 ---
 
-## 10. 数据位置与排查
+## 7. Backup (LAN loreserver)
 
-| 内容 | 位置 |
+Backup = `lore push` to a LAN loreserver.
+
+1. Settings → Server: enter the loreserver **IP / port** (default `41337`) and save
+2. Click **Backup** in the bottom bar
+3. If the project was created offline (no remote), you are offered “Migrate and back up”: the app
+   registers the repository on the server, pushes everything, and converts it to an online
+   repository
+
+> - The backup server has no authentication (`auth: None`); **trusted LAN only**
+> - Migration is refused while in a rollback state; restore first
+> - The backup server comes from `serve`'s optional loreserver or a standalone `loreserver`; see
+>   the server guide
+
+---
+
+## 8. Web deployment
+
+Publishes the timeline as a website (browser access with login).
+
+1. Settings → Server: enable “Web deployment service”, fill in the server address / port, save
+2. In the “Site” area on the right of the timeline:
+   - **Site name**: ASCII letters, digits, `-`, `_` only; locked after deployment (it is the
+     `/<name>/` path)
+   - **Access token**: used for browser login; can be generated randomly, effective after saving
+3. Click **Deploy** in the bottom bar and wait for the upload
+4. After a successful deploy click “Open site” to view it in the browser
+
+> The deployment connection is independent of the deployment state: a project that has never been
+> deployed can still be deployed for the first time.
+> When local changes are newer than the deployed version, the button hints “a newer version can be
+> deployed”.
+
+---
+
+## 9. Settings
+
+Four tabs: **Blender · Tags · Server · About** (tab labels are shorthand; details below).
+
+### 9.1 Blender (including General)
+
+- **Blender**: version list, download and install, delete, switch the active version
+- **General**:
+  - Open the last project on startup
+  - Commit identity (author shown on records; app-wide global; any name, `@local` not required)
+  - Behaviour when closing the window (stay in tray / quit)
+
+### 9.2 Tags (processes / tags, per project)
+
+- Each process has a name and a set of tags; by default there is a single “Blender” process
+- Add / delete processes, add / remove tags, restore defaults
+- Saving takes effect immediately in the record dialog and the timeline filter
+- Stored in the project's `.keinestamp/tags.toml`, **effective for the current project only**; not
+  editable while no project is open
+
+### 9.3 Server (including remote repositories)
+
+- Service switches: web deployment service, loreserver service
+- Address / port: web deployment and loreserver may share an IP
+- Deploy token: upload and health-check authentication
+- Test connection: probes both services separately
+- Remote repositories: lists repositories on the server; download, delete, or open a
+  previously downloaded local project
+- Test the connection automatically when opening a project
+
+### 9.4 About
+
+- **Version / platform**: the version injected at build time (same source as `Cargo.toml` /
+  `tauri.conf.json`) and the running platform
+- **Lore**: shows only the bundled `lore` version; red with an explanation when missing or not
+  `0.8.6` (the error message includes the actual path)
+- **Locations**: program directory and config directory, each with a one-click open in Explorer
+- **Updates**: shows the source repository; entering the About tab checks GitHub Releases once, and
+  “Check for updates” retries. When a newer version exists the status line shows a clickable
+  “New version vX.Y.Z found ↗” that opens that release page; a small dot also appears next to the
+  About tab
+- When offline / rate-limited it honestly shows “unknown” and does not affect the other settings
+- The About tab is read-only and has no bottom buttons (click outside the dialog to close)
+
+---
+
+## 10. Data locations and troubleshooting
+
+| Content | Location |
 |---|---|
-| 项目历史 / 对象 | `<项目>/.lore/` |
-| 网页产物、时间线缓存 | `<项目>/.keinestamp/web/` |
-| 回退暂存 | `<项目>/.keinestamp/rollback-backup/` |
-| 丢弃备份（最近 5 份） | `<项目>/.keinestamp/discard-backup-*/` |
-| 全局设置 | `%APPDATA%\\Keinestamp\\app-config.toml` |
+| Project history / objects | `<project>/.lore/` |
+| Web output, timeline cache | `<project>/.keinestamp/web/` |
+| Rollback stash | `<project>/.keinestamp/rollback-backup/` |
+| Discard backups (last 5) | `<project>/.keinestamp/discard-backup-*/` |
+| Global settings | `%APPDATA%\Keinestamp\app-config.toml` |
 
-常见问题：
+Common issues:
 
-- **提示 Lore 版本不符**：确认 `lore-bin/` 完整（`lore.exe`、`loreserver.exe`、`version.txt`、`LICENSE`），版本必须 0.8.6
-- **回退提示需要丢弃确认**：检出文件被修改过，选择「丢弃并跳转」或先备份修改
-- **恢复提示冲突**：当前改动与回退前暂存冲突，逐文件选择保留哪边
-- **备份提示离线创建**：按提示「迁移并备份」，或先在服务器上注册同名仓库
-- **部署 403**：项目目录已存在但注册表没有身份，联系服务器管理员清理后重新部署
-- **Address not found**：历史数据可能被清理或尚未从服务器下载完整，先 `sync` / 重新克隆
+- **Lore version mismatch**: make sure `lore-bin/` is complete (`lore.exe`, `loreserver.exe`,
+  `version.txt`, `LICENSE`) and version `0.8.6`
+- **Rollback asks for discard confirmation**: a checked-out file was edited; choose “Discard and
+  continue” or back up your edits first
+- **Restore reports conflicts**: current changes conflict with the pre-rollback stash; choose which
+  side to keep per file
+- **Backup says the repo was created offline**: follow “Migrate and back up”, or register a
+  same-name repository on the server first
+- **Deploy returns 403**: the project directory exists but the registry has no identity; ask the
+  server admin to clean it up and deploy again
+- **Address not found**: history may have been cleaned up or not fully downloaded yet; `sync` or
+  re-clone first
 
 ---
 
-## 11. 语言
+## 11. Language
 
-设置 → 通用 → **语言**，三档可选：
+Settings → General → **Language**, three options:
 
-| 选项 | 行为 |
+| Option | Behaviour |
 |---|---|
-| 跟随系统（默认） | 按操作系统语言自动选择；中文系统 = 简体中文，其它 = English |
-| 简体中文 | 固定中文 |
-| English | 固定英文 |
+| Follow system (default) | Uses the OS language; Chinese systems = Simplified Chinese, others = English |
+| 简体中文 | Always Chinese |
+| English | Always English |
 
-切换**即时生效**（无需重启）：主界面、状态面板、时间线、托盘菜单同步更新。
-已生成并部署的网页**恒为英文**，不受此设置影响；用户数据（项目名 / 流程名 / 标签名 /
-文件名 / 提交信息）按原样显示，不做翻译。
+Switching takes effect **immediately** (no restart): main window, changes panel, timeline and tray
+menu all update.
+Deployed web pages are **always English** and are not affected by this setting; user data (project
+names, process names, tag names, file names, commit messages) is shown verbatim and never
+translated.
 
-系统语言本身变化后需重启应用才会跟随。脚本或 CI 需要固定语言时用环境变量
-`KEINESTAMP_LOCALE=zh-CN`（或 `en-US`）。
+Changing the OS language itself requires an app restart to be picked up. Scripts or CI that need a
+fixed language can set `KEINESTAMP_LOCALE=zh-CN` (or `en-US`).

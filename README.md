@@ -1,117 +1,133 @@
 # Keinestamp
 
-**二进制工程进度看板**（当前深度适配 Blender）—— 面向 `.blend`、贴图、视频、设计稿、
-游戏资产等大文件工程的本地优先记录 / 回退 / 局域网备份 / 网页时间线部署。
+**English** | [简体中文](README.zh-CN.md)
 
-后端使用 [Epic Games Lore](https://github.com/EpicGames/lore) 0.8.6（内容寻址、分块去重 VCS）：
-同一份大文件反复保存只留一份内容，`.blend` 连存 10 次仓库增量 < 1%（实测 99.9% 去重）。
-GUI（Tauri 2 + Svelte 5）与 CLI 共用同一套后端逻辑，纯本地离线可用，备份与网页部署按需开启。
+**A progress board for binary-heavy projects** (currently optimized for Blender) — local-first
+record / rollback / LAN backup / web-timeline deployment for `.blend` files, textures, videos,
+design sources, game assets and other large-file projects.
 
-![主界面](docs/images/screenshot-main.png)
+The backend is [Epic Games Lore](https://github.com/EpicGames/lore) 0.8.6 (content-addressed,
+chunk-deduplicated VCS): saving the same large file repeatedly keeps only one copy — committing a
+`.blend` ten times adds < 1% to the repository (99.9% dedup measured).
+The GUI (Tauri 2 + Svelte 5) and the CLI share the same backend logic and work fully offline;
+backup and web deployment are opt-in.
 
-## 适用范围
+![Main window](docs/images/screenshot-main.png)
 
-- **通用能力**：任意文件 / 目录的记录、时间线、回退恢复、局域网备份与网页部署；
-  网页时间线支持图片、视频封面与 3D（GLB）预览
-- **内建预览**：`.blend` → GLB（Blender 导出）、`.glb/.gltf` 直接预览；
-  PNG/JPG/WebP/TGA/EXR 与 PSD/KRA/Sai 等设计源文件（尽力提取缩略图）；
-  MP4/MOV/WebM 取首帧（需系统安装 ffmpeg）
-- **当前重点**：Blender 工作流 + 网页时间线（GLB 预览、Blender 版本管理、流程 / 标签归类）
-- **其它工程类型**：记录 / 回退 / 备份 / 部署开箱可用，专属预览格式可按预览 Provider 扩展
-  （见 [docs/generalization-plan.md](docs/generalization-plan.md)）
+## Scope
 
-## 功能
+- **General**: record, timeline, rollback/restore, LAN backup and web deployment for any file or
+  directory; the web timeline previews images, video posters and 3D (GLB)
+- **Built-in previews**: `.blend` → GLB (exported by Blender), `.glb/.gltf` previewed directly;
+  PNG/JPG/WebP/TGA/EXR and design sources such as PSD/KRA/Sai (best-effort thumbnails);
+  MP4/MOV/WebM first frame (requires ffmpeg installed on the system)
+- **Current focus**: Blender workflows + web timeline (GLB previews, Blender version management,
+  process / tag grouping)
+- **Other project types**: record / rollback / backup / deployment work out of the box; extra
+  preview formats can be added through preview providers
+  (see [docs/generalization-plan.md](docs/generalization-plan.md), Chinese)
 
-- **一键记录**：勾选变更文件 → 记录推进；支持流程分类、标签、3D 预览标记
-- **时间线**：搜索 / 按流程筛选、里程碑、文件变动、与上一记录对比
-- **回退 / 恢复 / 顶替**：选择任意记录回退（工作区落到其父版本并检出该记录改动），可撤销回退；回退后继续记录即顶替
-- **去重存储**：Lore 分块去重，`.blend` 连存 10 次仓库增量 < 1%（实测 99.9% 去重）
-- **多类型预览**：3D（`.blend` → GLB、`.glb/.gltf` 直接预览）、图片 / 设计源文件、视频封面，
-  网页时间线中直接查看
-- **3D 预览**：标记的 `.blend` 自动导出 GLB，浏览器内旋转查看
-- **局域网备份**：`备份` = `lore push` 到 loreserver；离线仓库可一键迁移为在线
-- **网页时间线**：多租户 `serve` 一键部署到自建服务器；令牌登录、深浅主题、移动端可用
-- **Blender 版本管理**：列出官方版本、下载安装、切换当前使用版本
+## Features
 
-## 快速开始（Windows）
+- **One-click record**: tick changed files → record; supports process categories, tags and 3D
+  preview marking
+- **Timeline**: search / filter by process, milestones, file changes, compare with the previous
+  record
+- **Rollback / restore / supersede**: roll back to any record (the workspace falls to its parent
+  version and that record's changes are checked out), undo at any time; recording after a rollback
+  supersedes the replaced records
+- **Deduplicated storage**: Lore chunk dedup; ten saves of a `.blend` add < 1% to the repository
+  (99.9% measured)
+- **Multi-type previews**: 3D (`.blend` → GLB, `.glb/.gltf` directly), images / design sources,
+  video posters — viewable in the web timeline
+- **3D preview**: marked `.blend` files are exported to GLB and can be rotated in the browser
+- **LAN backup**: `Backup` = `lore push` to loreserver; offline repositories can be migrated
+  online in one click
+- **Web timeline**: multi-tenant `serve` deploys to your own server; token login, light/dark
+  themes, mobile-friendly
+- **Blender version management**: list official versions, install, switch the active one
 
-| 方式 | 说明 |
+## Quick start (Windows)
+
+| Option | Description |
 |---|---|
-| 安装包 | 下载 `Keinestamp_0.5.2_x64-setup.exe` 安装 |
-| 便携版 | 下载 `Keinestamp-0.5.2-windows-x64-portable.zip`，解压到任意目录运行 `Keinestamp.exe` |
+| Installer | Download `Keinestamp_0.5.2_x64-setup.exe` and install |
+| Portable | Download `Keinestamp-0.5.2-windows-x64-portable.zip`, extract anywhere, run `Keinestamp.exe` |
 
-> 便携版 = `Keinestamp.exe` + 同目录 `lore-bin/`（`lore.exe`、`loreserver.exe`、`LICENSE`）。
-> 启动时校验捆绑的 Lore 版本必须为 `0.8.6`。
+> Portable = `Keinestamp.exe` + a sibling `lore-bin/` folder (`lore.exe`, `loreserver.exe`,
+> `LICENSE`). The bundled Lore version is verified at startup and must be `0.8.6`.
 
-1. 启动后点「+ 新建项目」，选择工程目录（Blender 项目目录，或任意需要版本管理的目录）
-2. 在左侧「变更」面板勾选要纳入本次记录的文件，点右上「记录」
-3. 填写记录说明，可选流程分类 / 标签 / 是否生成预览
+1. Launch, click “+ New project” and pick a project directory (a Blender project, or any directory
+   you want versioned)
+2. Tick the files to include in this record in the **Changes** panel on the left, then click
+   **Record** in the top-right
+3. Enter a message; optionally choose a process category / tags / whether to generate a preview
 
-![设置页](docs/images/screenshot-settings.png)
+![Settings](docs/images/screenshot-settings.png)
 
-详细操作见 **[GUI 使用指南](docs/gui-guide.md)**。
+See the **[GUI guide](docs/gui-guide.md)** for details.
 
 ## CLI
 
 ```powershell
-keinestamp init <path>                      # 初始化项目（建 Lore 仓库 + 忽略规则）
-keinestamp record <path> -m "说明"          # 记录（别名 commit）
-keinestamp status <path>                    # 查看未提交改动
-keinestamp log <path> -n 20                 # 时间线（最新在前）
-keinestamp rollback <path> -e <记录ID>      # 回退到该记录的父版本
-keinestamp restore <path>                   # 撤销回退
-keinestamp export <path> -e <记录ID> -o <目录>
-keinestamp push|pull <path>                 # 备份 / 同步到 loreserver
-keinestamp serve <path> -p 7799             # 启动网页服务（多租户）
+keinestamp init <path>                      # initialize a project (Lore repo + ignore rules)
+keinestamp record <path> -m "message"       # record (alias: commit)
+keinestamp status <path>                    # show uncommitted changes
+keinestamp log <path> -n 20                 # timeline (newest first)
+keinestamp rollback <path> -e <record-id>   # roll back to the record's parent version
+keinestamp restore <path>                   # undo rollback
+keinestamp export <path> -e <record-id> -o <dir>
+keinestamp push|pull <path>                 # backup / sync with loreserver
+keinestamp serve <path> -p 7799             # start the web service (multi-tenant)
 keinestamp deploy <path> --server http://<host>:7799 [--deploy-token <token>]
-keinestamp config <path> --set identity=你@主机
+keinestamp config <path> --set identity=you@host
 ```
 
-完整参数见 **[CLI 参考](docs/cli.md)**。
+Full reference: **[CLI reference](docs/cli.md)**.
 
-## 服务端部署（可选）
+## Server deployment (optional)
 
-网页时间线与局域网备份需要一台服务器（Windows / Linux 均可，Linux 推荐 systemd）：
+The web timeline and LAN backup need a server (Windows or Linux; systemd is recommended on Linux):
 
 ```bash
 keinestamp serve /srv/keinestamp --port 7799
 ```
 
-`serve` 按需生成 `serve.toml`，提供多租户部署、令牌登录与可选的内置 loreserver。
-详见 **[服务端部署指南](docs/server-guide.md)**。
+`serve` generates `serve.toml` on demand and provides multi-tenant deployment, token login and
+an optional built-in loreserver. See the **[server deployment guide](docs/server-guide.md)**.
 
-## 文档
+## Documentation
 
-- [GUI 使用指南](docs/gui-guide.md)
-- [CLI 参考](docs/cli.md)
-- [服务端部署指南](docs/server-guide.md)
-- [Lore 0.8.6 命令速查（开发用）](docs/lore-commands.md)
+- [GUI guide](docs/gui-guide.md)
+- [CLI reference](docs/cli.md)
+- [Server deployment guide](docs/server-guide.md)
+- [Lore 0.8.6 command cheat sheet (development, Chinese)](docs/lore-commands.md)
 
-## 从源码构建
+## Building from source
 
-前置：Windows 10/11、Rust 1.85+（Edition 2024）、Node.js 20+、npm。
-构建脚本会自动下载并校验 Lore 0.8.6 到 `src-tauri/resources/lore-bin/`
-（国内网络 / 离线构建见 [AGENTS.md](AGENTS.md)）。
+Prerequisites: Windows 10/11, Rust 1.85+ (Edition 2024), Node.js 20+, npm.
+The build script downloads and verifies Lore 0.8.6 into `src-tauri/resources/lore-bin/`
+(for offline / China-network builds see [AGENTS.md](AGENTS.md), Chinese).
 
 ```powershell
 cd frontend; npm install
-cd src-tauri; cargo tauri build     # 安装包输出到 src-tauri/target/release/bundle/
-cargo build --release               # CLI：target/release/keinestamp.exe
+cd src-tauri; cargo tauri build     # installers go to src-tauri/target/release/bundle/
+cargo build --release               # CLI: target/release/keinestamp.exe
 ```
 
-## 架构
+## Architecture
 
 ```
 GUI (Tauri 2 / Svelte 5) ─┐
-                          ├─ lore_project ─ lore_backend（唯一 lore 调用点）─ Lore 0.8.6
-CLI (clap) ───────────────┘        ├─ timeline（展示缓存）
-                                   ├─ hidden（忽略规则）
-                                   └─ html_gen（网页时间线）
-serve（多租户 HTTP）─ 静态托管 html_gen 产物 + 可选拉起 loreserver
+                          ├─ lore_project ─ lore_backend (single lore call site) ─ Lore 0.8.6
+CLI (clap) ───────────────┘        ├─ timeline (display cache)
+                                   ├─ hidden (ignore rules)
+                                   └─ html_gen (web timeline)
+serve (multi-tenant HTTP) ─ static html_gen output + optional loreserver
 ```
 
-## 许可
+## License
 
-本项目采用 **MIT** 许可，见 [LICENSE](LICENSE)。
-捆绑的 **Lore**（`lore.exe` / `loreserver.exe`）由 Epic Games 以 MIT 许可发布，
-许可证随发行包内 `lore-bin/LICENSE` 一并分发。
+**MIT** — see [LICENSE](LICENSE).
+Bundled **Lore** (`lore.exe` / `loreserver.exe`) is published by Epic Games under the MIT license;
+its license ships as `lore-bin/LICENSE` inside release packages.
