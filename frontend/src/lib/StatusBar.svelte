@@ -1,4 +1,6 @@
 <script lang="ts">
+  import { t } from './i18n/index.svelte'
+
   let {
     text = '',
     connected = false,
@@ -9,9 +11,9 @@
 </script>
 
 <div class="status-bar">
-  <span class="status-left">{text || 'Ready'}</span>
+  <span class="status-left">{text || t('gui.statusbar.ready')}</span>
   <span class="status-right">
-    <span class="conn-indicator" class:connected title={connected ? '已连接' : '未连接'}>
+    <span class="conn-indicator" class:connected title={connected ? t('gui.statusbar.connected') : t('gui.statusbar.disconnected')}>
       <span class="dot"></span>
     </span>
   </span>
@@ -46,3 +48,4 @@
     box-shadow: 0 0 0 2.5px color-mix(in srgb, var(--success) 18%, transparent);
   }
 </style>
+

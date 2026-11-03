@@ -142,18 +142,18 @@ fn fetch_latest_tag() -> Result<String, String> {
         Ok(resp) => match resp.into_string() {
             Ok(body) => match tag_from_release_json(&body) {
                 Some(tag) => return Ok(tag),
-                None => "GitHub API 响应缺少 tag_name".to_string(),
+                None => crate::i18n::t("err.about.missingTag"),
             },
-            Err(e) => format!("读取 GitHub API 响应失败：{}", e),
+            Err(e) => crate::i18n::tf("err.about.readFailed", &[("error", &e.to_string())]),
         },
-        Err(ureq::Error::Status(code, _)) => format!("GitHub API 返回 HTTP {}", code),
-        Err(e) => format!("请求 GitHub API 失败：{}", e),
+        Err(ureq::Error::Status(code, _)) => crate::i18n::tf("err.about.httpStatus", &[("code", &code.to_string())]),
+        Err(e) => crate::i18n::tf("err.about.requestFailed", &[("error", &e.to_string())]),
     };
 
     match agent.get(RELEASE_LATEST_PAGE).call() {
         Ok(resp) => tag_from_release_url(resp.get_url())
-            .ok_or_else(|| format!("{}；发布页未跳转到具体版本", api_err)),
-        Err(e) => Err(format!("{}；请求发布页失败：{}", api_err, e)),
+            .ok_or_else(|| crate::i18n::tf("err.about.releaseNotRedirected", &[("message", api_err.as_str())])),
+        Err(e) => Err(crate::i18n::tf("err.about.releaseRequestFailed", &[("message", api_err.as_str()), ("error", &e.to_string())])),
     }
 }
 
@@ -184,7 +184,7 @@ pub fn check_update() -> UpdateInfo {
             current: current.clone(),
             latest: Some(latest.clone()),
             url: format!("{}/tag/{}", RELEASES_URL, tag),
-            message: format!("发现新版本 v{}（当前 v{}）", latest, current),
+            message: crate::i18n::tf("err.about.found", &[("latest", latest.as_str()), ("current", current.as_str())]),
             checked_at,
         },
         Some(false) => UpdateInfo {
@@ -192,7 +192,7 @@ pub fn check_update() -> UpdateInfo {
             current: current.clone(),
             latest: Some(latest),
             url: RELEASES_URL.to_string(),
-            message: format!("已是最新版本（v{}）", current),
+            message: crate::i18n::tf("err.about.upToDate", &[("current", current.as_str())]),
             checked_at,
         },
         None => UpdateInfo {
@@ -200,7 +200,7 @@ pub fn check_update() -> UpdateInfo {
             current,
             latest: None,
             url: RELEASES_URL.to_string(),
-            message: format!("无法比较版本号：远端为 {}", tag),
+            message: crate::i18n::tf("err.about.cannotCompare", &[("tag", tag.as_str())]),
             checked_at,
         },
     }

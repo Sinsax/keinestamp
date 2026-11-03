@@ -1,3 +1,5 @@
+import { t } from './i18n/index.svelte'
+
 export interface StatusFile {
   path: string
   x: string
@@ -5,34 +7,29 @@ export interface StatusFile {
 }
 
 // Tauri status 输出格式（lore 后端）：
-//   `未提交的修改：` 节头 + `  {code} {path}` 行，code ∈ A/M/D/??
+//   `{节头}` + `  {code} {path}` 行，code ∈ A/M/D/??
+// 节头文字随界面语言变化（"未提交的修改：" / "Uncommitted changes:"），
+// 所以只按"两个空格 + 状态码 + 路径"的结构解析，不匹配任何自然语言。
 export function parseStatus(output: string): StatusFile[] {
   const result: StatusFile[] = []
-  let inChanges = false
   for (const raw of output.split('\n')) {
     const l = raw.trimEnd()
-    if (!inChanges) {
-      if (l.includes('未提交的修改')) {
-        inChanges = true
-      }
-      continue
-    }
     if (l.trim() === '') continue
-    const m = l.match(/^  (\S+)\s+(.+)$/)
+    const m = l.match(/^ {2}(\S+) +(\S.*)$/)
     if (!m) continue
     const code = m[1]
     const path = m[2].trim()
-    if (!path || path === '') continue
+    if (!path) continue
     result.push({ x: code === '??' ? '?' : code, y: ' ', path })
   }
   return result
 }
 
 export function statusLabel(x: string, y: string): string {
-  if (x === 'M' || y === 'M') return '已修改'
-  if (x === 'A' || y === 'A') return '新增'
-  if (x === 'D' || y === 'D') return '已删除'
-  if (x === '?' || y === '?') return '未跟踪'
+  if (x === 'M' || y === 'M') return t('gui.statuspanel.statusModified')
+  if (x === 'A' || y === 'A') return t('gui.statuspanel.statusAdded')
+  if (x === 'D' || y === 'D') return t('gui.statuspanel.statusDeleted')
+  if (x === '?' || y === '?') return t('gui.statuspanel.statusUntracked')
   return ''
 }
 
@@ -157,3 +154,4 @@ function wildcardMatch(pattern: string, text: string): boolean {
   while (pi < pattern.length && pattern[pi] === '*') pi++
   return pi === pattern.length
 }
+

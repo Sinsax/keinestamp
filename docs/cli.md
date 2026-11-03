@@ -173,6 +173,8 @@ keinestamp download-blender -v 4.2.0
 
 ## 退出码与输出
 
-- 成功：输出中文结果（如 `已提交`、`已回退到记录 ...`），退出码 0
-- 失败：`错误：...` 输出到 stderr，退出码非 0
-- Lore 相关错误会转译为中文（如 `Address not found` → 数据不在本地存储）
+- 成功：输出本地化结果（中文环境 `已提交`，英文环境 `Committed`），退出码 0
+- 失败：`错误：...`（英文 `Error: ...`）输出到 stderr，退出码非 0
+- **语言**：跟随系统或软件设置（设置 → 通用 → 语言）；脚本可用 `KEINESTAMP_LOCALE=zh-CN` / `en-US` 强制
+- Lore 相关错误会转译并附带提示（如 `Address not found` → 数据已不在本地存储）
+- clap 自动生成的 `Usage:` 与参数报错骨架保持英文（库内固定文本）

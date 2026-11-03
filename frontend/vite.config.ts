@@ -10,6 +10,8 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: host || false,
+    // catalog 放在仓库根 i18n/（前后端共用一份），dev server 需要放行上一级
+    fs: { allow: ['..', '.'] },
     hmr: host ? { protocol: 'ws', host, port: 5174 } : undefined,
     watch: { ignored: ['**/src-tauri/**'] },
   },

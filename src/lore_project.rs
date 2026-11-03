@@ -166,7 +166,7 @@ pub fn record_with_category(
     // 提交已经落库：重建时间线失败不能把整个记录报成失败——否则用户重试会
     // 产生一条空记录/重复记录（审查 P1-4）。下次记录或打开项目时会再次重建。
     if let Err(e) = crate::timeline::rebuild_cache(project_root) {
-        eprintln!("[record] 记录已提交（{rev}），但时间线重建失败（将在下次记录时重试）: {e}");
+        eprintln!("[record] {}", crate::i18n::tf("err.debug.timelineRebuildFailed", &[("rev", rev.as_str()), ("error", &e.to_string())]));
     }
     Ok(rev)
 }
@@ -306,7 +306,7 @@ pub fn rollback(
         // HEAD 可能已被 branch_reset 移动（后续检出步骤失败）→ 尽力还原回 head_before
         if let Err(e) = restore_backup_at(project_root, &rollback_backup_dir(project_root), &[]) {
             // 还原失败：备份目录仍在（restore 失败不删目录），保留即可重试
-            eprintln!("[rb] 回退失败后自动还原失败（备份已保留，可手动恢复）: {e}");
+            eprintln!("[rb] {}", crate::i18n::tf("err.debug.rollbackRestoreFailed", &[("error", &e.to_string())]));
         }
         if let Ok(cur) = lore_backend::current_revision(project_root) {
             if cur != head_before {
@@ -334,7 +334,11 @@ fn rollback_inner(
             eprintln!("[rb-t] modified_files: {}ms", t1.elapsed().as_millis());
             if !discard && !modified.is_empty() {
                 bail!(
-                    "回退需要丢弃确认：回退期间有未提交更改（修改过上次回退检出的内容），继续回退将丢弃这些更改"
+                    "{}",
+                    crate::i18n::coded(
+                        "rollback_discard_confirm",
+                        crate::i18n::t("err.rollback.discardConfirm"),
+                    )
                 );
             }
             discard_dirty(project_root, hidden)?;
@@ -384,11 +388,7 @@ fn rollback_inner(
                                 let _ = write_back(project_root, done, revision);
                             }
                             let _ = lore_backend::unstage_all(project_root);
-                            bail!(
-                                "无法删除文件（可能被占用）：{} — {}；请关闭占用该文件的程序后重试",
-                                p,
-                                e
-                            );
+                            bail!("{}", crate::i18n::tf("err.repo.deleteBusy", &[("path", p.as_str()), ("error", &e.to_string())]));
                         }
                     }
                 }
@@ -519,12 +519,36 @@ fn file_sha256(path: &Path) -> Result<String> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
-/// 回退状态下的"真修改"文件（连续回退需确认的）：
+/// 回退状态下的"真修改"文件（**连续回退丢弃确认**用；恢复确认用 [rollback_modified_for_restore]）：
 /// - change_files 中工作区 hash ≠ 检出 hash 的（修改过检出内容）
 /// - 不在 change_files 的普通未提交改动（用户编辑非检出文件）
+/// - 回退期间用户新建的 untracked（真实工作；丢弃路径会把它移出工作区，必须确认——审查 P0-1）
 /// 纯检出（内容与检出一致）不算修改。无回退态 → 空。
 /// 旧 marker 无 change_hashes 时 fallback 全量 changed_files（保守：视为修改）。
 pub fn rollback_modified_files(project_root: &Path) -> Result<Vec<String>> {
+    rollback_modified_files_raw(project_root)
+}
+
+/// 恢复确认（undo_rollback）用的"真修改"：**只含跟踪文件**的修改。
+/// 未跟踪新文件不进恢复确认列表——恢复不会删除它们（restore_backup 写回归还，
+/// 有测试锁死"恢复不得删除用户新建的未跟踪文件"），列出只会误导用户以为会被丢弃。
+pub fn rollback_modified_for_restore(project_root: &Path) -> Result<Vec<String>> {
+    let marker = crate::timeline::read_marker(project_root)?.context(crate::i18n::t("err.repo.noRollbackState"))?;
+    let hidden = crate::hidden::load_hidden(project_root);
+    // 回退期间新建的 untracked（不在 change_files 内）= 恢复确认不关心（不会被删除）
+    let untracked_new: std::collections::HashSet<String> = changed_files(project_root, &hidden)?
+        .into_iter()
+        .filter(|f| f.state == LoreState::Untracked && !marker.change_files.contains(&f.path))
+        .map(|f| f.path)
+        .collect();
+    Ok(rollback_modified_files_raw(project_root)?
+        .into_iter()
+        .filter(|p| !untracked_new.contains(p))
+        .collect())
+}
+
+/// "真修改"基础计算（两个包装共用；untracked 计入——由包装按用途过滤）。
+fn rollback_modified_files_raw(project_root: &Path) -> Result<Vec<String>> {
     let Some(marker) = crate::timeline::read_marker(project_root)? else {
         return Ok(Vec::new());
     };
@@ -603,7 +627,7 @@ fn discard_dirty(project_root: &Path, hidden: &[String]) -> Result<()> {
                 std::fs::remove_file(&src)?;
                 discarded += 1;
             }
-            LoreState::Added => bail!("存在已暂存的改动（staged state），请先处理后回退"),
+            LoreState::Added => bail!("{}", crate::i18n::t("err.repo.stagedDirty")),
             _ => {}
         }
     }
@@ -611,11 +635,7 @@ fn discard_dirty(project_root: &Path, hidden: &[String]) -> Result<()> {
         lore_backend::run_lore_paths(project_root, &["file", "reset"], &reset_paths)?;
     }
     if discarded > 0 {
-        eprintln!(
-            "[rb] 丢弃的未跟踪文件已移入 {}（{} 个）",
-            discard_dir.display(),
-            discarded
-        );
+        eprintln!("[rb] {}", crate::i18n::tf("err.debug.discardedUntracked", &[("dir", &discard_dir.display().to_string()), ("count", &discarded.to_string())]));
         prune_discard_backups(project_root, 5);
     }
     Ok(())
@@ -654,7 +674,7 @@ fn prune_prefixed_dirs(project_root: &Path, prefix: &str, keep: usize) {
 /// 仅工作区改动（前端菜单按状态码 M/D 控制；staged/untracked 不在此范围）。
 pub fn discard_file_changes(project_root: &Path, path: &str) -> Result<()> {
     if path.is_empty() || path.ends_with('/') {
-        bail!("无效路径");
+        bail!("{}", crate::i18n::t("err.repo.invalidPath"));
     }
     let full = project_root.join(path);
     if let Some(parent) = full.parent() {
@@ -697,7 +717,7 @@ fn rollback_conflicts_with_modified(
 }
 
 pub fn rollback_conflicts(project_root: &Path) -> Result<Vec<String>> {
-    let _marker = crate::timeline::read_marker(project_root)?.context("无回退状态")?;
+    let _marker = crate::timeline::read_marker(project_root)?.context(crate::i18n::t("err.repo.noRollbackState"))?;
     let modified: std::collections::HashSet<String> =
         rollback_modified_files(project_root)?.into_iter().collect();
     rollback_conflicts_with_modified(project_root, &modified)
@@ -710,22 +730,37 @@ pub fn rollback_conflicts(project_root: &Path) -> Result<Vec<String>> {
 /// Some(false) = 留下（已修改的检出取回，删除标记文件保留）。纯检出时 confirm 忽略直接执行。
 pub fn undo_rollback(project_root: &Path, hidden: &[String], confirm: Option<bool>) -> Result<()> {
     let _guard = RollbackOpGuard::new();
-    // 只计算一次“真修改”：冲突检测和确认判定都要用，避免恢复时对大文件重复 hash 两遍
+    // 两个列表用途不同：
+    // - 冲突检测用完整列表（stashed 备份里含 untracked，交集冲突语义不变）
+    // - 确认判定用 rollback_modified_for_restore（只含跟踪文件修改）——未跟踪新文件
+    //   恢复时不会被删除（写回归还），不应要求确认或进确认列表
     let modified = rollback_modified_files(project_root)?;
+    let confirm_modified = rollback_modified_for_restore(project_root)?;
     let modified_set: std::collections::HashSet<String> =
         modified.iter().cloned().collect();
     let conflicts = rollback_conflicts_with_modified(project_root, &modified_set)?;
     if !conflicts.is_empty() {
-        eprintln!("[restore] 冲突文件: {:?}", conflicts);
-        bail!("回退冲突：{}", conflicts.join(", "));
+        eprintln!("[restore] {}", crate::i18n::tf("err.debug.conflicts", &[("files", &format!("{:?}", conflicts))]));
+        let files = conflicts.join(", ");
+        bail!(
+            "{}",
+            crate::i18n::coded(
+                "rollback_conflict",
+                crate::i18n::tf("err.rollback.conflict", &[("files", files.as_str())]),
+            )
+        );
     }
-    let marker = crate::timeline::read_marker(project_root)?.context("无回退状态")?;
+    let marker = crate::timeline::read_marker(project_root)?.context(crate::i18n::t("err.repo.noRollbackState"))?;
     // 确认判定只看"真修改"（用户改过/删过内容）；回退删除标记（deleted_files）属检出
     // 的一部分（恢复时由 branch_reset 自动处理）→ 不触发确认
-    if !modified.is_empty() && confirm.is_none() {
+    if !confirm_modified.is_empty() && confirm.is_none() {
+        let files = confirm_modified.join(", ");
         bail!(
-            "恢复需要确认：回退期间有已修改内容（{}），继续恢复将丢弃这些更改",
-            modified.join(", ")
+            "{}",
+            crate::i18n::coded(
+                "restore_confirm",
+                crate::i18n::tf("err.rollback.restoreConfirm", &[("files", files.as_str())]),
+            )
         );
     }
     eprintln!(
@@ -771,7 +806,7 @@ pub fn resolve_rollback_conflicts(
     choices: &[(String, String)],
 ) -> Result<()> {
     let _guard = RollbackOpGuard::new();
-    let marker = crate::timeline::read_marker(project_root)?.context("无回退状态")?;
+    let marker = crate::timeline::read_marker(project_root)?.context(crate::i18n::t("err.repo.noRollbackState"))?;
     // 选择"current"的冲突文件：检出内容带回（不排除）；其余检出文件默认丢弃
     let keep_current: std::collections::HashSet<&str> = choices
         .iter()
@@ -801,10 +836,10 @@ fn finish_rollback_restore(
     hidden: &[String],
     exclude_new: &[String],
 ) -> Result<()> {
-    let marker = crate::timeline::read_marker(project_root)?.context("无回退状态")?;
+    let marker = crate::timeline::read_marker(project_root)?.context(crate::i18n::t("err.repo.noRollbackState"))?;
     let current = lore_backend::current_revision(project_root)?;
     if current != marker.rollback_point {
-        bail!("回退后已有新记录，无法撤销回退");
+        bail!("{}", crate::i18n::t("err.repo.newRecordAfterRollback"));
     }
     let new_dir = rollback_backup_new_dir(project_root);
     // 只 scan 一次：备份当前改动 + 后续丢弃 untracked 检出新增文件共用同一份 changed_files
@@ -815,7 +850,7 @@ fn finish_rollback_restore(
     // （lore 对 untracked 有本地内容也拒绝同步）→ 丢弃 = 物理删除（仅 change_files 内的检出新增）
     for f in &changed {
         if f.state == LoreState::Untracked && marker.change_files.contains(&f.path) {
-            eprintln!("[restore] 丢弃检出新增文件: {}", f.path);
+            eprintln!("[restore] {}", crate::i18n::tf("err.debug.discardedNewFiles", &[("path", &f.path)]));
             let _ = std::fs::remove_file(project_root.join(&f.path));
         }
     }
@@ -845,7 +880,7 @@ fn finish_rollback_restore(
         let t_write = std::time::Instant::now();
         // 写回失败必须中止：继续走下去会清 marker + 删备份，工作区停在半状态且无法重试
         if let Err(e) = reset_files_to(project_root, &marker.head_before, &reset_paths) {
-            bail!("恢复失败：写回检出文件出错（{}），回退状态与备份已保留，可重试：{e}", reset_paths.len());
+            bail!("{}", crate::i18n::tf("err.repo.restoreWriteFailed", &[("count", &reset_paths.len().to_string()), ("error", &e.to_string())]));
         }
         eprintln!(
             "[restore] write_back: {}ms ({} files)",
@@ -858,10 +893,10 @@ fn finish_rollback_restore(
     // 还原失败必须向上传播：这是用户回退前未提交改动的唯一副本，
     // 吞错后继续 remove_dir_all 就是永久数据丢失（审查 P0-2）
     restore_backup_at(project_root, &backup_dir, &[])
-        .context("恢复失败：回退前暂存的文件无法还原（备份已保留，可修复问题后重试）")?;
+        .context(crate::i18n::t("err.repo.restoreStashFailed"))?;
     if new_backup {
         restore_backup_at(project_root, &new_dir, exclude_new)
-            .context("恢复失败：回退期间的改动无法还原（备份已保留，可重试）")?;
+            .context(crate::i18n::t("err.repo.restoreChangesFailed"))?;
     }
     let _ = std::fs::remove_dir_all(&backup_dir);
     let _ = std::fs::remove_dir_all(&new_dir);
@@ -924,10 +959,7 @@ pub fn clear_rollback(project_root: &Path) -> Result<()> {
     let merge_failed = match restore_untracked_from_backup(project_root) {
         Ok(()) => false,
         Err(e) => {
-            eprintln!(
-                "[rb] 合并未跟踪内容失败，备份目录已保留（{}）：{e}",
-                rollback_backup_dir(project_root).display()
-            );
+            eprintln!("[rb] {}", crate::i18n::tf("err.repo.untrackedMergeFailed", &[("dir", &rollback_backup_dir(project_root).display().to_string()), ("error", &e.to_string())]));
             true
         }
     };
@@ -1012,7 +1044,7 @@ fn backup_dirty_to_with_files(
             // 未跟踪内容必须移出工作区并备份：它们不在任何 revision 树里，
             // 一旦后续连续回退走到 discard_dirty 就再也找不回来（2026-10 审查 P0-1）。
             LoreState::Untracked => untracked.push(f.path.clone()),
-            LoreState::Added => bail!("存在已暂存的改动（staged state），请先处理后回退"),
+            LoreState::Added => bail!("{}", crate::i18n::t("err.repo.stagedDirty")),
             _ => {}
         }
     }
@@ -1027,12 +1059,7 @@ fn backup_dirty_to_with_files(
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let aside = dir.with_file_name(format!("rollback-backup-prev-{stamp}"));
-        std::fs::rename(dir, &aside).with_context(|| {
-            format!(
-                "存在未消费的回退备份且无法归档（{}），已中止以免覆盖：请先恢复或手动清理",
-                dir.display()
-            )
-        })?;
+        std::fs::rename(dir, &aside).with_context(|| crate::i18n::tf("err.repo.backupArchiveFailed", &[("path", &dir.display().to_string())]))?;
         eprintln!("[rb] 旧的未消费备份已归档到 {}", aside.display());
     }
     for p in &backup_files {
@@ -1057,9 +1084,7 @@ fn backup_dirty_to_with_files(
             std::fs::create_dir_all(parent)?;
         }
         std::fs::copy(&src, &dst)?;
-        std::fs::remove_file(&src).with_context(|| {
-            format!("未跟踪文件已备份但无法移出工作区（可能被占用）：{}", p)
-        })?;
+        std::fs::remove_file(&src).with_context(|| crate::i18n::tf("err.repo.untrackedBusy", &[("path", p.as_str())]))?;
     }
     if !deleted.is_empty() || !untracked.is_empty() {
         // 仅删除/仅未跟踪时目录可能尚未创建
@@ -1990,7 +2015,7 @@ mod tests {
         );
         // 连续回退 r3 未确认 → 拒绝
         let err = rollback(&root, &r3, &vec![".keinestamp/".to_string()], false).unwrap_err();
-        assert!(err.to_string().contains("需要丢弃确认"), "err: {err}");
+        assert!(err.to_string().contains("[code:rollback_discard_confirm]"), "err: {err}");
         assert!(root.join("new.txt").exists(), "拒绝时不得动用户文件");
         // 确认丢弃 → 文件移入 discard-backup，可找回
         rollback(&root, &r3, &vec![".keinestamp/".to_string()], true).unwrap();
@@ -2052,7 +2077,7 @@ mod tests {
         std::fs::write(root.join("a.txt"), "V2-EDITED").unwrap();
         // 未确认（None）→ 报"恢复需要确认"
         let err = undo_rollback(&root, &vec![".keinestamp/".to_string()], None).unwrap_err();
-        assert!(err.to_string().contains("恢复需要确认"), "err: {err}");
+        assert!(err.to_string().contains("[code:restore_confirm]"), "err: {err}");
         // 确认丢弃（Some(true)）→ 恢复成功，a.txt = r2 树版（v2，修改丢弃）
         undo_rollback(&root, &vec![".keinestamp/".to_string()], Some(true)).unwrap();
         assert!(!rollback_state(&root).unwrap().active);
@@ -2742,7 +2767,7 @@ mod tests {
         );
         // 连续回退 r3：真修改未确认时报错
         let err = rollback(&root, &r3, &vec![".keinestamp/".to_string()], false).unwrap_err();
-        assert!(err.to_string().contains("需要丢弃确认"), "err: {err}");
+        assert!(err.to_string().contains("[code:rollback_discard_confirm]"), "err: {err}");
         // 连续回退 r3 仍处于 r2 回退态（未跳转）
         assert!(rollback_state(&root).unwrap().active);
         assert_eq!(lore_backend::current_revision(&root).unwrap(), r1);
@@ -2859,7 +2884,7 @@ mod tests {
             "编辑非检出文件也算修改"
         );
         let err = rollback(&root, &r3, &vec![".keinestamp/".to_string()], false).unwrap_err();
-        assert!(err.to_string().contains("需要丢弃确认"), "err: {err}");
+        assert!(err.to_string().contains("[code:rollback_discard_confirm]"), "err: {err}");
         // 丢弃确认后继续
         rollback(&root, &r3, &vec![".keinestamp/".to_string()], true).unwrap();
         // 丢弃：b.txt 中间编辑被还原到 HEAD（r2 树 = b1）
@@ -3057,7 +3082,7 @@ mod tests {
 
         let err = rollback(&root, &r3, &hidden, false).unwrap_err();
         assert!(
-            err.to_string().contains("需要丢弃确认"),
+            err.to_string().contains("[code:rollback_discard_confirm]"),
             "未确认时必须拒绝丢弃，实际: {err}"
         );
         assert!(

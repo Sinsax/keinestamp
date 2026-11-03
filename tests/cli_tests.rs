@@ -29,6 +29,8 @@ fn tmp_dir(name: &str) -> PathBuf {
 fn run(args: &[&str]) -> (String, bool) {
     let output = Command::new(keinestamp_bin())
         .env("KEINESTAMP_NO_RECENT", "1")
+        // CLI 输出语言固定中文：下方断言依赖中文标签，不能被开发机系统语言影响
+        .env("KEINESTAMP_LOCALE", "zh-CN")
         .args(args)
         .output()
         .expect("failed to run keinestamp");

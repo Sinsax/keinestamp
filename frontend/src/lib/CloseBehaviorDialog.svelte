@@ -1,5 +1,6 @@
 <script lang="ts">
   import { resolveCloseAction } from '../api'
+  import { t } from './i18n/index.svelte'
 
   let {
     onCancel,
@@ -36,13 +37,13 @@
       <span class="confirm-icon">
         <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zm0 1.5a5 5 0 110 10 5 5 0 010-10z"/><path d="M7.2 4.6h1.6v4.4H7.2zM7.2 10.4h1.6v1.2H7.2z"/></svg>
       </span>
-      <h3>关闭窗口时希望怎样？</h3>
+      <h3>{t('gui.closeAsk.title')}</h3>
     </div>
-    <div class="confirm-msg">以后关闭窗口将按此选择执行，可随时在设置中修改；通知区域图标左键打开、右键可退出。</div>
+    <div class="confirm-msg">{t('gui.closeAsk.message')}</div>
     <div class="actions">
-      <button onclick={onCancel}>取消</button>
-      <button onclick={() => pick(false)} disabled={busy}>退出应用</button>
-      <button class="accent" onclick={() => pick(true)} disabled={busy}>后台驻留</button>
+      <button onclick={onCancel}>{t('common.cancel')}</button>
+      <button onclick={() => pick(false)} disabled={busy}>{t('gui.closeAsk.quit')}</button>
+      <button class="accent" onclick={() => pick(true)} disabled={busy}>{t('gui.closeAsk.tray')}</button>
     </div>
   </div>
 </div>
@@ -76,3 +77,4 @@
     margin-bottom: 16px;
   }
 </style>
+

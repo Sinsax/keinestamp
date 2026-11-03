@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import * as api from '../api'
+    import * as api from '../api'
+  import { t } from './i18n/index.svelte'
   import { open } from '@tauri-apps/plugin-dialog'
   import InputDialog from './InputDialog.svelte'
 
@@ -49,7 +50,7 @@
   async function refreshServerRepos() {
     if (!loreServerUrl) {
       serverConn = 'fail'
-      serverMsg = '未配置 loreserver 地址'
+      serverMsg = t('gui.remote.noUrl')
       serverRepos = []
       return
     }
@@ -60,7 +61,7 @@
       const repos = await api.listServerRepos(loreServerUrl)
       serverConn = 'ok'
       serverRepos = repos
-      serverMsg = repos.length > 0 ? '' : '服务器上没有仓库'
+      serverMsg = repos.length > 0 ? '' : t('gui.remote.noRepos')
     } catch (e: any) {
       serverConn = 'fail'
       serverMsg = String(e)
@@ -79,7 +80,7 @@
 
   async function downloadSelected() {
     if (!loreServerUrl || selectedRepos.size === 0) return
-    const picked = await open({ directory: true, multiple: false, title: '选择仓库保存目录' })
+    const picked = await open({ directory: true, multiple: false, title: t('gui.remote.pickDir') })
     if (!picked) return
     const normParent = picked.replace(/^\\\\\?\\/, '')
     downloading = true
@@ -105,8 +106,8 @@
   // 仓库列表非空时删除成功/失败都看不到（2026-10 审查 P1）
   $effect(() => {
     if (!serverMsg) return
-    const t = setTimeout(() => { serverMsg = '' }, 8000)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => { serverMsg = '' }, 8000)
+    return () => clearTimeout(timer)
   })
 
   // 删除远端仓库：弹窗输入 DELETE 确认（删服务器仓库 = 备份数据丢失）
@@ -117,9 +118,9 @@
       await api.deleteServerRepo(loreServerUrl, name)
       serverRepos = serverRepos.filter(([n]) => n !== name)
       selectedRepos.delete(name)
-      serverMsg = `已删除仓库 ${name}`
+      serverMsg = t('gui.remote.deleted', { name })
     } catch (e: any) {
-      serverMsg = `删除失败: ${e}`
+      serverMsg = t('gui.remote.deleteFailed', { error: e })
       console.error('delete server repo failed', e)
     }
     deleting = false
@@ -129,26 +130,26 @@
 
 <div class="remote" class:embedded>
   {#if !enabled}
-    <div class="remote-empty">loreserver 服务未开启 — 在「服务器」区点击 loreserver 按钮开启</div>
+    <div class="remote-empty">{t('gui.remote.disabled')}</div>
   {:else}
   <div class="remote-head">
     <div>
-      <div class="remote-title">远端仓库（loreserver）</div>
+      <div class="remote-title">{t('gui.remote.title')}</div>
       <div class="remote-sub">
-        {loreServerUrl || '未配置地址'}
+        {loreServerUrl || t('gui.remote.unset')}
         {#if serverConn === 'ok'}
-          <span class="conn-badge ok">已连接</span>
+          <span class="conn-badge ok">{t('gui.remote.connected')}</span>
         {:else if serverConn === 'fail'}
-          <span class="conn-badge fail">未连接</span>
+          <span class="conn-badge fail">{t('gui.remote.disconnected')}</span>
         {/if}
         {#if serverRepos.length > 0}
-          <span class="conn-badge count">共 {serverRepos.length} 个仓库</span>
+          <span class="conn-badge count">{t('gui.remote.count', { n: serverRepos.length })}</span>
         {/if}
       </div>
     </div>
     <div class="remote-actions">
       <button class="rl-btn" onclick={refreshServerRepos} disabled={serverLoading || downloading}>
-        {serverLoading ? '加载中...' : '刷新'}
+        {serverLoading ? t('common.loading') : t('common.refresh')}
       </button>
       {#if serverRepos.length > 0}
         <button
@@ -156,7 +157,7 @@
           onclick={downloadSelected}
           disabled={selectedRepos.size === 0 || downloading}
         >
-          {downloading ? '下载中...' : `下载到本地（${selectedRepos.size}）`}
+          {downloading ? t('gui.remote.downloading') : t('gui.remote.downloadTo', { n: selectedRepos.size })}
         </button>
       {/if}
     </div>
@@ -165,21 +166,21 @@
   {#if serverMsg && serverRepos.length > 0}
     <div class="remote-note" role="status">
       <span>{serverMsg}</span>
-      <button class="rl-link" onclick={() => (serverMsg = '')} title="关闭提示">×</button>
+      <button class="rl-link" onclick={() => (serverMsg = '')} title={t('gui.remote.closeHint')}>×</button>
     </div>
   {/if}
 
   {#if serverConn === 'fail'}
-    <div class="remote-empty">{serverMsg || 'loreserver 不可达'}</div>
+    {serverMsg || t('gui.remote.unreachable')}
     {#if !loreServerUrl}
       <div class="remote-empty small">
-        <button class="rl-link" onclick={onGoSettings}>去设置配置 loreserver 地址</button>
+        <button class="rl-link" onclick={onGoSettings}>{t('gui.remote.goSettings')}</button>
       </div>
     {/if}
   {:else if serverLoading}
-    <div class="remote-empty">加载仓库列表...</div>
+    <div class="remote-empty">{t('gui.remote.loadingRepos')}</div>
   {:else if serverRepos.length === 0}
-    <div class="remote-empty">{serverMsg || '服务器上没有仓库 — 先在本机备份一个项目，或点击「连接」'}</div>
+    {serverMsg || t('gui.remote.emptyHint')}
   {:else}
     <div class="repo-list">
       {#each serverRepos as [name, id] (id)}
@@ -194,10 +195,10 @@
           {#if localPaths.has(name)}
             <button
               class="open-btn"
-              title="本地已有该项目，点击打开"
+              title={t('gui.remote.existingTitle')}
               onclick={(e) => { e.stopPropagation(); const p = localPaths.get(name); if (p) onOpenProject(p) }}
             >
-              跳转
+              {t('gui.remote.openExisting')}
             </button>
           {/if}
           <span class="repo-id">{id.slice(0, 8)}</span>
@@ -205,9 +206,9 @@
             class="del-btn"
             disabled={deleting}
             onclick={(e) => { e.stopPropagation(); deleteTarget = [name, id] }}
-            title="删除服务器仓库（备份数据将丢失）"
+            title={t('gui.remote.deleteServerTitle')}
           >
-            {deleting ? '删除中...' : '删除'}
+            {deleting ? t('gui.remote.deleting') : t('common.delete')}
           </button>
         </div>
       {/each}
@@ -230,13 +231,13 @@
 
 {#if deleteTarget}
   <InputDialog
-    title="删除远端仓库"
-    label={`输入 DELETE 确认删除「${deleteTarget[0]}」（备份数据将丢失，不可恢复）`}
+    title={t('gui.remote.deleteAriaTitle')}
+    label={t('gui.remote.deleteConfirm', { name: deleteTarget[0] })}
     mustEqual="DELETE"
-    okLabel="删除"
+    okLabel={t('common.delete')}
     danger
     uppercase
-    onConfirm={() => { const t = deleteTarget; if (t) performDelete(t[0]) }}
+    onConfirm={() => { const target = deleteTarget; if (target) performDelete(target[0]) }}
     onCancel={() => (deleteTarget = null)}
   />
 {/if}
@@ -454,3 +455,4 @@
     white-space: nowrap;
   }
 </style>
+

@@ -14,6 +14,8 @@
      */
     "allowJs": true,
     "checkJs": true,
+    /** 直接 import 仓库根的 i18n/*.json（唯一 catalog，前后端共用） */
+    "resolveJsonModule": true,
     "moduleDetection": "force"
   },
   "include": ["src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]

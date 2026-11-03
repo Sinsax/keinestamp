@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { t } from './i18n/index.svelte'
+
   let {
     title,
     label = '',
     initial = '',
-    okLabel = '确认',
-    cancelLabel = '取消',
+    okLabel = '',
+    cancelLabel = '',
     mustEqual = '',
     danger = false,
     uppercase = false,
@@ -25,6 +27,12 @@
     onConfirm: (value: string) => void
     onCancel: () => void
   } = $props()
+
+  const okText = $derived(okLabel || t('common.confirm'))
+  const cancelText = $derived(cancelLabel || t('common.cancel'))
+  const invalidHint = $derived(
+    mustEqual ? t('gui.input.mustEqual', { value: mustEqual }) : t('gui.input.invalidDirName')
+  )
 
   let value = $state('')
   let inputEl = $state<HTMLInputElement | null>(null)
@@ -66,14 +74,14 @@
     <h3>{title}</h3>
     <div class="field">
       <label for="input-dialog-field">{label}</label>
-      <input id="input-dialog-field" bind:this={inputEl} type="text" bind:value oninput={handleInput} placeholder="输入..." />
+      <input id="input-dialog-field" bind:this={inputEl} type="text" bind:value oninput={handleInput} placeholder={t('gui.input.placeholder')} />
       {#if invalid}
-        <div class="input-err">{mustEqual ? `请输入 ${mustEqual} 以确认` : '目录名不能包含 / 或 \\'}</div>
+        <div class="input-err">{invalidHint}</div>
       {/if}
     </div>
     <div class="actions">
-      <button onclick={onCancel}>{cancelLabel}</button>
-      <button onclick={() => onConfirm(value)} class="accent" class:danger disabled={invalid}>{okLabel}</button>
+      <button onclick={onCancel}>{cancelText}</button>
+      <button onclick={() => onConfirm(value)} class="accent" class:danger disabled={invalid}>{okText}</button>
     </div>
   </div>
 </div>
@@ -88,3 +96,4 @@
     margin-top: 4px;
   }
 </style>
+

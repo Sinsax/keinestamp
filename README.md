@@ -37,8 +37,8 @@ GUI（Tauri 2 + Svelte 5）与 CLI 共用同一套后端逻辑，纯本地离线
 
 | 方式 | 说明 |
 |---|---|
-| 安装包 | 下载 `Keinestamp_0.5.1_x64-setup.exe` 安装 |
-| 便携版 | 下载 `Keinestamp-0.5.1-windows-x64-portable.zip`，解压到任意目录运行 `Keinestamp.exe` |
+| 安装包 | 下载 `Keinestamp_0.5.2_x64-setup.exe` 安装 |
+| 便携版 | 下载 `Keinestamp-0.5.2-windows-x64-portable.zip`，解压到任意目录运行 `Keinestamp.exe` |
 
 > 便携版 = `Keinestamp.exe` + 同目录 `lore-bin/`（`lore.exe`、`loreserver.exe`、`LICENSE`）。
 > 启动时校验捆绑的 Lore 版本必须为 `0.8.6`。

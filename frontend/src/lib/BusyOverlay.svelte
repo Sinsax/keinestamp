@@ -1,15 +1,19 @@
 <script lang="ts">
+  import { t } from './i18n/index.svelte'
+
   let {
-    text = '处理中...',
+    text = '',
   }: {
     text?: string
   } = $props()
+
+  const shown = $derived(text || t('common.loading'))
 </script>
 
 <div class="busy-overlay">
   <div class="busy-box">
     <div class="busy-spinner"></div>
-    <div class="busy-text">{text}</div>
+    <div class="busy-text">{shown}</div>
   </div>
 </div>
 
@@ -59,3 +63,4 @@
     color: var(--text);
   }
 </style>
+

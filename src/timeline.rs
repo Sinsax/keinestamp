@@ -594,8 +594,8 @@ fn entry_files(project_root: &Path, revision: &str) -> Vec<String> {
         Err(e) => {
             // 读取父失败：不要错误地落入"全树 dump"分支（会把该 revision 的全部文件误列为改动）
             eprintln!(
-                "[debug] entry_files: revision_parent 失败（{}），返回空文件列表",
-                e
+                "{}",
+                crate::i18n::tf("err.debug.timelineParentFailed", &[("error", &e.to_string())])
             );
             return Vec::new();
         }

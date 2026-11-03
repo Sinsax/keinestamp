@@ -10,10 +10,10 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
         .with_context(|| format!("failed to read timeline at {:?}", timeline_path))?;
 
     let entry = crate::timeline::get_entry(&timeline, entry_id)
-        .ok_or_else(|| anyhow::anyhow!("未找到 entry: {}", entry_id))?;
+        .ok_or_else(|| anyhow::anyhow!(crate::i18n::tf("cli.export.notFound", &[("entry", entry_id)])))?;
 
     if output_dir.exists() {
-        anyhow::bail!("输出目录已存在: {:?}", output_dir);
+        anyhow::bail!(crate::i18n::tf("cli.export.dirExists", &[("path", &output_dir.display().to_string())]));
     }
 
     let files_dir = output_dir.join("files");
@@ -21,11 +21,11 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
 
     let preview_path = meta.web_root.join(&entry.preview);
     if entry.preview.is_empty() || !preview_path.exists() {
-        eprintln!("(该提交无缩略图)");
+        eprintln!("{}", crate::i18n::t("cli.export.noThumbnail"));
     } else {
         // preview 可能是目录/尾斜杠路径 → file_name() 为 None，跳过复制而非 panic
         let Some(file_name) = preview_path.file_name() else {
-            eprintln!("(预览路径无文件名，跳过复制: {:?})", preview_path);
+            eprintln!("{}", crate::i18n::tf("cli.export.previewNoName", &[("path", &preview_path.display().to_string())]));
             return Ok(());
         };
         std::fs::copy(&preview_path, output_dir.join(file_name))
@@ -37,26 +37,20 @@ pub fn export_entry(project_root: &Path, entry_id: &str, output_dir: &Path) -> a
         .context("failed to write snapshot.json")?;
 
     let readme = format!(
-        r#"提交导出快照
-==============
-提交:     {}
-时间:     {}
-作者:     {}
-消息:     {}
-文件数:   {}
-"#,
-        &entry.id[..7.min(entry.id.len())],
-        &entry.timestamp[..19.min(entry.timestamp.len())].replace('T', " "),
-        entry.author,
-        entry.message,
-        entry.files.len(),
-    );
+            "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+            crate::i18n::t("cli.export.readmeTitle"),
+            crate::i18n::t("cli.export.readmeSep"),
+            crate::i18n::tf("cli.export.readmeId", &[("value", &entry.id[..7.min(entry.id.len())])]),
+            crate::i18n::tf(
+                "cli.export.readmeTime",
+                &[("value", &entry.timestamp[..19.min(entry.timestamp.len())].replace('T', " "))],
+            ),
+            crate::i18n::tf("cli.export.readmeAuthor", &[("value", &entry.author)]),
+            crate::i18n::tf("cli.export.readmeMessage", &[("value", &entry.message)]),
+            crate::i18n::tf("cli.export.readmeFiles", &[("value", &entry.files.len().to_string())]),
+        );
     std::fs::write(output_dir.join("README.txt"), &readme).context("failed to write README.txt")?;
 
-    println!(
-        "已导出提交 {} 到 {:?}",
-        &entry.id[..7.min(entry.id.len())],
-        output_dir
-    );
+    println!("{}", crate::i18n::tf("cli.export.done", &[("id", &entry.id[..7.min(entry.id.len())]), ("path", &output_dir.display().to_string())]));
     Ok(())
 }

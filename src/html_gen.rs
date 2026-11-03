@@ -155,7 +155,7 @@ pub fn generate_index_html(
 }
 
 const TEMPLATE: &str = r##"<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
@@ -351,10 +351,10 @@ h1 { font-size: clamp(26px, 3vw, 36px); font-weight: 750; letter-spacing: -1px; 
 <div class="deco glow-br"></div>
 <div class="page">
   <div class="left-col">
-    <div class="cal-header"><span class="cal-title">进度日历</span></div>
+    <div class="cal-header"><span class="cal-title">Progress calendar</span></div>
     <div id="cal-sidebar"></div>
     <div class="left-footer">
-      <button id="theme-toggle" class="theme-btn" title="切换日/夜">
+      <button id="theme-toggle" class="theme-btn" title="Toggle day/night">
         <svg class="icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></svg>
         <svg class="icon-moon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 9.2A6.5 6.5 0 1 1 6.8 2a5.3 5.3 0 0 0 7.2 7.2z"/></svg>
       </button>
@@ -365,7 +365,7 @@ h1 { font-size: clamp(26px, 3vw, 36px); font-weight: 750; letter-spacing: -1px; 
     <div class="right-head">
       <div class="head-row">
         <div>
-          <div class="eyebrow">进度时间线 <span class="dot"></span></div>
+          <div class="eyebrow">Progress timeline <span class="dot"></span></div>
           <h1 id="project-title"></h1>
         </div>
         <div class="head-meta">
@@ -409,10 +409,11 @@ function render() {
   document.getElementById('project-title').textContent = data.project || 'Keinestamp';
   // web 只显示主线：被顶替（superseded）记录不展示（GUI 时间线保留折叠区，部署页不显示）
   var mainline = (data.entries || []).filter(function(e) { return !e.superseded; });
+  var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var total = mainline.length;
   var msCount = mainline.filter(function(e) { return e.milestone; }).length;
-  document.getElementById('meta-count').textContent = '共 ' + total + ' 条记录';
-  document.getElementById('meta-ms').innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .8l2 4.4 4.8.5-3.6 3.2 1 4.7L8 11.2l-4.2 2.4 1-4.7L1.2 5.7l4.8-.5L8 .8z"/></svg>' + msCount + ' 里程碑';
+  document.getElementById('meta-count').textContent = total + ' records';
+  document.getElementById('meta-ms').innerHTML = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 .8l2 4.4 4.8.5-3.6 3.2 1 4.7L8 11.2l-4.2 2.4 1-4.7L1.2 5.7l4.8-.5L8 .8z"/></svg>' + msCount + ' milestones';
   var h = '';
   if (mainline.length > 0) {
     var entries = mainline.slice().reverse();
@@ -429,7 +430,7 @@ function render() {
           h += '<span class="tag-group-line"></span>';
           h += '</div>';
         } else {
-          h += '<div class="tag-group"><span class="tag-group-dot" style="background:var(--border-strong)"></span><span class="tag-group-label" style="color:var(--text-dim)">其他</span><span class="tag-group-line"></span></div>';
+          h += '<div class="tag-group"><span class="tag-group-dot" style="background:var(--border-strong)"></span><span class="tag-group-label" style="color:var(--text-dim)">Other</span><span class="tag-group-line"></span></div>';
         }
       }
 
@@ -453,7 +454,7 @@ function render() {
       h += '</div>';
 
       if (e.files && e.files.length > 0) {
-        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▸</span><span>文件变动</span></div>';
+        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▸</span><span>File changes</span></div>';
         h += '<div class="sec-body" style="display:none">';
         e.files.forEach(function(f, i) {
           var st = (e.file_status&&e.file_status[i])||'';
@@ -464,7 +465,7 @@ function render() {
 
       var eErrors = e.preview_errors || [];
       if (eErrors.length > 0) {
-        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▸</span><span>预览错误 (' + eErrors.length + ')</span></div>';
+        h += '<div class="sec-hdr" onclick="toggleSec(this)"><span class="arr">▸</span><span>Preview errors (' + eErrors.length + ')</span></div>';
         h += '<div class="sec-body" style="display:none">';
         eErrors.forEach(function(err) {
           h += '<div class="preview-error-line"><svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;vertical-align:-1px" aria-hidden="true"><path d="M8 2.3 14.4 13.3H1.6L8 2.3z"/><path d="M8 6.6v2.8"/><circle cx="8" cy="11.6" r="0.7" fill="currentColor" stroke="none"/></svg> ' + esc(err) + '</div>';
@@ -478,7 +479,7 @@ function render() {
         h += '<div class="sec-body" style="">';
         eGlbs.forEach(function(g) {
           h += '<div class="diff-entry"><div class="diff-path">' + esc(g.file) + '</div>';
-          h += '<div class="model-box" data-url="' + g.url + '"><div class="model-placeholder">加载 3D 模型...</div></div>';
+          h += '<div class="model-box" data-url="' + g.url + '"><div class="model-placeholder">Loading 3D model…</div></div>';
           h += '</div>';
         });
         h += '</div>';
@@ -508,7 +509,7 @@ function render() {
       h += '</div>';
     });
   } else {
-    h += '<div class="empty"><div class="empty-icon"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>暂无记录</div>';
+    h += '<div class="empty"><div class="empty-icon"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>No records yet</div>';
   }
   document.getElementById('app').innerHTML = h;
 }
@@ -554,7 +555,7 @@ function renderCalendar() {
     var m = cur % 12 + 1;
     var daysInMonth = new Date(y, m, 0).getDate();
     h += '<div class="cal-month">';
-    h += '<span class="cal-mlabel">' + m + '月</span>';
+    h += '<span class="cal-mlabel">' + MONTH_NAMES[m - 1] + '</span>';
     h += '<span class="cal-days">';
     for (var d = 1; d <= daysInMonth; d++) {
       var ds = y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0');
@@ -565,16 +566,16 @@ function renderCalendar() {
       var isToday = ds === today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
       if (isToday) cls += ' today';
       var tipLines = [ds];
-      if (ids) tipLines.push('(' + ids.length + ' 条)');
+      if (ids) tipLines.push('(' + ids.length + ')');
       var msgs = dateMsgs[ds] || [];
       msgs.slice(0, 3).forEach(function(m) { tipLines.push('• ' + m); });
-      if (msgs.length > 3) tipLines.push('… 还有 ' + (msgs.length - 3) + ' 条');
+      if (msgs.length > 3) tipLines.push('… ' + (msgs.length - 3) + ' more');
       var tip = tipLines.join(' &#10; ');
       h += '<span class="' + cls + '" title="' + tip + '" onclick="calScroll(\'' + ds + '\')"></span>';
     }
     h += '</span></div>';
   }
-  h += '<div class="cal-legend"><span title="较少">少</span><span class="s" title="0 条"></span><span class="s s1" title="1 条"></span><span class="s s2" title="2 条"></span><span class="s s3" title="3 条"></span><span class="s s4" title="4+ 条"></span><span title="较多">多</span></div>';
+  h += '<div class="cal-legend"><span title="Fewer">Less</span><span class="s" title="0 records"></span><span class="s s1" title="1 record"></span><span class="s s2" title="2 records"></span><span class="s s3" title="3 records"></span><span class="s s4" title="4+ records"></span><span title="More">More</span></div>';
   el.innerHTML = h;
 }
 
@@ -870,11 +871,11 @@ function createViewer(container, w, h, url, isOverlay) {
       applyShading();
       resetView();
     } else {
-      showError('3D 模型无可见网格');
+      showError('The 3D model has no visible mesh');
     }
   }, null, function(err) {
     console.error('GLB parse failed:', err);
-    showError('3D 模型解析失败');
+    showError('Failed to parse the 3D model');
   });
 
   function btn(label, cls, onclick) {
@@ -893,7 +894,7 @@ function createViewer(container, w, h, url, isOverlay) {
     var row2 = document.createElement('div');
     row2.className = 'model-toolbar-row';
 
-    var textureBtn = btn('贴图', 'mbtn active', function() {
+    var textureBtn = btn('Textures', 'mbtn active', function() {
       textureVisible = !textureVisible;
       applyShading();
       if (textureVisible) textureBtn.classList.add('active'); else textureBtn.classList.remove('active');
@@ -901,7 +902,7 @@ function createViewer(container, w, h, url, isOverlay) {
     textureBtn.classList.add('shade-btn');
     row1.appendChild(textureBtn);
 
-    var solidBtn = btn('实体', 'mbtn active', function() {
+    var solidBtn = btn('Solid', 'mbtn active', function() {
       solidVisible = !solidVisible;
       applyShading();
       if (solidVisible) solidBtn.classList.add('active'); else solidBtn.classList.remove('active');
@@ -909,7 +910,7 @@ function createViewer(container, w, h, url, isOverlay) {
     solidBtn.classList.add('shade-btn');
     row1.appendChild(solidBtn);
 
-    var xrayBtn = btn('X光', 'mbtn', function() {
+    var xrayBtn = btn('X-ray', 'mbtn', function() {
       xrayMode = !xrayMode;
       applyShading();
       if (xrayMode) xrayBtn.classList.add('active'); else xrayBtn.classList.remove('active');
@@ -917,7 +918,7 @@ function createViewer(container, w, h, url, isOverlay) {
     xrayBtn.classList.add('shade-btn');
     row1.appendChild(xrayBtn);
 
-    var gridBtn = btn('网格', 'mbtn active', function() {
+    var gridBtn = btn('Wireframe', 'mbtn active', function() {
       grid.visible = !grid.visible;
       markDirty();
       if (grid.visible) gridBtn.classList.add('active'); else gridBtn.classList.remove('active');
@@ -926,38 +927,38 @@ function createViewer(container, w, h, url, isOverlay) {
 
     row1.appendChild(document.createElement('span')).className = 'sep';
 
-    row1.appendChild(btn('正视图', 'mbtn', function() {
+    row1.appendChild(btn('Front', 'mbtn', function() {
       setViewAxis(0, 0, 1);
     }));
 
     var side = 1;
-    var sideBtn = btn('右视图', 'mbtn', function() {
+    var sideBtn = btn('Right', 'mbtn', function() {
       side = -side;
       setViewAxis(side, 0, 0);
-      sideBtn.textContent = side > 0 ? '右视图' : '左视图';
+      sideBtn.textContent = side > 0 ? 'Right' : 'Left';
     });
     row1.appendChild(sideBtn);
 
-    row1.appendChild(btn('顶视图', 'mbtn', function() {
+    row1.appendChild(btn('Top', 'mbtn', function() {
       setViewAxis(0, 1, 0);
     }));
 
     row1.appendChild(document.createElement('span')).className = 'sep';
 
-    var faceBtn = btn('面部', 'mbtn', function() {
+    var faceBtn = btn('Face', 'mbtn', function() {
       setFaceView();
     });
     row1.appendChild(faceBtn);
 
     row1.appendChild(document.createElement('span')).className = 'sep';
 
-    var orthoBtn = btn('正交', 'mbtn', function() {
+    var orthoBtn = btn('Ortho', 'mbtn', function() {
       setProjection(camera === perspCam);
       if (camera === orthoCam) orthoBtn.classList.add('active'); else orthoBtn.classList.remove('active');
     });
     row1.appendChild(orthoBtn);
 
-    var resetBtn = btn('重置', 'mbtn', function() {
+    var resetBtn = btn('Reset', 'mbtn', function() {
       resetView();
     });
     row1.appendChild(resetBtn);
@@ -965,8 +966,8 @@ function createViewer(container, w, h, url, isOverlay) {
     if (expandCb) {
       var eb = document.createElement('button');
       eb.className = 'model-expand-btn';
-      eb.textContent = '放大';
-      eb.title = '放大到网页尺寸';
+      eb.textContent = 'Zoom';
+      eb.title = 'Zoom to fit page width';
       eb.addEventListener('click', function(e) { e.stopPropagation(); expandCb(); });
       row2.appendChild(eb);
     }
@@ -1051,7 +1052,7 @@ function initModelsLazy() {
   if (boxes.length === 0) return;
   if (typeof THREE === 'undefined' || !THREE.WebGLRenderer) {
     document.querySelectorAll('.model-placeholder').forEach(function(el) {
-      el.textContent = '3D 预览不可用';
+      el.textContent = '3D preview unavailable';
     });
     return;
   }
@@ -1081,7 +1082,7 @@ function initModelsLazy() {
     });
   }, { rootMargin: '200px' });
   boxes.forEach(function(el) {
-    el.innerHTML = '<div class="model-placeholder">等待加载...</div>';
+    el.innerHTML = '<div class="model-placeholder">Waiting to load…</div>';
     OBSERVER.observe(el);
   });
 
@@ -1100,7 +1101,7 @@ function enqueueViewer(el) {
     createViewerFor(el);
   } else {
     VIEWER_QUEUE.push(el);
-    el.innerHTML = '<div class="model-placeholder">排队中 (' + VIEWER_QUEUE.length + ')...</div>';
+    el.innerHTML = '<div class="model-placeholder">Queued (' + VIEWER_QUEUE.length + ')…</div>';
   }
 }
 
@@ -1127,7 +1128,7 @@ function disposeViewer(el) {
     ACTIVE_VIEWERS[idx].viewer.dispose();
     ACTIVE_VIEWERS.splice(idx, 1);
   }
-  el.innerHTML = '<div class="model-placeholder">3D 已暂停，滚动回来看</div>';
+  el.innerHTML = '<div class="model-placeholder">3D paused — scroll back to resume</div>';
   if (VIEWER_QUEUE.length > 0) {
     var next = VIEWER_QUEUE.shift();
     if (next && next.isConnected && !next.getAttribute('data-viewer-id')) {
@@ -1150,7 +1151,7 @@ function openImageFullscreen(el) {
   var close = document.createElement('button');
   close.className = 'image-overlay-close';
   close.innerHTML = '&times;';
-  close.setAttribute('title', '关闭');
+  close.setAttribute('title', 'Close');
   close.addEventListener('click', function() { overlay.remove(); });
   bar.appendChild(title);
   bar.appendChild(close);
@@ -1230,7 +1231,7 @@ mod tests {
 
         let html = std::fs::read_to_string(dir.join("index.html"))?;
         assert!(html.contains("Test Project"));
-        assert!(html.contains("暂无记录"));
+        assert!(html.contains("No records yet"));
         assert!(html.contains("empty-icon"));
         assert!(!html.contains("diffsData"), "diff feature removed");
 
@@ -1866,7 +1867,7 @@ mod tests {
         generate_index_html(&dir, &dir, &timeline, "ErrTest")?;
         let html = std::fs::read_to_string(dir.join("index.html"))?;
         assert!(
-            html.contains("预览错误"),
+            html.contains("Preview errors"),
             "deploy page should render preview error section"
         );
         assert!(

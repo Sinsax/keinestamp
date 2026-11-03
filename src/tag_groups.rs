@@ -16,8 +16,10 @@ pub struct TagGroup {
 }
 
 /// 配置文件首行注释（人工可读；解析 TOML 时注释会被忽略）。
-const TAG_GROUPS_HEADER: &str =
-    "# Keinestamp 流程与标签（项目级配置，不入库；删除本文件即恢复默认 Blender 流程）";
+/// 运行期取文案（const 无法调用 i18n，语言切换后新写入的文件即跟随）。
+fn tag_groups_header() -> String {
+    crate::i18n::t("err.tags.fileHeader")
+}
 
 /// tags.toml 的包装结构。
 ///
@@ -121,7 +123,7 @@ pub fn save_tag_groups(project_root: &Path, groups: &[TagGroup]) -> Result<Vec<T
         flows: normalized.clone(),
     };
     let body = toml::to_string(&file).context("failed to serialize tag groups")?;
-    let content = format!("{TAG_GROUPS_HEADER}\n{body}");
+    let content = format!("{}\n{body}", tag_groups_header());
     let path = tag_groups_path(project_root);
     crate::process_util::atomic_write(&path, content.as_bytes())
         .with_context(|| format!("failed to write tag groups {:?}", path))?;
@@ -195,7 +197,7 @@ mod tests {
             content.contains("[[flows]]"),
             "文件应为 [[flows]] 数组表格式，实际内容：\n{content}"
         );
-        assert!(content.contains(TAG_GROUPS_HEADER), "文件应含说明注释");
+        assert!(content.contains(&tag_groups_header()), "文件应含说明注释");
 
         let loaded = load_tag_groups(&dir)?;
         assert_eq!(loaded, saved, "save → load 应保持内容一致");

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { TagGroup } from '../api'
   import { resolveTagCategory } from './tags'
+  import { t } from './i18n/index.svelte'
 
   let {
     onConfirm,
@@ -115,18 +116,18 @@
 <div class="dialog-overlay" onclick={() => { if (!busy) onCancel() }} role="presentation">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog commit-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
-    <h3>记录进度</h3>
+    <h3>{t('gui.commit.title')}</h3>
     <div class="field">
-      <label for="cd-message">记录说明</label>
+      <label for="cd-message">{t('gui.commit.messageLabel')}</label>
       <textarea
         id="cd-message"
         bind:value={message}
         rows={3}
-        placeholder="描述本次修改..."
+        placeholder={t('gui.commit.messagePlaceholder')}
       ></textarea>
     </div>
     <div class="field">
-      <span class="cat-label">流程分类（可选）</span>
+      <span class="cat-label">{t('gui.commit.categoryLabel')}</span>
       <div class="cat-row">
         {#each TAG_GROUPS as g}
           <button
@@ -138,7 +139,7 @@
       </div>
     </div>
     <div class="field">
-      <label for="cd-tag">标签（可选）</label>
+      <label for="cd-tag">{t('gui.commit.tagsLabel')}</label>
       <div class="tag-row">
         {#each currentTags as p}
           <button
@@ -151,7 +152,7 @@
           class="tag-btn custom-btn"
           class:active={useCustom}
           onclick={() => { useCustom = true; selectedTags = []; }}
-        >自定义</button>
+        >{t('gui.commit.customTag')}</button>
       </div>
       {#if useCustom}
         <input
@@ -159,20 +160,20 @@
           class="custom-input"
           type="text"
           bind:value={customTag}
-          placeholder="输入自定义标签..."
+          placeholder={t('gui.commit.customPlaceholder')}
         />
       {/if}
     </div>
     {#if hasPreviewMarked}
       <div class="field row-field">
-        <label for="cd-preview">生成预览</label>
+        <label for="cd-preview">{t('gui.commit.previewLabel')}</label>
         <input id="cd-preview" type="checkbox" bind:checked={previewEnabled} />
       </div>
     {/if}
     <div class="actions">
-      <button onclick={onCancel} disabled={busy}>取消</button>
+      <button onclick={onCancel} disabled={busy}>{t('common.cancel')}</button>
       <button onclick={handleConfirm} class="accent" disabled={busy || !message.trim()}>
-        {busy ? (progress ? `记录中...：${progress}` : '记录中...') : '记录 (Ctrl+Enter)'}
+        {busy ? (progress ? t('gui.commit.recordingProgress', { progress }) : t('gui.commit.recording')) : t('gui.commit.confirm')}
       </button>
     </div>
   </div>
@@ -271,3 +272,4 @@
     cursor: pointer;
   }
 </style>
+

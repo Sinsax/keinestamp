@@ -72,7 +72,7 @@ pub fn deploy_to_server(
 
     let zip_bytes = create_incremental_zip(web_root, &manifest, &changed).map_err(|e| {
         eprintln!("[debug] deploy_to_server: create_zip failed: {}", e);
-        anyhow::anyhow!("打包网页文件失败: {}", e)
+        anyhow::anyhow!(crate::i18n::tf("err.push.zipFailed", &[("error", &e.to_string())]))
     })?;
     eprintln!(
         "[debug] deploy_to_server: changed={} deleted={} zip_size={} bytes",
@@ -114,11 +114,11 @@ pub fn deploy_to_server(
                 "[debug] deploy_to_server: server error {}: {}",
                 code, body
             );
-            anyhow::bail!("服务器返回 {}: {}", code, body)
+            anyhow::bail!(crate::i18n::tf("err.push.serverError", &[("code", &code.to_string()), ("body", &body)]))
         }
         Err(e) => {
             eprintln!("[debug] deploy_to_server: ureq error: {}", e);
-            anyhow::bail!("连接服务器失败: {}", e)
+            anyhow::bail!(crate::i18n::tf("err.push.connectFailed", &[("error", &e.to_string())]))
         }
     };
 

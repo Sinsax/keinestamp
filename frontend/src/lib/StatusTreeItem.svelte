@@ -4,6 +4,7 @@
   import type { StatusFile } from './statusParse'
   import { statusColor, statusIconType, statusLabel, ext } from './statusParse'
   import { previewTypeOf } from './preview'
+  import { t } from './i18n/index.svelte'
   import FileTypeIcon from './FileTypeIcon.svelte'
 
   let {
@@ -68,7 +69,7 @@
 
 {#if isDir}
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-  <div class="sp-item sp-dir" class:sp-ignored={ignored} onclick={() => { if (!ignored) onToggleDir(node) }} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title="文件夹仅用于分组/批量勾选，不会作为 Lore 路径提交；提交的始终是文件">
+  <div class="sp-item sp-dir" class:sp-ignored={ignored} onclick={() => { if (!ignored) onToggleDir(node) }} oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); onContextMenu(node.path, true, e.clientX, e.clientY) }} title={t('gui.statustree.dirTitle')}>
     <input
       type="checkbox"
       class="sp-check"
@@ -80,7 +81,7 @@
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
       <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-      <span class="sp-arrow" onclick={(e) => { e.stopPropagation(); onToggleCollapse(node.path) }} title="展开/折叠">
+      <span class="sp-arrow" onclick={(e) => { e.stopPropagation(); onToggleCollapse(node.path) }} title={t('gui.statustree.expandCollapse')}>
         {isCollapsed(node.path) ? '▸' : '▾'}
       </span>
       <span class="sp-dir-icon">
@@ -88,7 +89,7 @@
       </span>
       <span class="sp-path sp-dir-name">{node.name}</span>
       {#if isCollapsed(node.path) && (ignored || dirAllIgnoredFn(node.path))}
-        <span class="sp-ignored-badge">已忽略</span>
+        <span class="sp-ignored-badge">{t('gui.statustree.ignoredBadge')}</span>
       {/if}
     </span>
   </div>
@@ -125,7 +126,7 @@
       disabled={ignored || rollbackDeleted}
       onclick={(e) => e.stopPropagation()}
       onchange={() => onToggleFile(node.path)}
-      title={rollbackDeleted ? '已检出删除（该版本已删除此文件，记录时算删除）' : ignored ? '已忽略，不参与提交' : '取消勾选可单独提交其余文件'}
+      title={rollbackDeleted ? t('gui.statustree.fileTitleDeleted') : ignored ? t('gui.statustree.fileTitleIgnored') : t('gui.statustree.fileTitleNormal')}
     />
     <span class="sp-row" style="padding-left: {depth * 28}px">
       <span class="sp-icon" style="color: {statusColor(status?.x || ' ', status?.y || ' ')}">
@@ -143,18 +144,20 @@
       <span class="sp-ext-badge">{ext(node.path)}</span>
       <span class="sp-path">{node.name}</span>
       {#if ignored}
-        <span class="sp-ignored-badge">已忽略</span>
+        <span class="sp-ignored-badge">{t('gui.statustree.ignoredBadge')}</span>
       {/if}
       <span class="sp-badges">
         {#if isPreviewMarked}
-          <span class="sp-badge sp-badge-3d" title="已标记预览（右键取消）">
+          <span class="sp-badge sp-badge-3d" title={t('gui.statustree.previewBadgeTitle')}>
             {previewTypeOf(node.path) === 'image' ? 'Image' : previewTypeOf(node.path) === 'video' ? 'Video' : 'Model'}
           </span>
         {/if}
         {#if rollbackDeleted}
-          <span class="sp-badge sp-badge-rbd">已检出删除</span>
+          <span class="sp-badge sp-badge-rbd">{t('gui.statustree.deletedBadge')}</span>
         {:else if rollbackMark}
-          <span class="sp-badge sp-badge-rb">{rollbackModified ? '已修改' : '已检出'}</span>
+          <span class="sp-badge sp-badge-rb" title={t('gui.statustree.rollbackVersionTitle')}>
+            {rollbackModified ? t('gui.statustree.modifiedBadge') : t('gui.statustree.checkedOutBadge')}
+          </span>
         {:else if status?.x && status.x !== ' '}
           <span class="sp-badge" style="color: {statusColor(status.x, status.y)}">{statusLabel(status.x, status.y)}</span>
         {/if}
@@ -217,3 +220,4 @@
     font-weight: 700 !important;
   }
 </style>
+

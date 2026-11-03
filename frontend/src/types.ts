@@ -81,10 +81,12 @@ export interface RollbackState {
   head_matches: boolean
   /** X 删除的文件（标记"回退删除"，记录时算删除） */
   deleted_files: string[]
-  /** X 修改/新增的文件（检出为未提交"回退改动"；内容与检出一致 = "已检出"，不符 = "已修改"） */
+  /** X 修改/新增的文件（检出为未提交"回退改动"；内容与检出 X 时一致 = "该记录版本"，不符 = "该记录版本·已改"） */
   change_files: string[]
-  /** 检出文件中被"真修改"的（内容与检出 hash 不符；标签显示"已修改"，其余显示"已检出"） */
+  /** 检出文件中被"真修改"的（内容与检出 hash 不符；标签显示"该记录版本·已改"，其余显示"该记录版本"） */
   modified_files: string[]
+  /** 恢复确认用的"真修改"（只含跟踪文件修改；未跟踪新文件恢复时不会被删除，不进确认列表） */
+  restore_modified_files: string[]
 }
 
 export type RollbackChoice = [string, 'current' | 'stashed']
@@ -105,6 +107,24 @@ export interface AboutInfo {
   config_dir: string
 }
 
+/** 界面语言：偏好 + 实际生效语言（后端 keinestamp::i18n::LocaleInfo） */
+export interface LocaleOption {
+  tag: 'zh-CN' | 'en-US'
+  native_name: string
+}
+
+export interface LocaleInfo {
+  /** "system" | "zh-CN" | "en-US" */
+  pref: string
+  /** 实际生效的语言 tag */
+  tag: 'zh-CN' | 'en-US'
+  /** 生效语言的母语名称 */
+  native_name: string
+  /** 系统语言 tag（探测失败回落 zh-CN） */
+  system_tag: 'zh-CN' | 'en-US'
+  available: LocaleOption[]
+}
+
 export type UpdateState = 'up_to_date' | 'available' | 'unknown'
 
 /** 设置 → 关于：检查更新结果（unknown 是正常状态，不是异常） */
@@ -116,3 +136,4 @@ export interface UpdateInfo {
   message: string
   checked_at: string
 }
+

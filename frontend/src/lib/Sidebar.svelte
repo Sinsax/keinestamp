@@ -1,6 +1,7 @@
 <script lang="ts">
   import DirTree from './DirTree.svelte'
   import { openFolder } from '../api'
+  import { t } from './i18n/index.svelte'
 
   let {
     trackedFiles = [],
@@ -82,7 +83,7 @@
 <div class="sidebar" class:collapsed>
   {#if collapsed}
     <div class="sidebar-collapsed-bar">
-      <button class="expand-btn" onclick={onExpand} title="展开侧栏">
+      <button class="expand-btn" onclick={onExpand} title={t('gui.sidebar.expand')}>
         <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
       </button>
     </div>
@@ -94,16 +95,16 @@
           <span class="sidebar-count">{trackedFiles.length}</span>
         {/if}
       {:else}
-        <span>Files</span>
+        <span>{t('gui.sidebar.files')}</span>
       {/if}
     </div>
     <div class="sidebar-list">
       {#if !activePath}
-        <div class="sidebar-empty">未选择项目</div>
+        <div class="sidebar-empty">{t('gui.sidebar.noProject')}</div>
       {:else if trackedFiles.length === 0}
         <div class="sidebar-empty">
           <div class="sidebar-empty-icon"><svg viewBox="0 0 20 20" width="24" height="24" fill="currentColor" opacity="0.4"><path d="M2 4.5A1.5 1.5 0 013.5 3h5.757a1.5 1.5 0 011.06.44l1.122 1.12A1.5 1.5 0 0112 4.62V6h2.5A1.5 1.5 0 0116 7.5v6a1.5 1.5 0 01-1.5 1.5h-11A1.5 1.5 0 012 13.5v-9z"/></svg></div>
-          <div>无文件</div>
+          <div>{t('gui.sidebar.noFiles')}</div>
         </div>
       {:else}
         <DirTree paths={[...trackedFiles, ...emptyDirs]} dirs={emptyDirs} {activePath} onContextMenu={openContextMenu} />
@@ -115,7 +116,7 @@
           <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor">
             <path d="M2 2.5A1.5 1.5 0 0 1 3.5 1h7.828a1.5 1.5 0 0 1 1.06.44l1.122 1.12A1.5 1.5 0 0 1 14 3.62V13.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 13.5V2.5z"/>
           </svg>
-          <span>退出文件夹</span>
+          <span>{t('gui.sidebar.closeProject')}</span>
         </button>
       </div>
     {/if}
@@ -126,9 +127,9 @@
   <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu() }}></div>
   <div class="ctx-menu" style="left: {contextMenu.x}px; top: {contextMenu.y}px">
-    <button onclick={menuOpenFolder}>打开所在文件夹</button>
-    <button onclick={menuCopyPath}>复制路径</button>
-    <button onclick={menuCopyName}>复制名称</button>
+    <button onclick={menuOpenFolder}>{t('gui.sidebar.openFolder')}</button>
+    <button onclick={menuCopyPath}>{t('gui.sidebar.copyPath')}</button>
+    <button onclick={menuCopyName}>{t('gui.sidebar.copyName')}</button>
   </div>
 {/if}
 
@@ -258,3 +259,4 @@
     color: var(--accent);
   }
 </style>
+

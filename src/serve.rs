@@ -139,7 +139,7 @@ pub fn load_config(path: &Path) -> Result<ServeConfig> {
         // 空/纯空白 token 会让 `Authorization: Bearer `（空 token）直接通过认证 ——
         // 等于把部署接口完全敞开（2026-10 审查 HTTP-12）
         Some(t) if t.trim().is_empty() => anyhow::bail!(
-            "serve.toml 的 deploy_token 为空：请填入一个随机 token（空 token 等于没有认证）"
+            crate::i18n::t("cli.serve.deployTokenEmpty")
         ),
         Some(_) => {}
     }
@@ -368,11 +368,11 @@ fn check_browser_static_auth(
 fn login_page_html(project_name: &str) -> String {
     format!(
         r##"<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>Keinestamp 登录</title>
+<title>Keinestamp login</title>
 <script>document.documentElement.dataset.theme = localStorage.getItem('keinestamp_web_theme') === 'night' ? 'night' : 'day';</script>
 <style>
 :root{{
@@ -403,11 +403,11 @@ button:hover{{background:var(--accent-hover)}}
 <body>
 <div class="card">
   <h1>{project}</h1>
-  <div class="sub">输入访问令牌以查看时间线</div>
+  <div class="sub">Enter the access token to view the timeline</div>
   <form method="post" action="/{project}/login">
-    <input type="password" name="token" placeholder="访问令牌" required autofocus id="token-input" />
-    <button type="submit">确认</button>
-    <div class="error" id="error">令牌无效</div>
+    <input type="password" name="token" placeholder="Access token" required autofocus id="token-input" />
+    <button type="submit">Sign in</button>
+    <div class="error" id="error">Invalid token</div>
   </form>
 </div>
 <script>
@@ -457,7 +457,7 @@ fn index_page_html() -> String {
 }
 
 const INDEX_HTML_TEMPLATE: &str = r##"<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
@@ -847,7 +847,7 @@ html[data-moon="full"] .bm-logo {
 <div class="deco code-tex c1">timeline 42 · entries 7</div>
 <div class="deco code-tex c2">revert d9f2ab</div>
 <div class="deco code-tex c3">glb export ✓</div>
-<div class="deco code-tex c4">tag: 建模</div>
+<div class="deco code-tex c4">tag: modeling</div>
 
 <header class="topbar">
   <div class="brand-mini">
@@ -855,7 +855,7 @@ html[data-moon="full"] .bm-logo {
     Keinestamp
   </div>
   <div class="topbar-right">
-    <button id="theme-toggle" class="theme-btn" title="切换日/夜">
+    <button id="theme-toggle" class="theme-btn" title="Toggle day/night">
       <svg class="icon-sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="3.2"/><path d="M8 1.2v1.8M8 13v1.8M1.2 8h1.8M13 8h1.8M3.2 3.2l1.3 1.3M11.5 11.5l1.3 1.3M12.8 3.2l-1.3 1.3M4.5 11.5l-1.3 1.3"/></svg>
       <svg class="icon-moon" viewBox="0 0 16 16" fill="currentColor"><path d="M14 9.2A6.5 6.5 0 1 1 6.8 2a5.3 5.3 0 0 0 7.2 7.2z"/></svg>
     </button>
@@ -867,7 +867,7 @@ html[data-moon="full"] .bm-logo {
     <div class="eyebrow">Lore · Timeline <span class="dot">●</span></div>
     <h1>{site_name}</h1>
     <p class="hero-sub">Lore Progress Board</p>
-    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M5.3 8.2l1.9 1.9 3.5-3.9"/></svg> 已记录</span><span class="cursor"></span></code>
+    <code class="hero-code"><span style="color:var(--text-dim)">$</span> record h1st0ry0 <span class="ok"><svg viewBox="0 0 16 16" width="11" height="11" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px" aria-hidden="true"><circle cx="8" cy="8" r="6.4"/><path d="M5.3 8.2l1.9 1.9 3.5-3.9"/></svg> Recorded</span><span class="cursor"></span></code>
   </div>
   <div class="hero-art">
     <div class="ha-ring">
@@ -888,7 +888,7 @@ html[data-moon="full"] .bm-logo {
     <div class="ha-scale">
       <i style="height:4px"></i><i style="height:7px"></i><i style="height:10px"></i><i style="height:7px"></i><i style="height:4px"></i>
     </div>
-    <div class="ha-tag"><span id="moonName">月相</span></div>
+    <div class="ha-tag"><span id="moonName">Moon phase</span></div>
   </div>
 </main>
 
@@ -954,11 +954,11 @@ html[data-moon="full"] .bm-logo {
       return { phase: phase, illum: illum };
     }
     function moonName(p, i) {
-      if (i < 0.02) return '新月';
-      if (i < 0.40) return p < 0.5 ? '蛾眉月' : '残月';
-      if (i <= 0.60) return p < 0.5 ? '上弦月' : '下弦月';
-      if (i < 0.95) return p < 0.5 ? '盈凸月' : '亏凸月';
-      return '满月';
+      if (i < 0.02) return 'New moon';
+      if (i < 0.40) return p < 0.5 ? 'Waxing crescent' : 'Waning crescent';
+      if (i <= 0.60) return p < 0.5 ? 'First quarter' : 'Last quarter';
+      if (i < 0.95) return p < 0.5 ? 'Waxing gibbous' : 'Waning gibbous';
+      return 'Full moon';
     }
     function moonPath(p) {
       var waxing = p < 0.5;
@@ -975,7 +975,7 @@ html[data-moon="full"] .bm-logo {
     var day = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12);
     var real = moonInfo(day);
     var overridePhase = null;
-    var NAME_IDX = { '新月': 0, '蛾眉月': 1, '上弦月': 2, '盈凸月': 3, '满月': 4, '亏凸月': 5, '下弦月': 6, '残月': 7 };
+    var NAME_IDX = { 'New moon': 0, 'Waxing crescent': 1, 'First quarter': 2, 'Waxing gibbous': 3, 'Full moon': 4, 'Waning gibbous': 5, 'Last quarter': 6, 'Waning crescent': 7 };
     var realIdx = NAME_IDX[moonName(real.phase, real.illum)];
 
     function currentPhase() {
@@ -1063,7 +1063,7 @@ html[data-moon="full"] .bm-logo {
     })();
 
     // 低语：偶尔浮过一句没有来由的话
-    var WHISPERS = ['岁在玄枵', '月亮记得', '此夜无事可录', '一切过去之事皆有存根', '潮汐与历史同期', '白泽未醒', '暂行记录，永不磨灭', '第四十一条记录已被封存'];
+    var WHISPERS = ['The year of the void', 'The moon remembers', 'Nothing to record tonight', 'All that has passed leaves a trace', 'Tides keep time with history', 'Baize still sleeps', 'Recorded for now, never forgotten', 'Entry 41 has been sealed'];
     function spawnWhisper() {
       var w = document.createElement('div');
       w.className = 'whisper';
@@ -1115,7 +1115,7 @@ html[data-moon="full"] .bm-logo {
     // 给开控制台的人留的话
     try {
       console.log('%c:::::::::', 'color:#dc4a44;font-family:monospace;font-size:14px;letter-spacing:3px');
-      console.log('%c月亮记得每一次记录。', 'color:#8a8f98;font-family:monospace');
+      console.log('%cThe moon remembers every record.', 'color:#8a8f98;font-family:monospace');
     } catch (e) { /* ignore */ }
   })();
 </script>
@@ -1242,12 +1242,16 @@ fn load_projects(web_root: &Path) -> (HashMap<String, String>, HashMap<String, S
             let saved = std::fs::copy(&path, &backup).is_ok();
             log_error(
                 "PROJECTS",
-                &format!(
-                    "corrupt projects file {:?}: {} — 已备份到 {:?}（{}），以空注册表启动",
-                    path,
-                    e,
-                    backup,
-                    if saved { "成功" } else { "失败" }
+                &crate::i18n::tf(
+                    "cli.serve.corruptRegistry",
+                    &[
+                        ("error", &e.to_string()),
+                        ("path", &format!("{:?}", path)),
+                        (
+                            "status",
+                            &if saved { crate::i18n::t("cli.serve.saved") } else { crate::i18n::t("cli.serve.failed") },
+                        ),
+                    ],
                 ),
             );
             (HashMap::new(), HashMap::new())
@@ -1535,13 +1539,14 @@ pub fn auto_generate_config(
 port = {}
 deploy_token = "{}"
 web_root = "{}"
-# 备份服务器：true = serve 启动时拉起 loreserver（持久化 store，跟随 serve 生命周期）
+{}
 enable_loreserver = false
 "#,
         host,
         port,
         dt,
-        canonical_root.to_string_lossy().replace('\\', "\\\\")
+        canonical_root.to_string_lossy().replace('\\', "\\\\"),
+        crate::i18n::t("cli.serve.tomlComment")
     );
     std::fs::write(&path, &config_toml)
         .with_context(|| format!("failed to write auto-generated serve config to {:?}", path))?;
@@ -1555,7 +1560,7 @@ enable_loreserver = false
     log_info("SETUP", &format!("Deploy Token (for app): {}", dt));
     log_info(
         "SETUP",
-        &format!("Web URL: http://{}:{}/<项目名>", host, port),
+        &crate::i18n::tf("cli.serve.webUrl", &[("host", &host), ("port", &port.to_string())]),
     );
     log_info(
         "SETUP",
@@ -1625,7 +1630,7 @@ fn parse_loreserver_info(output: &str) -> (String, String, String) {
                 .strip_prefix("Server version:")
                 .map(|s| s.trim().to_string())
         })
-        .unwrap_or_else(|| "未知".to_string());
+        .unwrap_or_else(|| crate::i18n::t("cli.serve.unknown"));
     // Loaded config 里 store 路径形如 `LocalImmutableStoreSettings { ..., path: "C:/...", ... }`
     let mut stores: Vec<String> = Vec::new();
     for anchor in ["LocalImmutableStoreSettings", "LocalMutableStoreSettings"] {
@@ -1642,14 +1647,14 @@ fn parse_loreserver_info(output: &str) -> (String, String, String) {
         }
     }
     let store = if stores.is_empty() {
-        "默认（系统临时目录，重启丢失）".to_string()
+        crate::i18n::t("cli.serve.storeDefault")
     } else {
         stores.join(" | ")
     };
     let auth = if output.contains("auth: None") {
-        "无认证，仅限可信局域网".to_string()
+        crate::i18n::t("cli.serve.authNone")
     } else {
-        "已配置认证".to_string()
+        crate::i18n::t("cli.serve.authConfigured")
     };
     (version, store, auth)
 }
@@ -1662,7 +1667,7 @@ pub fn ensure_loreserver() -> Result<Option<std::process::Child>> {
         log_info("LORESERVER", "already online");
         return Ok(None);
     }
-    let bin = loreserver_bin().context("loreserver 未找到（Lore 安装目录）")?;
+    let bin = loreserver_bin().context(crate::i18n::t("cli.serve.loreserverMissing"))?;
     ensure_loreserver_config()?;
     let cfg_dir = loreserver_config_dir();
     log_info("LORESERVER", &format!("starting {}", bin.display()));
@@ -1672,7 +1677,7 @@ pub fn ensure_loreserver() -> Result<Option<std::process::Child>> {
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         .spawn()
-        .map_err(|e| anyhow::anyhow!("拉起 loreserver 失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("cli.serve.spawnFailed", &[("error", &e.to_string())])))?;
     let stdout = child.stdout.take();
     let stderr = child.stderr.take();
     // 读取线程：就绪前收集到共享缓冲（供解析），就绪后逐行转发（防管道写满阻塞）
@@ -1738,15 +1743,15 @@ pub fn ensure_loreserver() -> Result<Option<std::process::Child>> {
             let (version, store, auth) = parse_loreserver_info(&startup_out);
             log_info("LORESERVER", &format!("lore {}（{}）", version, auth));
             log_info("LORESERVER", &format!("store: {}", store));
-            log_info("LORESERVER", "监听 41337 (gRPC/QUIC) + 41339 (HTTP)");
+            log_info("LORESERVER", &crate::i18n::t("cli.serve.listening"));
             return Ok(Some(child));
         }
         if let Ok(Some(status)) = child.try_wait() {
-            anyhow::bail!("loreserver 启动后退出: {}", status);
+            anyhow::bail!(crate::i18n::tf("cli.serve.exited", &[("status", &status.to_string())]));
         }
     }
     let _ = child.kill();
-    anyhow::bail!("loreserver 启动超时（10s）")
+    anyhow::bail!(crate::i18n::t("cli.serve.timeout"))
 }
 
 /// 自建监听 socket：唯一目的是设置 SO_RCVTIMEO / SO_SNDTIMEO（tiny_http 不提供该能力）。
@@ -1767,26 +1772,26 @@ fn bind_listener_with_timeout(
     let addr = format!("{}:{}", host, port);
     let sa = addr
         .to_socket_addrs()
-        .with_context(|| format!("无法解析监听地址：{}", addr))?
+        .with_context(|| crate::i18n::tf("cli.serve.resolveAddr", &[("addr", addr.as_str())]))?
         .next()
-        .with_context(|| format!("监听地址没有可用解析结果：{}", addr))?;
+        .with_context(|| crate::i18n::tf("cli.serve.resolveEmpty", &[("addr", addr.as_str())]))?;
     let domain = match sa {
         std::net::SocketAddr::V4(_) => Domain::IPV4,
         std::net::SocketAddr::V6(_) => Domain::IPV6,
     };
     let sock =
-        Socket::new(domain, Type::STREAM, Some(Protocol::TCP)).context("创建监听 socket 失败")?;
+        Socket::new(domain, Type::STREAM, Some(Protocol::TCP)).context(crate::i18n::t("cli.serve.socketFailed"))?;
     #[cfg(unix)]
     {
         let _ = sock.set_reuse_address(true);
     }
     sock.set_read_timeout(Some(timeout))
-        .context("设置 SO_RCVTIMEO 失败")?;
+        .context(crate::i18n::t("cli.serve.recvTimeout"))?;
     sock.set_write_timeout(Some(timeout))
-        .context("设置 SO_SNDTIMEO 失败")?;
+        .context(crate::i18n::t("cli.serve.sendTimeout"))?;
     sock.bind(&sa.into())
-        .with_context(|| format!("绑定 {} 失败", sa))?;
-    sock.listen(128).context("listen 失败")?;
+        .with_context(|| crate::i18n::tf("cli.serve.bindFailed", &[("addr", &sa.to_string())]))?;
+    sock.listen(128).context(crate::i18n::t("cli.serve.listenFailed"))?;
     Ok(sock.into())
 }
 
@@ -1802,10 +1807,12 @@ fn spawn_slot_watchdog(active: Arc<AtomicUsize>) {
                     Some(t) if t.elapsed() >= STUCK_SLOTS_WARN_AFTER => {
                         log_warn(
                             "WATCHDOG",
-                            &format!(
-                                "请求槽位已占满 {} 秒（{} 个），疑似半开连接/慢客户端；新请求将超时",
-                                t.elapsed().as_secs(),
-                                n
+                            &crate::i18n::tf(
+                                "cli.serve.slotsSaturated",
+                                &[
+                                    ("secs", &t.elapsed().as_secs().to_string()),
+                                    ("n", &n.to_string()),
+                                ],
                             ),
                         );
                         // 每 2 分钟重复一次，避免刷屏
@@ -1823,7 +1830,7 @@ fn spawn_slot_watchdog(active: Arc<AtomicUsize>) {
 
 pub fn start(config: ServeConfig) -> Result<()> {
     // 前置依赖检测：Lore v0.8.6 缺失/版本不符 → 拒绝启动
-    crate::lore_backend::check_lore_env().context("Lore 前置依赖检查失败")?;
+    crate::lore_backend::check_lore_env().context(crate::i18n::t("cli.serve.loreCheckFailed"))?;
     let _ = TRUST_PROXY.set(config.trust_proxy);
     let _ = SITE_NAME.set(
         config
@@ -1868,7 +1875,7 @@ pub fn start(config: ServeConfig) -> Result<()> {
     #[cfg(not(windows))]
     log_warn(
         "STARTUP",
-        "非 Windows 平台：监听 socket 的读超时不会继承给已接受的连接，         请务必在反向代理（Caddy/nginx）上配置 request read timeout，         否则半开连接可以耗尽工作线程",
+        &crate::i18n::t("cli.serve.readTimeoutNote"),
     );
     log_warn("STARTUP", "HTTP mode — data is sent in plaintext.");
     log_warn(
@@ -2571,9 +2578,9 @@ fn handle_upload(
         // 而且因为目录已存在又会拒绝接管（403）→ 自锁。必须显式告警。
         log_error(
             "DEPLOY",
-            &format!(
-                "{} project={} deployed but FAILED to persist identity — 重启后该站点将无法登录/重新部署，请检查磁盘",
-                ip, project_name
+            &crate::i18n::tf(
+                "cli.serve.persistFailed",
+                &[("project", &ip.to_string()), ("project2", &project_name)],
             ),
         );
     }
@@ -2922,7 +2929,7 @@ Loaded config: Settings { environment: None, immutable_store: ImmutableStoreSett
         assert!(html.contains("my_proj"));
         assert!(html.contains("--accent"));
         assert!(!html.contains("<svg"), "web logo should be removed");
-        assert!(html.contains("输入访问令牌以查看时间线"));
+        assert!(html.contains("Enter the access token to view the timeline"));
     }
 
     #[test]

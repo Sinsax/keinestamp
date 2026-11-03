@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { ProjectType } from '../types'
+  import { t } from './i18n/index.svelte'
 
   let {
     projectType,
@@ -9,9 +10,9 @@
     onBackup = () => {},
     connected = false,
     deployAhead = false,
-    deployTip = '部署到服务器',
+    deployTip = '',
     restoreEnabled = false,
-    restoreTitle = '没有可恢复的回退',
+    restoreTitle = '',
     busy = false,
     loreOk = true,
   }: {
@@ -32,29 +33,32 @@
 
   const initialized = $derived(projectType === 'initialized')
   const loreReady = $derived(loreOk && initialized)
-  const loreTitle = '缺少 Lore v0.8.6 环境，请重新安装/构建'
+  const loreTitle = $derived(t('gui.actionbar.loreMissing'))
+  // 文案在组件内解析（props 只作为覆盖项），切换语言时自动跟随
+  const deployTitle = $derived(deployTip || t('gui.actionbar.deployTip'))
+  const restoreTip = $derived(restoreTitle || t('gui.actionbar.restoreNone'))
 </script>
 
 <div class="action-bar">
   <button class="record-btn" onclick={onRecord} disabled={!loreReady || busy} title={loreOk ? '' : loreTitle}>
-    <span class="ab-label">记录</span>
+    <span class="ab-label">{t('gui.actionbar.record')}</span>
     <span class="ab-hint">record</span>
   </button>
 
-  <button class="restore-btn" class:enabled={restoreEnabled} onclick={onRestore} disabled={!loreReady || !restoreEnabled || busy} title={loreOk ? restoreTitle : loreTitle}>
-    <span class="ab-label">恢复</span>
+  <button class="restore-btn" class:enabled={restoreEnabled} onclick={onRestore} disabled={!loreReady || !restoreEnabled || busy} title={loreOk ? restoreTip : loreTitle}>
+    <span class="ab-label">{t('gui.actionbar.restore')}</span>
     <span class="ab-hint">redo</span>
   </button>
 
   <div class="spacer"></div>
 
-  <button class="backup-btn" onclick={onBackup} disabled={!loreReady || busy} title={loreOk ? '备份到 loreserver' : loreTitle}>
-    <span class="ab-label">备份</span>
+  <button class="backup-btn" onclick={onBackup} disabled={!loreReady || busy} title={loreOk ? t('gui.actionbar.backupTip') : loreTitle}>
+    <span class="ab-label">{t('gui.actionbar.backup')}</span>
     <span class="ab-hint">backup</span>
   </button>
 
-  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!loreReady || !connected || busy} title={loreOk ? deployTip : loreTitle}>
-    <span class="ab-label">部署</span>
+  <button class="deploy-btn" class:ahead={deployAhead} onclick={onDeploy} disabled={!loreReady || !connected || busy} title={loreOk ? deployTitle : loreTitle}>
+    <span class="ab-label">{t('gui.actionbar.deploy')}</span>
     <span class="ab-hint">deploy</span>
   </button>
 </div>

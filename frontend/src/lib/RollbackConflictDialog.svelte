@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { RollbackChoice } from '../types'
+  import { t } from './i18n/index.svelte'
 
   let {
     conflicts,
@@ -19,8 +20,8 @@
 <div class="dialog-overlay" onclick={onCancel} role="presentation">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog conflict-dialog" onclick={(e: MouseEvent) => e.stopPropagation()} role="dialog" tabindex="-1">
-    <h3>恢复冲突</h3>
-    <p class="conflict-hint">以下文件在回退期间被改动，且与回退前暂存的内容冲突，请为每个文件选择保留的版本：</p>
+    <h3>{t('gui.conflict.title')}</h3>
+    <p class="conflict-hint">{t('gui.conflict.hint')}</p>
     {#each conflicts as f}
       <div class="conflict-row">
         <span class="conflict-path" title={f}>{f}</span>
@@ -28,22 +29,22 @@
           <button
             class:active={choices[f] !== 'stashed'}
             onclick={() => (choices[f] = 'current')}
-          >当前版本改动</button>
+          >{t('gui.conflict.keepCurrent')}</button>
           <button
             class:active={choices[f] === 'stashed'}
             onclick={() => (choices[f] = 'stashed')}
-          >回退前改动</button>
+          >{t('gui.conflict.keepStashed')}</button>
         </div>
       </div>
     {/each}
     <div class="actions">
-      <button onclick={onCancel}>取消</button>
+      <button onclick={onCancel}>{t('common.cancel')}</button>
       <button
         class="accent"
         disabled={busy || conflicts.some((f) => choices[f] === undefined)}
         onclick={() => onResolve(conflicts.map((f) => [f, choices[f] === 'stashed' ? 'stashed' : 'current']))}
       >
-        {busy ? '恢复中...' : '确定恢复'}
+        {busy ? t('gui.conflict.resolving') : t('gui.conflict.resolve')}
       </button>
     </div>
   </div>
@@ -139,3 +140,4 @@
     cursor: default;
   }
 </style>
+

@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core'
-import type { MetaConfig, Timeline, RecentEntry, StatusResult, ProjectType, RollbackState, RollbackChoice, AboutInfo, UpdateInfo } from './types'
+import type { MetaConfig, Timeline, RecentEntry, StatusResult, ProjectType, RollbackState, RollbackChoice, AboutInfo, UpdateInfo, LocaleInfo } from './types'
 
 export async function detect(path: string): Promise<ProjectType> {
   return invoke<ProjectType>('detect', { path })
@@ -292,6 +292,21 @@ export async function getDeployStatus(serverUrl: string, deployToken: string | n
   return invoke('get_deploy_status', { serverUrl, deployToken, path })
 }
 
+/** 界面语言偏好："system" | "zh-CN" | "en-US" */
+export async function getLocalePref(): Promise<string> {
+  return invoke<string>('get_locale_pref')
+}
+
+/** 实际生效的界面语言（含系统语言探测结果与可选语言列表） */
+export async function getEffectiveLocale(): Promise<LocaleInfo> {
+  return invoke<LocaleInfo>('get_effective_locale')
+}
+
+/** 设置语言偏好并立即生效（返回生效后的完整信息，供界面刷新） */
+export async function setLocalePref(pref: string): Promise<LocaleInfo> {
+  return invoke<LocaleInfo>('set_locale_pref', { pref })
+}
+
 /** 设置 → 关于：版本 / 平台 / Lore 运行时 / 程序与配置目录（本地读取，不含网络） */
 export async function getAboutInfo(): Promise<AboutInfo> {
   return invoke<AboutInfo>('get_about_info')
@@ -301,3 +316,4 @@ export async function getAboutInfo(): Promise<AboutInfo> {
 export async function checkAppUpdate(): Promise<UpdateInfo> {
   return invoke<UpdateInfo>('check_app_update')
 }
+

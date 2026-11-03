@@ -1,6 +1,7 @@
 <script lang="ts">
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import logo from '../assets/logo.png'
+  import { t } from './i18n/index.svelte'
 
   let win: any = undefined
   try {
@@ -39,13 +40,13 @@
     <div class="tb-subtitle">Lore Progress Board</div>
   <div class="tb-spacer"></div>
   <div class="tb-controls">
-    <button class="tb-btn" onclick={doMinimize} title="Minimize">
+    <button class="tb-btn" onclick={doMinimize} title={t('gui.titlebar.minimize')}>
       <svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor"><path d="M2 6h8v1H2z"/></svg>
     </button>
-    <button class="tb-btn" onclick={doMaximize} title="Maximize">
+    <button class="tb-btn" onclick={doMaximize} title={t('gui.titlebar.maximize')}>
       <svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor"><path d="M2 2h8v8H2zm1 1v6h6V3z"/></svg>
     </button>
-    <button class="tb-btn tb-close" onclick={doClose} title="Close">
+    <button class="tb-btn tb-close" onclick={doClose} title={t('gui.titlebar.close')}>
       <svg viewBox="0 0 12 12" width="10" height="10" fill="currentColor"><path d="M2.646 2.646a.5.5 0 0 1 .708 0L6 5.293l2.646-2.647a.5.5 0 0 1 .708.708L6.707 6l2.647 2.646a.5.5 0 0 1-.708.708L6 6.707l-2.646 2.647a.5.5 0 0 1-.708-.708L5.293 6 2.646 3.354a.5.5 0 0 1 0-.708z"/></svg>
     </button>
   </div>
@@ -121,3 +122,4 @@
     color: #fff;
   }
 </style>
+

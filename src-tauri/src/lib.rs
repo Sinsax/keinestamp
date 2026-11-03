@@ -120,7 +120,7 @@ async fn record(
             );
         };
 
-        emit("git_commit", "记录中...");
+        emit("git_commit", &keinestamp::i18n::t("gui.progress.recording"));
 
         let p = PathBuf::from(&path);
         let meta = read_meta(&p)?;
@@ -172,11 +172,10 @@ async fn record(
             .sum();
         emit(
             "git_commit",
-            &format!(
-                "正在提交 {} 个文件（{:.1} MB）...",
-                changed_files.len(),
-                commit_size as f64 / 1024.0 / 1024.0
-            ),
+            &keinestamp::i18n::tf("gui.progress.committing", &[
+                ("n", &changed_files.len().to_string()),
+                ("mb", &format!("{:.1}", commit_size as f64 / 1024.0 / 1024.0)),
+            ]),
         );
 
         // 记录（回退状态下 = 顶替：Lore branch reset 后 HEAD 即回退点，新记录自然顶替）；
@@ -209,7 +208,7 @@ async fn record(
         let short_hash = hash[..7.min(hash.len())].to_string();
 
         let blender_path_buf = if needs_blender {
-            emit("blender_prepare", "准备 Blender...");
+            emit("blender_prepare", &keinestamp::i18n::t("gui.progress.blenderPrepare"));
             match keinestamp::blender_download::ensure_blender() {
                 Ok(path) => Some(path),
                 Err(e) => {
@@ -238,7 +237,7 @@ async fn record(
                     kind,
                     blender_path.map(|p| p.to_path_buf()),
                 ) else {
-                    let msg = format!("{}: 预览类型 {} 尚未实现", bf, kind.as_str());
+                    let msg = keinestamp::i18n::tf("gui.progress.previewKindUnsupported", &[("file", &bf), ("kind", kind.as_str())]);
                     eprintln!("[debug] record: {msg}");
                     preview_errors.push(msg);
                     continue;
@@ -254,11 +253,11 @@ async fn record(
                 let output_name = format!("{}_{}", short_hash, base_name);
                 let bpath = meta.project_root.join(bf);
                 let output_dir = meta.web_root.join(provider.output_subdir());
-                emit("preview_export", &format!("生成预览: {}", bf));
+                emit("preview_export", &keinestamp::i18n::tf("gui.progress.previewGenerating", &[("file", &bf)]));
                 match provider.generate(&bpath, &output_dir, &output_name) {
                     Ok(Some(path)) => generated.push((path, kind, bf.clone())),
                     Ok(None) => {
-                        let msg = format!("{}: 未能生成预览", bf);
+                        let msg = keinestamp::i18n::tf("gui.progress.previewFailed", &[("file", &bf)]);
                         eprintln!("[debug] record: {msg}");
                         preview_errors.push(msg);
                     }
@@ -286,7 +285,7 @@ async fn record(
             Vec::new()
         };
 
-        emit("timeline", "更新时间线...");
+        emit("timeline", &keinestamp::i18n::t("gui.progress.timeline"));
 
         // 时间线缓存已由 record() 内部 rebuild_cache 重建；补写全部预览路径、类型、开关与失败诊断
         let timeline_path = keinestamp::timeline::timeline_cache_path(&meta.project_root);
@@ -318,7 +317,7 @@ async fn record(
             .map(|s| s.to_string_lossy().to_string())
             .unwrap_or_default();
 
-        emit("html", "生成页面...");
+        emit("html", &keinestamp::i18n::t("gui.progress.html"));
         if let Err(e) = keinestamp::timeline::read_timeline(&timeline_path).and_then(|timeline| {
             keinestamp::html_gen::generate_index_html(
                 &meta.web_root,
@@ -334,7 +333,7 @@ async fn record(
 
         keinestamp::recent::RecentProjects::add_path(&p);
         eprintln!("[debug] record → {}", short_hash);
-        emit("done", "完成");
+        emit("done", &keinestamp::i18n::t("gui.progress.done"));
         Ok::<String, String>(short_hash)
     });
     let result: Result<String, String> = handle.await.map_err(|e| e.to_string())?;
@@ -372,7 +371,7 @@ async fn backup(path: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || {
         let p = PathBuf::from(&path);
         if !keinestamp::lore_backend::repo_exists(&p) {
-            return Err("项目尚未初始化 lore 仓库".to_string());
+            return Err(keinestamp::i18n::t("err.lore.notInitialized"));
         }
         map_err(keinestamp::lore_backend::push_to_server(&p).map(|_| ()))?;
         eprintln!("[debug] backup → ok");
@@ -416,7 +415,7 @@ async fn deploy(path: String) -> Result<(), String> {
             eprintln!("[debug] deploy → ok");
             Ok(())
         } else {
-            Err("未设置服务器地址".to_string())
+            Err(keinestamp::i18n::t("cli.deploy.noServer"))
         }
     })
     .await
@@ -529,7 +528,7 @@ async fn pull(path: String) -> Result<(), String> {
                 &meta.project_root,
             ))?;
         } else {
-            return Err("该项目没有配置远端（离线仓库），无法拉取".to_string());
+            return Err(keinestamp::i18n::t("err.lore.noRemotePull"));
         }
 
         eprintln!("[debug] pull → ok");
@@ -706,6 +705,7 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
                             "deleted_files": m.deleted_files,
                             "change_files": m.change_files,
                             "modified_files": [],
+                            "restore_modified_files": [],
                         }));
                     } else {
                         // 只有确认 HEAD 已前进（current_revision 读取成功且 != rollback_point）才清理——
@@ -722,6 +722,7 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
                             "deleted_files": [],
                             "change_files": [],
                             "modified_files": [],
+                            "restore_modified_files": [],
                         }));
                     }
                 }
@@ -732,6 +733,8 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
                     "change_files": m.change_files,
                     "modified_files": keinestamp::lore_project::rollback_modified_files(&meta.project_root)
                         .unwrap_or_default(),
+                    "restore_modified_files": keinestamp::lore_project::rollback_modified_for_restore(&meta.project_root)
+                        .unwrap_or_default(),
                 }))
             }
             Ok(None) => Ok(serde_json::json!({
@@ -740,6 +743,7 @@ async fn get_rollback_state(path: String) -> Result<serde_json::Value, String> {
                 "deleted_files": [],
                 "change_files": [],
                 "modified_files": [],
+                "restore_modified_files": [],
             })),
             Err(e) => Err(e.to_string()),
         }
@@ -831,7 +835,7 @@ async fn status(path: String) -> Result<StatusResult, String> {
         let output = if clean {
             String::new()
         } else {
-            let mut s = String::from("未提交的修改：\n");
+            let mut s = format!("{}\n", keinestamp::i18n::t("cli.status.changes"));
             for f in &files {
                 s.push_str(&format!("  {} {}\n", state_code(&f.state), f.path));
             }
@@ -911,7 +915,7 @@ fn update_config(path: String, key: String, value: Option<String>) -> Result<(),
         }
         "site_name" => {
             if meta.site_locked {
-                return Err("站点名已锁定，部署后无法修改".to_string());
+                return Err(keinestamp::i18n::t("err.config.siteNameLocked"));
             }
             let v = value.filter(|s| !s.is_empty());
             if let Some(name) = &v {
@@ -1497,6 +1501,29 @@ fn set_server_toggles(deploy_enabled: bool, lore_enabled: bool) {
 }
 
 #[tauri::command]
+fn get_locale_pref() -> String {
+    keinestamp::app_config::get_locale_pref()
+}
+
+#[tauri::command]
+fn get_effective_locale() -> keinestamp::i18n::LocaleInfo {
+    keinestamp::i18n::info()
+}
+
+/// 设置语言偏好并立即对整个进程生效（含托盘菜单）。
+/// `KEINESTAMP_LOCALE` 只影响进程启动时的默认解析，用户显式选择优先。
+#[tauri::command]
+fn set_locale_pref(app: tauri::AppHandle, pref: String) -> keinestamp::i18n::LocaleInfo {
+    eprintln!("[debug] set_locale_pref({pref})");
+    keinestamp::app_config::set_locale_pref(&pref);
+    let parsed = keinestamp::i18n::LocalePref::parse(Some(pref.as_str()));
+    let resolved = keinestamp::i18n::resolve_with(None, parsed);
+    keinestamp::i18n::set_locale(resolved);
+    refresh_tray(&app);
+    keinestamp::i18n::info()
+}
+
+#[tauri::command]
 fn get_close_action() -> Option<bool> {
     keinestamp::app_config::get_close_to_tray()
 }
@@ -1745,6 +1772,25 @@ fn open_site(url: String) -> Result<(), String> {
     Ok(())
 }
 
+/// 托盘右键菜单（文案走 i18n，切语言后重建）
+fn tray_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem};
+    let open_item = MenuItem::with_id(app, "open", keinestamp::i18n::t("gui.tray.open"), true, None::<&str>)?;
+    let quit_item = MenuItem::with_id(app, "quit", keinestamp::i18n::t("gui.tray.quit"), true, None::<&str>)?;
+    Menu::with_items(app, &[&open_item, &quit_item])
+}
+
+/// 语言切换后立即刷新托盘菜单与提示（不重启）
+fn refresh_tray(app: &tauri::AppHandle) {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        if let Ok(menu) = tray_menu(app) {
+            let _ = tray.set_menu(Some(menu));
+        }
+        let tooltip = keinestamp::i18n::t("gui.tray.tooltip");
+        let _ = tray.set_tooltip(Some(tooltip.as_str()));
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1752,7 +1798,6 @@ pub fn run() {
         // 不注册 tauri-plugin-shell：全部进程启动都走 std::process::Command 并自带
         // 参数校验，注册 shell 只会多一条"从 webview 执行命令"的通路（审查 F16）
         .setup(|app| {
-            use tauri::menu::{Menu, MenuItem};
             use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
             // 注入捆绑目录（安装包 resources/lore-bin；编译期注入的路径是构建机路径，运行时以资源目录为准）
@@ -1760,13 +1805,11 @@ pub fn run() {
                 keinestamp::lore_backend::set_bundled_lore_dir(res_dir.join("lore-bin"));
             }
 
-            let open_item = MenuItem::with_id(app, "open", "打开", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open_item, &quit_item])?;
+            let menu = tray_menu(app.handle())?;
             let icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))?;
             let _tray = TrayIconBuilder::with_id("main-tray")
                 .icon(icon)
-                .tooltip("Keinestamp（左键打开，右键菜单）")
+                .tooltip(keinestamp::i18n::t("gui.tray.tooltip"))
                 .menu(&menu)
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event| match event.id.as_ref() {
@@ -1890,6 +1933,9 @@ pub fn run() {
             get_close_action,
             set_close_action,
             resolve_close_action,
+            get_locale_pref,
+            set_locale_pref,
+            get_effective_locale,
             get_about_info,
             check_app_update,
         ])

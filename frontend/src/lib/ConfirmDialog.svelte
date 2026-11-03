@@ -1,9 +1,11 @@
 <script lang="ts">
+  import { t } from './i18n/index.svelte'
+
   let {
     title,
     message,
-    okLabel = '确认',
-    cancelLabel = '取消',
+    okLabel = '',
+    cancelLabel = '',
     danger = false,
     onConfirm,
     onCancel,
@@ -20,6 +22,10 @@
 
   // Enter 只在本对话框「没有输入焦点」时才代表确认：
   // 否则在 CommitDialog 的说明框里换行会顺手把破坏性操作执行掉（2026-10 审查 P1）
+  // 按钮文案在组件内解析（props 仅作覆盖），切换语言时自动跟随
+  const okText = $derived(okLabel || t('common.confirm'))
+  const cancelText = $derived(cancelLabel || t('common.cancel'))
+
   function isTypingTarget(target: EventTarget | null): boolean {
     const el = target as HTMLElement | null
     if (!el) return false
@@ -75,8 +81,8 @@
     </div>
     <div class="confirm-msg">{message}</div>
     <div class="actions">
-      <button onclick={onCancel}>{cancelLabel}</button>
-      <button onclick={onConfirm} class:accent={!danger} class:danger={danger}>{okLabel}</button>
+      <button onclick={onCancel}>{cancelText}</button>
+      <button onclick={onConfirm} class:accent={!danger} class:danger={danger}>{okText}</button>
     </div>
   </div>
 </div>
@@ -110,3 +116,4 @@
     margin-bottom: 16px;
   }
 </style>
+

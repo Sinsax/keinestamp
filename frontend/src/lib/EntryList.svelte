@@ -3,6 +3,7 @@
   import type { PreviewFile, TimelineEntry } from '../types'
   import { setEntryMilestone, setEntryPreview, setEntryPreviewFile, updateConfig, compareEntries, type FileDiff, type TagGroup } from '../api'
   import { previewTypeOf } from './preview'
+  import { t } from './i18n/index.svelte'
   import { resolveTagCategory, tagCategoryLabel, tagColor } from './tags'
 
   let {
@@ -341,7 +342,7 @@
       result.push({
         entry,
         showGroup,
-        groupLabel: entryTag || '其他',
+        groupLabel: entryTag || t('gui.entrylist.other'),
         groupColor: entryTag ? tagColor(entryTag) : '#6c7086',
       })
     }
@@ -355,15 +356,15 @@
 
 <div class="entries">
   <div class="entries-toolbar">
-    <span class="tl-title">时间线</span>
-    <input type="search" placeholder="搜索记录 / 流程 / 标签 / 文件..." bind:value={searchText} />
-    <select bind:value={filterCategory} title="按流程筛选">
-      <option value="">全部流程</option>
+    <span class="tl-title">{t('gui.entrylist.title')}</span>
+    <input type="search" placeholder={t('gui.entrylist.searchPlaceholder')} bind:value={searchText} />
+    <select bind:value={filterCategory} title={t('gui.entrylist.filterTitle')}>
+      <option value="">{t('gui.entrylist.allWorkflows')}</option>
       {#each categoryOptions as g (g.id)}
         <option value={g.id}>{g.label}</option>
       {/each}
     </select>
-    <button class="tl-local-btn" onclick={onOpenLocalView} title="在浏览器中打开本地时间线页面">
+    <button class="tl-local-btn" onclick={onOpenLocalView} title={t('gui.entrylist.openLocalTitle')}>
       <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c1.8 1.8 2.7 3.8 2.7 6S9.8 12.2 8 14M8 2c-1.8 1.8-2.7 3.8-2.7 6s.9 4.2 2.7 6"/></svg>
     </button>
   </div>
@@ -371,8 +372,8 @@
     {#if filteredEntries.length === 0}
       <div class="empty-state">
         <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm0 2a8 8 0 110 16 8 8 0 010-16zm-1 2v6.586l4.707 4.707 1.414-1.414L13 11.586V6h-2z"/></svg></div>
-        <div>{entries.length === 0 ? '暂无记录' : '没有匹配的记录'}</div>
-        <div style="font-size:12px">{entries.length === 0 ? '使用记录按钮记录进度' : '尝试调整搜索或筛选条件'}</div>
+        <div>{entries.length === 0 ? t('gui.entrylist.empty') : t('gui.entrylist.noMatch')}</div>
+        <div style="font-size:12px">{entries.length === 0 ? t('gui.entrylist.emptyHint') : t('gui.entrylist.noMatchHint')}</div>
       </div>
     {:else}
       {#each grouped as g, i (g.entry.id)}
@@ -390,7 +391,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="superseded-header" onclick={() => (supersededOpen = !supersededOpen)}>
           <span class="arr">{supersededOpen ? '▾' : '▸'}</span>
-          <span>被顶替记录（{supersededCount}）</span>
+          <span>{t('gui.entrylist.superseded', { n: supersededCount })}</span>
         </div>
       {/if}
       {#if !entry.superseded || supersededOpen}
@@ -421,7 +422,7 @@
         <button
           class="ms-badge"
           class:active={!!entry.milestone}
-          title={entry.milestone ? '取消里程碑' : '标记为里程碑'}
+          title={entry.milestone ? t('gui.entrylist.milestoneOff') : t('gui.entrylist.milestoneOn')}
           onclick={(e) => { e.stopPropagation(); toggleMilestone(entry); }}
         >
           <svg viewBox="0 0 16 16" width="10" height="10" fill="currentColor"><path d="M8 .6l1.9 4.6 4.9.4-3.7 3.2 1.1 4.8L8 11.2 3.8 13.6l1.1-4.8L1.2 5.6l4.9-.4L8 .6z"/></svg>
@@ -433,13 +434,13 @@
               <span
                 class="preview-badge"
                 class:active={entry.preview_enabled !== false}
-                title={entry.preview_enabled === false ? '预览已关闭（右键记录可开启）' : '该记录有预览（右键记录可关闭）'}
+                title={entry.preview_enabled === false ? t('gui.entrylist.previewOffTitle') : t('gui.entrylist.previewOnTitle')}
               >{previewLabel(entry)}</span>
             {/if}
             {#if entry.preview_errors && entry.preview_errors.length > 0}
               <span class="preview-error-badge" title={entry.preview_errors.join('\n')}>
                 <svg viewBox="0 0 16 16" width="10" height="10" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.3 14.4 13.3H1.6L8 2.3z"/><path d="M8 6.6v2.8"/><circle cx="8" cy="11.6" r="0.7" fill="currentColor" stroke="none"/></svg>
-                预览失败
+                {t('gui.entrylist.previewFailed')}
               </span>
             {/if}
             <span class="date">{entry.timestamp.slice(0, 19).replace('T', ' ')}</span>
@@ -463,18 +464,18 @@
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'details'); }}>
           <span class="arr">{hasSection(entry.id, 'details') ? '▾' : '▸'}</span>
-          <span>详情</span>
+          <span>{t('gui.entrylist.details')}</span>
         </div>
         {#if hasSection(entry.id, 'details')}
           <div class="section-body details-body">
             <div class="detail-row"><span class="detail-label">ID</span><span class="detail-value">{entry.id}</span></div>
-            <div class="detail-row"><span class="detail-label">时间</span><span class="detail-value">{entry.timestamp}</span></div>
-            <div class="detail-row"><span class="detail-label">流程</span><span class="detail-value">{categoryLabel(entry.tag_category) || '未分类'}</span></div>
-            <div class="detail-row"><span class="detail-label">标签</span><span class="detail-value">{(entry.tags && entry.tags.length > 0 ? entry.tags.join(', ') : entryTag) || '无'}</span></div>
-            <div class="detail-row"><span class="detail-label">文件</span><span class="detail-value">{entry.files.length} 个</span></div>
-            <div class="detail-row"><span class="detail-label">预览</span><span class="detail-value">{previewsOf(entry).length} 个</span></div>
+            <div class="detail-row"><span class="detail-label">{t('gui.entrylist.time')}</span><span class="detail-value">{entry.timestamp}</span></div>
+            <div class="detail-row"><span class="detail-label">{t('gui.entrylist.workflow')}</span><span class="detail-value">{categoryLabel(entry.tag_category) || t('gui.entrylist.uncategorized')}</span></div>
+            <div class="detail-row"><span class="detail-label">{t('gui.entrylist.tags')}</span><span class="detail-value">{(entry.tags && entry.tags.length > 0 ? entry.tags.join(', ') : entryTag) || t('gui.entrylist.none')}</span></div>
+            <div class="detail-row"><span class="detail-label">{t('gui.entrylist.files')}</span><span class="detail-value">{t('gui.entrylist.countSuffix', { n: entry.files.length })}</span></div>
+            <div class="detail-row"><span class="detail-label">{t('gui.entrylist.preview')}</span><span class="detail-value">{t('gui.entrylist.countSuffix', { n: previewsOf(entry).length })}</span></div>
             {#if entry.preview_errors && entry.preview_errors.length > 0}
-              <div class="detail-row"><span class="detail-label">预览错误</span><span class="detail-value">{entry.preview_errors.length} 个</span></div>
+              <div class="detail-row"><span class="detail-label">{t('gui.entrylist.previewErrors')}</span><span class="detail-value">{t('gui.entrylist.countSuffix', { n: entry.preview_errors.length })}</span></div>
             {/if}
           </div>
         {/if}
@@ -483,7 +484,7 @@
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'files'); }}>
           <span class="arr">{hasSection(entry.id, 'files') ? '▾' : '▸'}</span>
-          <span>文件变动</span>
+          <span>{t('gui.entrylist.fileChanges')}</span>
         </div>
         {#if hasSection(entry.id, 'files')}
           <div class="section-body">
@@ -501,7 +502,7 @@
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'previews'); }}>
             <span class="arr">{hasSection(entry.id, 'previews') ? '▾' : '▸'}</span>
-            <span>预览（{previewsOf(entry).length}）</span>
+            <span>{t('gui.entrylist.previewsWithCount', { n: previewsOf(entry).length })}</span>
           </div>
           {#if hasSection(entry.id, 'previews')}
             <div class="section-body preview-list">
@@ -515,7 +516,7 @@
                     onclick={(e) => { e.stopPropagation(); togglePreviewFile(entry, p) }}
                     disabled={previewBusy === entry.id + ':' + p.path}
                   >
-                    {p.enabled === false ? '关' : '开'}
+                    {p.enabled === false ? t('gui.entrylist.off') : t('gui.entrylist.on')}
                   </button>
                 </div>
               {/each}
@@ -527,7 +528,7 @@
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
           <div class="section-header" onclick={(e) => { e.stopPropagation(); toggleSection(entry.id, 'previewErrors'); }}>
             <span class="arr">{hasSection(entry.id, 'previewErrors') ? '▾' : '▸'}</span>
-            <span>预览错误（{entry.preview_errors.length}）</span>
+            <span>{t('gui.entrylist.previewErrorsWithCount', { n: entry.preview_errors.length })}</span>
           </div>
           {#if hasSection(entry.id, 'previewErrors')}
             <div class="section-body preview-error-list">
@@ -548,18 +549,18 @@
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="ctx-overlay" onclick={closeCtx} oncontextmenu={(e) => { e.preventDefault(); closeCtx(); }}></div>
     <div class="ctx-menu" style="left:{menu.x}px;top:{menu.y}px">
-      <button class="ctx-item" onclick={ctxExport}>导出</button>
+      <button class="ctx-item" onclick={ctxExport}>{t('common.export')}</button>
       <button
         class="ctx-item"
         onclick={ctxCompare}
         disabled={entries.findIndex((e) => e.id === menu.entry.id) < 0 || entries.findIndex((e) => e.id === menu.entry.id) + 1 >= entries.length}
-      >对比上一记录</button>
+      >{t('gui.entrylist.comparePrev')}</button>
       {#if menu.entry.preview}
         <button class="ctx-item" onclick={ctxTogglePreview} disabled={previewBusy === menu.entry.id}>
-          {menu.entry.preview_enabled === false ? '开启全部预览' : '关闭全部预览'}
+          {menu.entry.preview_enabled === false ? t('gui.entrylist.enableAllPreviews') : t('gui.entrylist.disableAllPreviews')}
         </button>
       {/if}
-      <button class="ctx-item" onclick={ctxRollback} disabled={ctxRollbackDisabled} title={rollbackPoint ? '该记录为当前回退点，不可回退' : ''}>回退</button>
+      <button class="ctx-item" onclick={ctxRollback} disabled={ctxRollbackDisabled} title={rollbackPoint ? t('gui.entrylist.rollbackPointTitle') : ''}>{t('gui.entrylist.rollback')}</button>
     </div>
   {/if}
 
@@ -572,7 +573,7 @@
         </div>
         <div class="compare-body">
           {#if compareResult.diffs.length === 0}
-            <div class="compare-empty">无差异</div>
+            <div class="compare-empty">{t('gui.entrylist.noDiff')}</div>
           {:else}
             {#each compareResult.diffs as d}
               <div class="compare-file">
@@ -587,13 +588,13 @@
   {/if}
   <div class="entries-footer">
     <div class="at-section">
-      <label for="el-site-name">网页名称</label>
+      <label for="el-site-name">{t('gui.entrylist.siteName')}</label>
       {#if siteLocked}
         <div class="at-row">
           <div class="at-masked site-name-display" title={siteName}>{siteName}</div>
-          <button class="at-save-btn site-open-btn" onclick={onOpenSite} title="在浏览器中打开部署的网页">
+          <button class="at-save-btn site-open-btn" onclick={onOpenSite} title={t('gui.entrylist.openSiteTitle')}>
             <svg viewBox="0 0 16 16" width="12" height="12" fill="currentColor"><path d="M6.354 5.5H4a3 3 0 0 0 0 6h3a3 3 0 0 0 2.83-4H9c-.086 0-.17.01-.25.031a2 2 0 0 1-2.29 2.969A2 2 0 0 1 4 8.5v-.5h2.354a1 1 0 0 0 0-2zM12 4.5H9a3 3 0 0 0-2.83 4h1.049a2 2 0 0 1 2.29-2.969A2 2 0 0 1 12 7.5v.5H9.646a1 1 0 0 0 0 2H12a3 3 0 0 0 0-6z"/></svg>
-            打开网页
+            {t('gui.entrylist.openSite')}
           </button>
         </div>
       {:else}
@@ -603,7 +604,7 @@
             id="el-site-name"
             class="at-input"
             bind:value={siteInput}
-            placeholder="站点名（仅限英文、数字、- 和 _）"
+            placeholder={t('gui.entrylist.siteNamePlaceholder')}
             onkeydown={(e) => { if (e.key === 'Enter') saveSiteName() }}
           />
           <button
@@ -612,14 +613,14 @@
             onclick={saveSiteName}
             disabled={siteSaving || !siteDirty}
           >
-            {siteSaving ? '保存中...' : siteDirty ? '保存' : '已保存'}
+            {siteSaving ? t('gui.entrylist.saving') : siteDirty ? t('gui.entrylist.save') : t('gui.entrylist.saved')}
           </button>
         </div>
-        <div class="site-hint">部署后锁定，作为站点访问地址</div>
+        <div class="site-hint">{t('gui.entrylist.siteHint')}</div>
       {/if}
     </div>
     <div class="at-section">
-      <label for="el-access-token">网页访问令牌</label>
+      <label for="el-access-token">{t('gui.entrylist.accessToken')}</label>
       <div class="at-row">
         {#if editingToken}
           <input
@@ -627,10 +628,10 @@
             id="el-access-token"
             class="at-input"
             bind:value={tokenInput}
-            placeholder="访问令牌"
+            placeholder={t('gui.entrylist.accessTokenPlaceholder')}
           />
           {#if !tokenInput}
-            <button class="at-gen-btn" onclick={handleGenToken}>随机生成</button>
+            <button class="at-gen-btn" onclick={handleGenToken}>{t('gui.entrylist.generate')}</button>
           {/if}
           <button
             class="at-save-btn"
@@ -638,7 +639,7 @@
             onclick={saveToken}
             disabled={tokenSaving || !isDirty}
           >
-            {tokenSaving ? '保存中...' : isDirty ? '保存' : '已保存'}
+            {tokenSaving ? t('gui.entrylist.saving') : isDirty ? t('gui.entrylist.save') : t('gui.entrylist.saved')}
           </button>
         {:else if accessToken}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -647,18 +648,18 @@
             class:copied={copyFeedback}
             onclick={copyToken}
             ondblclick={() => { editingToken = true; tokenInput = accessToken }}
-            title="单击复制，双击编辑"
+            title={t('gui.entrylist.copyEditTitle')}
           >
             {#if copyFeedback}
-              已复制!
+              {t('gui.entrylist.copied')}
             {:else}
               {'*'.repeat(Math.min(accessToken.length, 16))}
             {/if}
           </div>
         {:else}
           <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-          <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title="点击设置访问令牌">
-            - 未设置 -
+          <div class="at-empty" onclick={() => { editingToken = true; tokenInput = '' }} title={t('gui.entrylist.setTokenTitle')}>
+            {t('gui.entrylist.notSet')}
           </div>
         {/if}
       </div>
@@ -1296,3 +1297,4 @@
     cursor: default;
   }
 </style>
+

@@ -151,7 +151,7 @@ const INDEX_HTML: &str = r#"<!DOCTYPE html>
 <title>Keinestamp</title>
 </head>
 <body>
-<p>Keinestamp - 进度追踪</p>
+<p>Keinestamp - Progress tracking</p>
 </body>
 </html>
 "#;

@@ -5,7 +5,7 @@ Single-binary CLI + Tauri GUI **二进制工程进度看板**（Blender 优先�
 ## Commands
 
 ```powershell
-cargo test                          # 224 unit + 12 integration + doctest
+cargo test                          # 250 unit + 12 integration + doctest
 cargo test --lib <module>           # Single module (config/detect/init/lore_backend/lore_project/...)
 cargo test --test cli_tests         # Integration only
 cargo run -- init <path>            # CLI entry
@@ -14,6 +14,18 @@ cd frontend; npm run check          # svelte-check + tsc (no other lint/format)
 ```
 
 **Lore 依赖**：**构建时自动捆绑**（build.rs 按平台下载 v0.8.6 的 `lore`+`loreserver` 到 `src-tauri/resources/lore-bin/`，sha256 校验，缺失/失败 → 构建失败；**自动拷贝到构建产物目录 `target/<profile>/lore-bin`（exe 同目录）**；Tauri resources 打包、CLI 分发 = exe + 同目录 lore-bin 两件套）。**国内网络/离线构建**（build.rs 支持，按优先级）：① `KEINESTAMP_LORE_ARCHIVE_DIR` = 本地目录放两份官方资产压缩包（离线构建，仍 sha256 校验）；② `KEINESTAMP_LORE_RELEASE_BASE` = 自定义镜像 base（布局同 GitHub Releases）；③ 默认官方 GitHub → 公共加速代理（gh-proxy.com 等）回退，每源重试 3 次；④ 从其他机器拷贝整份 `lore-bin` 到 `src-tauri/resources/lore-bin/` 直接跳过下载。运行时查找：`KEINESTAMP_LORE_BIN` env → exe 同目录 `lore-bin/` → Tauri resource_dir 注入 → 平台默认（Windows `C:\Users\para\AppData\Local\lore\bin\lore.exe` / Linux `lore` PATH）。**启动检测**（`check_lore_env`：`--version` 精确 == 0.8.6）：CLI 命令前、serve 启动（拒绝启动）、GUI 启动（弹窗 + ActionBar 操作禁用）。Lore 为 MIT 许可（© Epic Games, Inc.），捆绑附带 LICENSE。**tauri.conf.json 的 resources glob 用 `*`（`**` 不被 tauri 接受）；文件勿用 PowerShell Set-Content 写（会加 BOM 破坏 JSON）**。
+
+## 多语言（i18n）
+
+- **唯一 catalog**：仓库根 `i18n/{zh-CN,en-US}.json`，前端（`frontend/src/lib/i18n`）与 Rust（`src/i18n.rs`）读**同一份**文件，不要复制到别处。键命名 `surface.area.item`（surface ∈ common/gui/cli/err/web），占位符 `{name}`，复数写成 `key.one`/`key.other`
+- **取值优先级**：`KEINESTAMP_LOCALE` env → `AppConfig.locale`（`system`/`zh-CN`/`en-US`，省略/空=跟随系统）→ 系统语言（Windows 直接调 kernel32 `GetUserDefaultLocaleName`，Unix 读 `LC_ALL/LC_MESSAGES/LANG`）→ `zh-CN`
+- **API**：Rust `i18n::t`/`tf`/`tn`/`t_for`/`render`/`lookup`；前端 `t()`/`tn()`，key 由 zh-CN.json 结构推导成联合类型（拼错即 `npm run check` 报错）
+- **cargo test 强制约束**：① 两份 catalog 展平后键集完全相同（`web.` 前缀豁免）；② 扫描 `src/**/*.rs` 与 `src-tauri/src/**/*.rs` 里的 `t("…")` 字面量，键必须存在（含 `{` 的动态键跳过，改由 `cli_subcommand_abouts_exist` 兜底）
+- **错误码（必须）**：控制流不得依赖自然语言。后端 `i18n::coded("offline_repo", 消息)` → `[code:offline_repo]消息`；前端 `errorCode(msg)` 分支、`stripErrorCode(msg)` 展示（`frontend/src/lib/errors.ts`）。历史实现曾用 `msg.includes('离线创建')`，一改语言即静默失效
+- **CLI**：`main.rs` 的 `localized_command()` 给 clap 的 about / 参数 help 打补丁；clap 自动生成的 Usage 与参数报错骨架是库内固定英文，不逐条定制
+- **网页端恒英文**：`html_gen.rs`、`serve.rs`、`init.rs` 的页面文案直接写英文（页面不参与双语），`<html lang="en">`；服务器/CLI 控制台输出仍走 catalog
+- **测试**：`tests/cli_tests.rs` 的 `run()` 固定 `KEINESTAMP_LOCALE=zh-CN`，中文断言不受开发机系统语言影响
+- **切换语言**：设置 → 通用 → 语言（跟随系统 / 简体中文 / English），即时生效；托盘菜单重建，前端靠 `localeEpoch()` 触发状态/时间线重新拉取
 
 ## Architecture
 
@@ -70,14 +82,14 @@ Build order (crate): config → detect → init → lore_backend → lore_projec
   - 点开头文件不可 stage（`Invalid path`）→ `.loreignore` 自动记录用 `lore --force stage`（实测可用）
 - **Git safety 不适用**：v2 无 git；禁止在项目里建 git 仓库（集成测试除外）
 - **MetaConfig** (`.keinestamp/.keinestamp.toml`)：`version`, `init_time`, `project_root`, `web_root`, `access_token`, `project_id`, `site_name`, `site_locked`（结构与 v1 相同；位于 `.keinestamp/` 私有目录，被 loreignore 排除，不参与提交）
-- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`)：`blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`, `close_to_tray`, `lore_server_url`
+- **AppConfig** (`%APPDATA%/Keinestamp/app-config.toml`)：`blender_path`, `deploy_token`, `deploy_server_url`, `auto_connect`, `close_to_tray`, `lore_server_url`, `locale`（`system`/`zh-CN`/`en-US`，省略 = 跟随系统）
 - **web 产物**：`.keinestamp/web/` 子目录（程序私有，loreignore 整体隔离），html_gen 输出 + timeline.json 缓存；**不入库**（commit_web 已删除）；zip 打包上传（push.rs）；web 版本号 = `.keinestamp/web-version` 本地计数器（`web_revision_count`/`bump_web_version`）
 - **Atomic writes**: Temp file + fsync + rename（`process_util::atomic_write`，临时名 = PID + 纳秒 + 目标名）。`timeline.json` / `.keinestamp.toml` / 部署注册表 / `.loreignore` 都走它；入口页 index.html 与 init 首次写入例外（写失败重建即可）
 - **init idempotent**: Re-init fills gaps, does not overwrite `init_time`
 - **UNC paths**: Frontend `normalizePath()` strips `\\?\` prefix at entry. `open_folder`/`open_web_timeline` also strip before passing to OS commands
 - **Export**: `lore repository dump` 解析文件树 + 逐文件 `lore file write`（不支持目录级 write）
 - **Chinese filenames**: Lore 原生 UTF-8，无需 quotepath 处理
-- **CLI output**: 中文标签（`已提交`、`已回退到记录 ...`、`已恢复回退前的状态`、`已推送到远端`）。Log 格式：`  {short_hash}  {date}  {author}  ({file_count} 文件)`
+- **CLI output**: 标签跟随界面语言（`已提交` / `Committed`、`已回退到记录 ...` / `Rolled back to before record ...`）；Log 格式 `  {short_hash}  {date}  {author}  ({file_count} 文件)`。**集成测试固定 `KEINESTAMP_LOCALE=zh-CN`**
 - **serve → loreserver**：serve.toml `enable_loreserver = true` 时启动探测 41339 health，离线则 spawn `loreserver --config <程序目录>/lore-server-config`（首次生成 local.toml：`[immutable_store.local].path` / `[mutable_store.local].path` → store 持久化于 `<程序目录>/lore-server-store`，重启数据保留）；在线则跳过；serve 退出时 kill 拉起的实例（外部已在线不杀）。启动后解析子进程输出打印结构化信息（`parse_loreserver_info`：版本 / store 路径 / auth 状态）+ 常驻读取线程转发后续输出（防管道阻塞）
 - **备份**（2026-08-11 实测定稿）：GUI 备份 = `push_to_server`：读配置地址（app-config `lore_server_url`，默认 `lore://127.0.0.1:41337`）→ health 探测（`http://host:41339/health_check`）→ **仓库必须在线创建**（`lore repository create lore://host:port/<名>`，remote_url 自动绑定；**离线仓库 push 输出"Pushed"但数据不到服务器**，备份报"该项目为离线创建"）→ `lore push`（首推自动建分支，增量推送）。CLI `push` 同流程；`lore commit <MESSAGE>` 是位置参数（`-m` 不存在）；`lore repository config set` 不存在（remote_url 改 config.toml）。**loreserver 无认证（auth: None）**——仅限可信局域网，设置 UI 已标注
 - **离线仓库迁移**（`migrate_offline_to_online`，实测）：离线仓库无法直接备份——`repository create <url>/<名> --id <同ID>` 预注册（空目录，服务器按 ID 绑定名字，**本地 store/hash/历史全保留**）→ 设 remote_url → push 全量；失败清理服务器残留。GUI：备份时检测离线 → 弹窗「迁移并备份」引导；校验：无回退态
@@ -142,7 +154,7 @@ cd src-tauri; cargo build         # Backend only
 | `get_rollback_state` | `{rollback_point, head_matches}` | marker 读取；head_matches = current == rollback_point |
 | `restore_rollback` | `()` | 撤销回退（branch reset 回 head_before） |
 | `get_rollback_conflicts` / `keep_rollback_file` / `resolve_rollback_conflicts` | `[]` / `()` | v1 兼容签名，Lore 无 git 式冲突（UI 已移除） |
-| `status` | `{clean, output}` | `changed_files`（过滤隐藏）；output 中文标签 `未提交的修改：` + `  {A/M/D/??} {path}` |
+| `status` | `{clean, output}` | `changed_files`（过滤隐藏）；output = 本地化节头 + `  {A/M/D/??} {path}`（前端只按结构解析，不匹配节头文字） |
 | `discard_file` | `()` | 取消单个文件更改（git restore）：`lore file reset <path>` 还原 HEAD——M 覆盖回 HEAD / D 从 HEAD 恢复（file reset 不建父目录，先 create_dir_all）；前端菜单仅 M/D 显示，M 弹确认框（2026-08-13） |
 | `log` / `get_project_log` | `LogEntry[]` / `String[]` | revision_history 过滤 kind=web |
 | `read_config` / `update_config` | 同 v1 | site_name 校验 ASCII + 锁定 |
@@ -166,12 +178,12 @@ All in `frontend/src/`（组件在 `lib/`）。Key files:
 
 - `App.svelte` — 主布局、状态、**10s 轮询**（**不因 `document.hidden` 跳过**——用户常年在资源管理器删文件，窗口在后台；改用 `pollStatus` 单飞去重防叠加，并在 window focus / visibilitychange 立即补一次刷新）；`lore status` 实测 ~4s 是**在线仓库 + loreserver 离线时 remote 连接超时**——`run_lore` 统一强制 `--offline` 后本地操作全部毫秒级；push/sync/clone/list/delete/migrate create 等远程命令用 `run_lore_remote` 不带）；`status`/`get_rollback_state`/`get_project_log`/`check_lore_env` 均 **async + spawn_blocking**（同步命令会阻塞主线程导致 UI 冻结）；**run_lore 全局串行锁 + 分级超时**（只读命令 60s；stage/unstage/commit/status --scan 等会写 `.lore/mutable` 的命令 30min——1GB+ 资源慢盘写入超 60s 被 kill 会造成 mutable state 半写损坏 `Not found deserializing state`）；**record 的 Blender 预览只在 `preview_files` 实际包含可预览目标时准备 Blender**（`Some([])` = 无预览标记，不碰 Blender，避免下载/启动被误认为记录卡死）；**`revision_parent` 读 timeline 缓存**（`TimelineEntry.parent` 主线推导，零 lore 调用；旧缓存 fallback lore info）；`lore service` 0.8.6 实测不可用；GUI 回退/恢复**命令完成即清遮罩 + toast**（loadProject 后台刷新，避免"完成提示后转圈"）。恢复按钮（`rollback_point && head_matches` 时可用）；备份按钮接线；无冲突对话框（v2 已删 ConflictDialog）
 - **store GC 语义**（2026-08-12 实测）：lore 分块 store 会清理「远端已有副本的本地孤儿块」——**在线仓库（push 过）** 的孤儿/历史块可被 `repository gc`/维护清理 → 回退被顶替记录报 `Address not found`（36_mine2 事故）；**离线仓库 GC 不删块**（本地唯一副本）；`run_lore` 统一带 **`--no-gc`** 阻止自动增量 GC（只读命令无副作用；显式 `repository gc` 仍可跑）；`Address not found` 由 `translate_lore_error` 转译为中文（"数据已不在本地存储：可能被清理或尚未从服务器下载"）；**clone 只下载最新状态** → `clone_repo_to` 后 `fetch_full_history`（逐 revision `repository dump` 在线拉全历史块，尽力而为）；**回退失败（首次）自动还原备份**（rollback_inner 失败 → `restore_backup_at`，避免 dirty 文件"消失"后下次回退清空备份目录丢数据）；**web 产物 dirty 卡 branch reset**：跳 web 父后 diff 含 web 提交改动 → 回退检出 `.keinestamp/web/` 文件（index.html/glb）→ 应用层 hidden 过滤看不到、lore 校验 tracked dirty 拒绝 reset → 修复：`revision_changes` 过滤 `.keinestamp/web/` 路径（不检出 web 产物）+ `reset_hidden_dirty`（branch reset 前从 HEAD 树 dump 取隐藏 tracked 清单 `file reset --force` 还原，loreignore 文件如 timeline.json status 不可见但 reset 仍校验，须 --force）接入 rollback_inner 与 finish_rollback_restore
-- `lib/SettingsDialog.svelte` — 四页：**Blender · 标签 · 服务器 · 关于**（标签文字从「Blender / 通用」「流程 / 标签」「服务器 / 远端仓库」简化，2026-11-02）。关于页切过去才读取：版本 / Lore 运行时 / 程序与配置目录 / 更新检查，失败如实显示、不弹窗；无新版/离线不阻塞；只读页无底部按钮（点遮罩关闭），有新版时状态行版本号可点击打开发布页。流程 / 标签为项目级（`.keinestamp/tags.toml`）：流程增删改名、每个流程的标签增删、恢复默认；默认仅 Blender 流程（原「建模流程」改名）；保存后 `onTagGroupsSaved` 回传主界面，记录弹窗与时间线筛选即时刷新
+- `lib/SettingsDialog.svelte` — 四页：**通用 · 标签 · 服务器 · 关于**（2026-11-03 由「Blender」改名，并把「Blender 版本管理」区块移到「通用」区块**下方**：通用=自动恢复/语言/提交身份/关闭行为）。关于页切过去才读取：版本 / Lore 运行时 / 程序与配置目录 / 更新检查，失败如实显示、不弹窗；无新版/离线不阻塞；只读页无底部按钮（点遮罩关闭），有新版时状态行版本号可点击打开发布页。流程 / 标签为项目级（`.keinestamp/tags.toml`）：卡片式（每个流程一张卡：名称输入 + 标签数 + 折叠式「+ 添加标签」），删除流程需**二次点击确认**（4s 超时还原），标题旁 `?` 气泡说明用法；流程增删改名、标签增删、恢复默认；默认仅 Blender 流程（原「建模流程」改名）；保存后 `onTagGroupsSaved` 回传主界面，记录弹窗与时间线筛选即时刷新
 - `lib/ActionBar.svelte` — 记录 / 恢复 / 备份 / 部署
 - `lib/EntryList.svelte` — 时间线卡片（id = lore revision sig）、★ milestone、右键导出/回退、回退点灰显；**「文本改动」区块已删除**（2026-08-12：diff 展示依赖 file_status（后端恒空）导致 A 状态误显，直接移除——只需「文件变动」；`get_file_diff`/`file_diff` 后端命令同步删除）
 - `lib/StatusPanel.svelte` — 变更面板（lore status 中文格式解析），勾选提交（files 参数），右键忽略/隐藏
 - `lib/CommitDialog.svelte` — 记录弹窗（无回退警告，v2 顶替正常）
-- `lib/statusParse.ts` — 解析 `未提交的修改：` + `  {code} {path}` 格式
+- `lib/statusParse.ts` — 只按结构解析 `  {code} {path}`（节头随语言变化，不参与匹配）；状态标签走 i18n
 - `api.ts` — Tauri invoke wrappers；`types.ts` — Interfaces（含 rollback_marker）
 - 其余（TitleBar/ProjectTabs/Toast/BusyOverlay/DetailPanel/ConfirmDialog/InputDialog/CloseBehaviorDialog/StatusBar/Sidebar/DirTree）— 同 v1
 

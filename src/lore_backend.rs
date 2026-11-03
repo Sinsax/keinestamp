@@ -113,28 +113,15 @@ pub fn check_lore_env_at(bin: &str) -> Result<LoreEnvInfo> {
         .arg("--version")
         .output()
         .map_err(|e| {
-            anyhow::anyhow!(
-                "未找到 lore（{}）：{}（请重新构建，build.rs 自动捆绑 v{}）",
-                bin,
-                e,
-                LORE_MIN_VERSION
-            )
+            anyhow::anyhow!(crate::i18n::tf("err.lore.notFound", &[("bin", &bin.to_string()), ("error", &e.to_string()), ("version", LORE_MIN_VERSION)]))
         })?;
     let stdout = String::from_utf8_lossy(&out.stdout).to_string();
     let Some(v) = parse_lore_version(&stdout) else {
-        bail!("lore 版本解析失败：{}（{}）", stdout.trim(), bin);
+        bail!("{}", crate::i18n::tf("err.lore.versionParseFailed", &[("output", stdout.trim()), ("bin", &bin.to_string())]));
     };
     let want = parse_lore_version(LORE_MIN_VERSION).expect("LORE_MIN_VERSION 解析失败");
     if v != want {
-        bail!(
-            "需要 Lore v{}，检测到 {}.{}.{}（{}）——请重新构建（build.rs 自动捆绑 v{}）",
-            LORE_MIN_VERSION,
-            v.0,
-            v.1,
-            v.2,
-            bin,
-            LORE_MIN_VERSION
-        );
+        bail!("{}", crate::i18n::tf("err.lore.versionMismatch", &[("want", LORE_MIN_VERSION), ("got", &format!("{}.{}.{}", v.0, v.1, v.2)), ("bin", &bin.to_string())]));
     }
     Ok(LoreEnvInfo {
         bin: bin.to_string(),
@@ -259,10 +246,7 @@ fn run_lore_at(cwd: Option<&Path>, args: &[&str], offline: bool) -> Result<Strin
 pub fn translate_lore_error(stderr: &str) -> String {
     let trimmed = stderr.trim();
     if trimmed.contains("Address not found") {
-        format!(
-            "{}（该记录的数据已不在本地存储：可能被存储清理或尚未从服务器下载，无法读取）",
-            trimmed
-        )
+        crate::i18n::tf("err.lore.addressNotFound", &[("message", trimmed)])
     } else {
         trimmed.to_string()
     }
@@ -297,7 +281,7 @@ fn copy_dir_all(src: &Path, dst: &Path) -> Result<()> {
 pub fn backup_mutable_state(project_root: &Path) -> Result<PathBuf> {
     let src = project_root.join(".lore").join("mutable");
     if !src.is_dir() {
-        bail!("缺少 .lore/mutable：{}", src.display());
+        bail!("{}", crate::i18n::tf("err.lore.missingMutable", &[("path", &src.display().to_string())]));
     }
     let token = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -408,7 +392,7 @@ fn parse_staged_paths(out: &str) -> Result<Vec<String>> {
         if matches!(first, 'A' | 'M' | 'D') {
             let p = clean_status_path(&l[1..]);
             if p.is_empty() {
-                bail!("lore status staged 行路径为空：{:?}", line);
+                bail!("{}", crate::i18n::tf("err.lore.stagedPathEmpty", &[("line", &format!("{:?}", line))]));
             }
             paths.push(p);
         } else if first == 'V' {
@@ -421,17 +405,14 @@ fn parse_staged_paths(out: &str) -> Result<Vec<String>> {
                 .unwrap_or(&p)
                 .to_string();
             if p.is_empty() {
-                bail!("lore status staged move 行路径为空：{:?}", line);
+                bail!("{}", crate::i18n::tf("err.lore.stagedMovePathEmpty", &[("line", &format!("{:?}", line))]));
             }
             paths.push(p);
         } else if l.starts_with("Tracked changes") {
             // 统计行（`Tracked changes: N added`）不是路径
             continue;
         } else {
-            bail!(
-                "无法解析 lore status staged 行（请先处理该文件后再记录）：{:?}",
-                line
-            );
+            bail!("{}", crate::i18n::tf("err.lore.stagedUnparsable", &[("line", &format!("{:?}", line))]));
         }
     }
     Ok(paths)
@@ -460,10 +441,7 @@ pub fn unstage_all(project_root: &Path) -> Result<()> {
     // 下一次 commit 会把残留 staged 一并提交——"没勾选/已删除的文件也进了记录"的直接原因。
     let remaining = staged_paths(project_root)?;
     if !remaining.is_empty() {
-        bail!(
-            "清理残留 staged 失败，仍处于 staged 状态：{}",
-            remaining.join(", ")
-        );
+        bail!("{}", crate::i18n::tf("err.lore.unstageResidual", &[("paths", &remaining.join(", "))]));
     }
     Ok(())
 }
@@ -556,10 +534,7 @@ fn ensure_only_expected_staged(
     }
     let unexpected = staged_unexpected(project_root, expected_files, always_allowed)?;
     if !unexpected.is_empty() {
-        bail!(
-            "存在未勾选且无法排除的 staged 内容，已中止提交：{}",
-            unexpected.join(", ")
-        );
+        bail!("{}", crate::i18n::tf("err.lore.unexpectedStaged", &[("paths", &unexpected.join(", "))]));
     }
     Ok(())
 }
@@ -712,7 +687,7 @@ fn commit_staged(project_root: &Path, message: &str, metadata: &[(&str, &str)]) 
     );
     let out = run_lore(project_root, &["--identity", &identity, "commit", message])?;
     eprintln!("[debug] commit_staged output:\n{}", out);
-    parse_commit_signature(&out).context("commit 输出解析失败：未找到 Signature 行")
+    parse_commit_signature(&out).context(crate::i18n::t("err.lore.commitParseFailed"))
 }
 
 fn parse_commit_signature(out: &str) -> Option<String> {
@@ -964,7 +939,7 @@ pub fn force_init_commit(project_root: &Path) -> Result<String> {
             &["--force", "stage", crate::hidden::LOREIGNORE],
         )?;
         if out.contains("[Error]") {
-            bail!("init 提交 stage 失败：{}", out);
+            bail!("{}", crate::i18n::tf("err.lore.initStageFailed", &[("output", &out)]));
         }
         commit_staged(project_root, "init", &[("kind", "init")])
     })
@@ -1076,7 +1051,7 @@ pub fn export_files(project_root: &Path, revision: &str, dest: &Path) -> Result<
         written += 1;
     }
     if written == 0 {
-        bail!("dump 中未解析到任何文件（revision {}）", revision);
+        bail!("{}", crate::i18n::tf("err.lore.dumpEmpty", &[("revision", revision)]));
     }
     Ok(())
 }
@@ -1098,7 +1073,7 @@ pub fn current_revision(project_root: &Path) -> Result<String> {
                 None
             }
         })
-        .context("status --revision-only 输出解析失败：未找到 On branch 行")
+        .context(crate::i18n::t("err.lore.statusParseFailed"))
 }
 
 /// 回退/撤销回退/顶替：重置分支 latest 指针并同步工作区到指定 revision。
@@ -1166,7 +1141,10 @@ pub fn has_remote_url(project_root: &Path) -> bool {
 /// 3. `lore push`（首推自动建分支，增量推送）
 pub fn push_to_server(project_root: &Path) -> Result<String> {
     if !has_remote_url(project_root) {
-        bail!("该项目为离线创建，暂不支持备份（备份需在线创建仓库）");
+        bail!(
+            "{}",
+            crate::i18n::coded("offline_repo", crate::i18n::t("err.backup.offlineRepo"))
+        );
     }
     let url = crate::app_config::get_lore_server_url();
     let host = url
@@ -1175,7 +1153,7 @@ pub fn push_to_server(project_root: &Path) -> Result<String> {
         .next()
         .unwrap_or("127.0.0.1");
     if !lore_server_health(host) {
-        bail!("loreserver 不可达（{}），请确认服务端已启动", url);
+        bail!("{}", crate::i18n::tf("err.lore.loreserverUnreachable", &[("url", &url.to_string())]));
     }
     run_lore_remote(project_root, &["push"])
 }
@@ -1189,7 +1167,7 @@ pub fn list_server_repos(url: &str) -> Result<Vec<(String, String)>> {
         .next()
         .unwrap_or("127.0.0.1");
     if !lore_server_health(host) {
-        bail!("loreserver 不可达（{}），请确认服务端已启动", url);
+        bail!("{}", crate::i18n::tf("err.lore.loreserverUnreachable", &[("url", &url.to_string())]));
     }
     let out = run_lore_global(&["repository", "list", url])?;
     let mut repos = Vec::new();
@@ -1212,7 +1190,7 @@ pub fn list_server_repos(url: &str) -> Result<Vec<(String, String)>> {
 pub fn clone_repo_to(url: &str, name: &str, dest_parent: &Path) -> Result<PathBuf> {
     let dest = dest_parent.join(name);
     if dest.exists() {
-        bail!("本地已存在同名目录：{}", dest.display());
+        bail!("{}", crate::i18n::tf("err.lore.cloneDestExists", &[("path", &dest.display().to_string())]));
     }
     std::fs::create_dir_all(&dest)?;
     let clone_url = format!("{}/{}", url.trim_end_matches('/'), name);
@@ -1226,7 +1204,7 @@ pub fn clone_repo_to(url: &str, name: &str, dest_parent: &Path) -> Result<PathBu
     };
     if out.contains("[Error]") {
         let _ = std::fs::remove_dir_all(&dest);
-        bail!("克隆失败：{}", out.trim());
+        bail!("{}", crate::i18n::tf("err.lore.cloneFailed", &[("output", out.trim())]));
     }
     // clone 只下载最新状态，历史块按需从远端拉取；拉全量历史块，
     // 否则 --offline 的 history/回退/记录会因本地缺块报 Address not found（尽力而为）
@@ -1261,7 +1239,7 @@ pub fn delete_server_repo(url: &str, name: &str) -> Result<()> {
         .next()
         .unwrap_or("127.0.0.1");
     if !lore_server_health(host) {
-        bail!("loreserver 不可达（{}），请确认服务端已启动", url);
+        bail!("{}", crate::i18n::tf("err.lore.loreserverUnreachable", &[("url", &url.to_string())]));
     }
     let delete_url = format!("{}/{}", url.trim_end_matches('/'), name);
     run_lore_global(&["repository", "delete", &delete_url])?;
@@ -1274,13 +1252,13 @@ pub fn delete_server_repo(url: &str, name: &str) -> Result<()> {
 /// 设置 config.toml remote_url → `lore push` 全量。push 失败时清理服务器残留注册。
 pub fn migrate_offline_to_online(project_root: &Path) -> Result<()> {
     if has_remote_url(project_root) {
-        bail!("该仓库已是在线仓库，无需迁移");
+        bail!("{}", crate::i18n::t("err.lore.alreadyOnline"));
     }
     if crate::timeline::read_marker(project_root)?.is_some() {
-        bail!("存在回退状态，请先恢复或记录后再迁移");
+        bail!("{}", crate::i18n::t("err.lore.rollbackActive"));
     }
     let id_bytes = std::fs::read(project_root.join(".lore").join("id"))
-        .context("读取仓库 ID 失败（.lore/id）")?;
+        .context(crate::i18n::t("err.lore.readRepoIdFailed"))?;
     let id: String = id_bytes.iter().map(|b| format!("{:02x}", b)).collect();
 
     let url = crate::app_config::get_lore_server_url();
@@ -1290,7 +1268,7 @@ pub fn migrate_offline_to_online(project_root: &Path) -> Result<()> {
         .next()
         .unwrap_or("127.0.0.1");
     if !lore_server_health(host) {
-        bail!("loreserver 不可达（{}），请确认服务端已启动", url);
+        bail!("{}", crate::i18n::tf("err.lore.loreserverUnreachable", &[("url", &url.to_string())]));
     }
     let name = ascii_repo_name(
         &project_root
@@ -1311,7 +1289,7 @@ pub fn migrate_offline_to_online(project_root: &Path) -> Result<()> {
     };
     let _ = std::fs::remove_dir_all(&tmp);
     if out.contains("[Error]") {
-        bail!("服务器注册失败：{}", out.trim());
+        bail!("{}", crate::i18n::tf("err.lore.registerFailed", &[("output", out.trim())]));
     }
     // 设置 remote_url（config.toml，幂等）
     let cfg_path = project_root.join(".lore").join("config.toml");
@@ -1818,7 +1796,7 @@ M a.txt (M)
         create_repo(&root).unwrap();
         // 离线仓库：即使服务器在线也明确报错（不产生假成功）
         let err = push_to_server(&root).unwrap_err();
-        assert!(err.to_string().contains("离线创建"), "err: {err}");
+        assert!(err.to_string().contains("[code:offline_repo]"), "err: {err}");
     }
 
     #[test]

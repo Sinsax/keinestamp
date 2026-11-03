@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount, onDestroy, tick } from 'svelte'
   import { listen } from '@tauri-apps/api/event'
   import * as api from '../api'
   import type { AboutInfo, UpdateInfo } from '../types'
@@ -20,6 +20,7 @@
   } = $props()
 
   import Remote from './Remote.svelte'
+  import { t, setLocale, syncSystemLocale, getLocale, getSystemLocale, nativeName, type Locale, type LocalePref } from './i18n/index.svelte'
 
   let serverIp = $state('')
   let loreServerIp = $state('')
@@ -37,6 +38,9 @@
   let loreIdentity = $state('keinestamp@local')
   let autoConnect = $state(false)
   let closeAction = $state<'tray' | 'quit'>('tray')
+  // 语言：偏好落 app-config.toml，切换即时生效（不等「保存」），托盘菜单同步重建
+  let localePref = $state<LocalePref>('system')
+  let localeSaving = $state(false)
   let selectedVersion = $state('')
   let versions = $state<string[]>([])
   let installedVersions = $state<string[]>([])
@@ -67,6 +71,12 @@
   let tagLoading = $state(false)
   let tagError = $state('')
   let tagsDirty = $state(false)
+  // 标签输入框：默认折叠成「+ 添加标签」，点开后才出现输入框（减少每张卡片的常驻噪音）
+  let editingTagFor = $state<string | null>(null)
+  let tagInputEl = $state<HTMLInputElement | null>(null)
+  // 删除流程：先点一次进入确认态，4 秒内再点才真删（避免误触）
+  let confirmFlowId = $state<string | null>(null)
+  let confirmFlowTimer: ReturnType<typeof setTimeout> | undefined
   // 关于页：版本 / Lore 运行时 / 路径 / 更新检查（进入该页才读取，避免每次开设置都 spawn lore）
   let about = $state<AboutInfo | null>(null)
   let aboutLoading = $state(false)
@@ -93,6 +103,9 @@
         sameIp = !loreHost || loreHost === serverIp
         deployPort = port(deployUrl || '', '7799')
         lorePort = port(loreUrl || '', '41337')
+        const localeInfo = await api.getEffectiveLocale()
+        localePref = (localeInfo.pref || 'system') as LocalePref
+        syncSystemLocale(localeInfo.system_tag as Locale)
         autoRestoreProject = await api.getAutoRestoreProject()
         loreIdentity = await api.getLoreIdentity()
         autoConnect = await api.getAutoConnect()
@@ -127,6 +140,7 @@
 
   onDestroy(() => {
     if (cooldownTimer) clearTimeout(cooldownTimer)
+    if (confirmFlowTimer) clearTimeout(confirmFlowTimer)
   })
 
   function updateCooldown() {
@@ -164,7 +178,32 @@
     return typeof e === 'string' ? e : (e?.message ?? String(e))
   }
 
-  async function loadTagGroups() {
+    /** 语言切换即时生效：写偏好 → 后端同步进程内 locale + 重建托盘 → 前端重渲染 */
+  async function applyLocale(event: Event) {
+    if (localeSaving) return
+    // 以 select 当前值为准（不依赖 bind 与 change 的先后顺序）
+    const select = event.currentTarget as HTMLSelectElement | null
+    if (select) localePref = select.value as LocalePref
+    localeSaving = true
+    try {
+      const info = await api.setLocalePref(localePref)
+      localePref = (info.pref || 'system') as LocalePref
+      syncSystemLocale(info.system_tag as Locale)
+      setLocale(info.tag as Locale)
+    } catch (e) {
+      // 失败就退回后端当前状态，避免下拉与实际语言不一致
+      const info = await api.getEffectiveLocale().catch(() => null)
+      if (info) {
+        localePref = (info.pref || 'system') as LocalePref
+        setLocale(info.tag as Locale)
+      }
+      saveError = String(e)
+    } finally {
+      localeSaving = false
+    }
+  }
+
+async function loadTagGroups() {
     if (!path) return
     tagLoading = true
     tagError = ''
@@ -173,7 +212,7 @@
       syncTagDrafts()
       tagsDirty = false
     } catch (e: any) {
-      tagError = `读取流程与标签失败：${detailOf(e)}`
+      tagError = t('gui.settings.err.loadTags', { error: detailOf(e) })
     } finally {
       tagLoading = false
     }
@@ -196,12 +235,39 @@
   }
 
   function nextFlowLabel(): string {
-    const baseLabel = '新流程'
+    const baseLabel = t('gui.settings.tags.newFlowLabel')
     const used = new Set(tagGroups.map((g) => g.label.trim()))
     if (!used.has(baseLabel)) return baseLabel
     let n = 2
     while (used.has(`${baseLabel} ${n}`)) n++
     return `${baseLabel} ${n}`
+  }
+
+  /** 展开某个流程的标签输入框并聚焦 */
+  async function startAddTag(groupId: string) {
+    editingTagFor = groupId
+    await tick()
+    tagInputEl?.focus()
+  }
+
+  function cancelAddTag() {
+    editingTagFor = null
+  }
+
+  /** 删除流程需要二次确认：第一次点击进入确认态，4 秒无操作自动还原 */
+  function armRemoveFlow(id: string) {
+    if (tagGroups.length <= 1) return
+    if (confirmFlowId === id) {
+      confirmFlowId = null
+      if (confirmFlowTimer) clearTimeout(confirmFlowTimer)
+      removeFlow(id)
+      return
+    }
+    confirmFlowId = id
+    if (confirmFlowTimer) clearTimeout(confirmFlowTimer)
+    confirmFlowTimer = setTimeout(() => {
+      confirmFlowId = null
+    }, 4000)
   }
 
   function addFlow() {
@@ -240,7 +306,7 @@
       syncTagDrafts()
       tagsDirty = true
     } catch (e: any) {
-      tagError = `恢复默认失败：${detailOf(e)}`
+      tagError = t('gui.settings.err.resetTags', { error: detailOf(e) })
     }
   }
 
@@ -251,14 +317,14 @@
       label: g.label.trim(),
       tags: g.tags.map((t) => t.trim()).filter(Boolean),
     }))
-    if (cleaned.length === 0) throw new Error('至少保留一个流程')
+    if (cleaned.length === 0) throw new Error(t('gui.settings.err.keepOneFlow'))
     const seenIds = new Set<string>()
     const seenLabels = new Set<string>()
     for (const g of cleaned) {
-      if (!g.id) throw new Error('流程 ID 不能为空')
-      if (!g.label) throw new Error('流程名称不能为空')
-      if (seenIds.has(g.id)) throw new Error(`流程 ID 重复：${g.id}`)
-      if (seenLabels.has(g.label)) throw new Error(`流程名称重复：${g.label}`)
+      if (!g.id) throw new Error(t('gui.settings.err.flowIdEmpty'))
+      if (!g.label) throw new Error(t('gui.settings.err.flowLabelEmpty'))
+      if (seenIds.has(g.id)) throw new Error(t('gui.settings.err.flowIdDup', { id: g.id }))
+      if (seenLabels.has(g.label)) throw new Error(t('gui.settings.err.flowLabelDup', { label: g.label }))
       seenIds.add(g.id)
       seenLabels.add(g.label)
     }
@@ -272,16 +338,16 @@
   async function downloadBlender() {
     downloading = true
     dlPhase = 'downloading'
-    dlMessage = '正在下载...'
+    dlMessage = t('gui.settings.blender.dlDownloading')
     dlPercent = 0
     try {
       const exePath = await api.downloadBlender(selectedVersion || null)
       dlPhase = 'done'
-      dlMessage = '下载完成 — 使用自带 Blender，无插件干扰 ✓'
+      dlMessage = t('gui.settings.blender.dlDone')
       loadInstalled()
     } catch (e) {
       dlPhase = 'error'
-      dlMessage = `下载失败: ${e}`
+      dlMessage = t('gui.settings.err.dlFailed', { error: String(e) })
       console.error('blender download failed', e)
     }
     downloading = false
@@ -306,11 +372,11 @@
     try {
       await api.deleteBlenderVersion(selectedVersion)
       dlPhase = 'done'
-      dlMessage = `已删除 Blender ${selectedVersion}`
+      dlMessage = t('gui.settings.blender.dlDeleted', { version: selectedVersion })
       await loadInstalled()
     } catch (e) {
       dlPhase = 'error'
-      dlMessage = `删除失败: ${e}`
+      dlMessage = t('gui.settings.err.deleteFailed', { error: String(e) })
     }
     deleting = false
   }
@@ -422,34 +488,34 @@
     saveError = ''
     let switched = false
     // 记录当前步骤：失败时告诉用户「哪一项没存进去」，而不是静默停在"保存"
-    let step = '保存部署令牌'
+    let step = t('gui.settings.steps.deployToken')
     try {
       // 选中已安装版本且与当前使用版本不同 → 保存时切换当前 Blender 版本
       if (selectedVersion && isInstalled(selectedVersion) && selectedVersion !== currentBlenderVersion) {
-        step = '切换 Blender 版本'
+        step = t('gui.settings.steps.blenderVersion')
         await api.setCurrentBlenderVersion(selectedVersion)
         currentBlenderVersion = selectedVersion
         switched = true
       }
-      step = '保存部署令牌'
+      step = t('gui.settings.steps.deployToken')
       await api.setDeployToken(deployToken)
-      step = '保存部署服务器地址'
+      step = t('gui.settings.steps.deployUrl')
       await api.setDeployServerUrl(deployUrl())
-      step = '保存备份服务器地址'
+      step = t('gui.settings.steps.loreUrl')
       await api.setLoreServerUrl(loreUrl())
-      step = '保存自动恢复设置'
+      step = t('gui.settings.steps.autoRestore')
       await api.setAutoRestoreProject(autoRestoreProject)
-      step = '保存提交身份'
+      step = t('gui.settings.steps.identity')
       await api.setLoreIdentity(loreIdentity)
-      step = '保存自动连接设置'
+      step = t('gui.settings.steps.autoConnect')
       await api.setAutoConnect(autoConnect)
-      step = '保存关闭行为'
+      step = t('gui.settings.steps.closeBehavior')
       await api.setCloseAction(closeAction === 'tray')
-      step = '保存服务器开关'
+      step = t('gui.settings.steps.serverToggles')
       await api.setServerToggles(deployEnabled, loreEnabled)
       // 项目级流程/标签放在最后：即使写失败，全局设置也已保存（错误提示会注明）
       if (path && tagsDirty) {
-        step = '保存流程与标签'
+        step = t('gui.settings.steps.tags')
         const saved = await api.saveTagGroups(path, collectTagGroups())
         tagGroups = saved
         syncTagDrafts()
@@ -457,11 +523,11 @@
         onTagGroupsSaved(saved)
       }
       savedFeedback = true
-      switchNotice = switched ? `当前版本已切换（Blender ${selectedVersion}）` : ''
+      switchNotice = switched ? t('gui.settings.steps.switchedNotice', { version: selectedVersion }) : ''
       setTimeout(() => { savedFeedback = false; switchNotice = '' }, 2500)
     } catch (e: any) {
       const detail = typeof e === 'string' ? e : (e?.message ?? String(e))
-      saveError = `${step}失败：${detail}（此前已成功的项已保存）`
+      saveError = t('gui.settings.steps.saveFailed', { step, error: detail })
       console.error('[settings] save failed at', step, e)
     } finally {
       saving = false
@@ -487,48 +553,363 @@
 <div class="dialog-overlay" onclick={onClose} role="presentation">
   <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div class="dialog settings-panel" onclick={(e) => e.stopPropagation()} role="dialog" tabindex="-1">
-    <h3>设置</h3>
+    <h3>{t('common.settings')}</h3>
 
     <div class="sd-tabs">
-      <button class="sd-tab" class:active={activeTab === 'main'} onclick={() => (activeTab = 'main')}>Blender</button>
-      <button class="sd-tab" class:active={activeTab === 'tags'} onclick={() => (activeTab = 'tags')}>标签</button>
-      <button class="sd-tab" class:active={activeTab === 'server'} onclick={() => (activeTab = 'server')}>服务器</button>
+      <button class="sd-tab" class:active={activeTab === 'main'} onclick={() => (activeTab = 'main')}>{t('gui.settings.tabs.general')}</button>
+      <button class="sd-tab" class:active={activeTab === 'tags'} onclick={() => (activeTab = 'tags')}>{t('gui.settings.tabs.tags')}</button>
+      <button class="sd-tab" class:active={activeTab === 'server'} onclick={() => (activeTab = 'server')}>{t('gui.settings.tabs.server')}</button>
       <button class="sd-tab" class:active={activeTab === 'about'} onclick={openAbout}>
-        关于
-        {#if update?.state === 'available'}<span class="sd-dot" title="有新版本" aria-label="有新版本"></span>{/if}
+        {t('gui.settings.tabs.about')}
+        {#if update?.state === 'available'}<span class="sd-dot" title={t('gui.settings.updateAvailable')} aria-label={t('gui.settings.updateAvailable')}></span>{/if}
       </button>
     </div>
 
     {#if activeTab === 'main'}
     <div class="section">
+      <div class="section-title">{t('gui.settings.general.sectionTitle')}</div>
+      <div class="field toggle-field">
+        <label>
+          <input type="checkbox" bind:checked={autoRestoreProject} />
+          {t('gui.settings.general.autoRestore')}
+        </label>
+      </div>
+      <div class="field">
+        <label for="sd-language">{t('gui.settings.language')}</label>
+        <select
+          id="sd-language"
+          class="sd-select"
+          bind:value={localePref}
+          disabled={localeSaving}
+          onchange={applyLocale}
+        >
+          <option value="system">
+            {t('gui.settings.languageSystemCurrent', { lang: nativeName(localePref === 'system' ? getSystemLocale() : getLocale()) })}
+          </option>
+          <option value="zh-CN">{t('gui.settings.languageZhCn')}</option>
+          <option value="en-US">{t('gui.settings.languageEnUs')}</option>
+        </select>
+        <span class="hint">{t('gui.settings.languageHint')}</span>
+      </div>
+      <div class="field">
+        <div class="label-row">
+          <label for="sd-lore-identity">{t('gui.settings.general.identityLabel')}</label>
+          <button type="button" class="tip" aria-label={t('gui.settings.general.identityAria')}>
+            ?
+            <span class="tip-bubble" role="tooltip">
+              <b>{t('gui.settings.general.identityFree')}</b>
+              <span>{t('gui.settings.general.identityTip1')}</span>
+              <span>{t('gui.settings.general.identityTip2')}</span>
+              <span>{t('gui.settings.general.identityTip3')}</span>
+            </span>
+          </button>
+        </div>
+        <input id="sd-lore-identity" type="text" bind:value={loreIdentity} placeholder="keinestamp@local" />
+        <span class="hint">{t('gui.settings.general.identityHint')}</span>
+      </div>
+      <div class="field">
+        <label for="sd-close-action">{t('gui.settings.general.closeLabel')}</label>
+        <select id="sd-close-action" class="sd-select" bind:value={closeAction}>
+          <option value="tray">{t('gui.settings.general.closeTray')}</option>
+          <option value="quit">{t('gui.settings.general.closeQuit')}</option>
+        </select>
+        <span class="hint">{t('gui.settings.general.closeHint')}</span>
+      </div>
+    </div>
+    {/if}
+
+    {#if activeTab === 'tags'}
+    <div class="section">
+      {#if !path}
+        <div class="tag-empty">{t('gui.settings.tags.noProject')}</div>
+      {:else if tagLoading}
+        <div class="tag-empty">{t('gui.settings.tags.loading')}</div>
+      {:else if tagError}
+        <div class="tag-empty error">{tagError}</div>
+        <div class="flow-actions">
+          <button class="mini-btn" onclick={() => void loadTagGroups()}>{t('gui.settings.tags.retry')}</button>
+        </div>
+      {:else}
+        <div class="tags-head">
+          <div class="section-title">{t('gui.settings.tags.sectionTitle')}</div>
+          <button type="button" class="tip" aria-label={t('gui.settings.tags.helpAria')}>
+            ?
+            <span class="tip-bubble" role="tooltip">
+              <b>{t('gui.settings.tags.helpTitle')}</b>
+              <span>{t('gui.settings.tags.helpWhat')}</span>
+              <span>{t('gui.settings.tags.helpRecord')}</span>
+              <span>{t('gui.settings.tags.helpScope')}</span>
+              <span>{t('gui.settings.tags.helpSave')}</span>
+            </span>
+          </button>
+          {#if tagsDirty}
+            <span class="flow-dirty">{t('gui.settings.tags.dirty')}</span>
+          {/if}
+        </div>
+        <span class="hint">{t('gui.settings.tags.hint')}</span>
+        {#each tagGroups as group, i (group.id)}
+          <div class="flow-card">
+            <div class="flow-head">
+              <span class="flow-index" aria-hidden="true">{i + 1}</span>
+              <input
+                class="flow-label"
+                type="text"
+                bind:value={group.label}
+                oninput={() => (tagsDirty = true)}
+                placeholder={t('gui.settings.tags.flowNamePlaceholder')}
+                aria-label={t('gui.settings.tags.flowNameAria')}
+                title={t('gui.settings.tags.flowNameTip')}
+              />
+              <span class="flow-count">{t('gui.settings.tags.tagCount', { n: group.tags.length })}</span>
+              <button
+                class="mini-btn del"
+                class:armed={confirmFlowId === group.id}
+                onclick={() => armRemoveFlow(group.id)}
+                disabled={tagGroups.length <= 1}
+                title={tagGroups.length <= 1 ? t('gui.settings.err.keepOneFlow') : t('gui.settings.tags.deleteFlowTipReasons')}
+              >
+                {confirmFlowId === group.id ? t('gui.settings.tags.deleteFlowArmed') : t('gui.settings.tags.deleteFlow')}
+              </button>
+            </div>
+            <div class="flow-tags">
+              {#each group.tags as tag (tag)}
+                <span class="flow-tag" title={t('gui.settings.tags.tagChipTip')}>
+                  {tag}
+                  <button class="tag-x" onclick={() => removeTag(group, tag)} title={t('gui.settings.tags.removeTag')} aria-label={t('gui.settings.tags.removeTag')}>×</button>
+                </span>
+              {/each}
+              {#if group.tags.length === 0}
+                <span class="flow-tag-empty">{t('gui.settings.tags.emptyTags')}</span>
+              {/if}
+            </div>
+            {#if editingTagFor === group.id}
+              <div class="flow-add">
+                <input
+                  type="text"
+                  bind:this={tagInputEl}
+                  bind:value={tagDrafts[group.id]}
+                  placeholder={t('gui.settings.tags.tagPlaceholder')}
+                  aria-label={t('gui.settings.tags.newTagAria')}
+                  onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(group) } else if (e.key === 'Escape') { e.preventDefault(); cancelAddTag() } }}
+                  onblur={() => { if (!(tagDrafts[group.id] || '').trim()) editingTagFor = null }}
+                />
+                <button class="mini-btn" onclick={() => addTag(group)} disabled={!(tagDrafts[group.id] || '').trim()}>{t('common.add')}</button>
+                <button class="mini-btn ghost" onclick={cancelAddTag}>{t('common.cancel')}</button>
+              </div>
+            {:else}
+              <button class="flow-add-btn" onclick={() => startAddTag(group.id)} title={t('gui.settings.tags.addTagTip')}>
+                + {t('gui.settings.tags.addTag')}
+              </button>
+            {/if}
+          </div>
+        {/each}
+        <div class="flow-actions">
+          <button class="mini-btn" onclick={addFlow} title={t('gui.settings.tags.addFlowTip')}>+ {t('gui.settings.tags.addFlow')}</button>
+          <button class="mini-btn ghost" onclick={() => void resetTagGroups()} title={t('gui.settings.tags.resetTip2')}>{t('gui.settings.tags.reset')}</button>
+        </div>
+      {/if}
+    </div>
+    {/if}
+
+    {#if activeTab === 'server'}
+    <div class="section">
+      <div class="section-title">{t('gui.settings.server.sectionTitle')}</div>
+      <div class="svc-toggle-row">
+        <button class="svc-toggle" class:on={deployEnabled} onclick={() => (deployEnabled = !deployEnabled)} title={t('gui.settings.server.deployToggleTitle')}>
+          <span class="svc-dot"></span>{t('gui.settings.server.deploy')}
+        </button>
+        <button class="svc-toggle" class:on={loreEnabled} onclick={() => (loreEnabled = !loreEnabled)} title={t('gui.settings.server.loreToggleTitle')}>
+          <span class="svc-dot"></span>loreserver
+        </button>
+      </div>
+      <div class="conn-grid">
+        <div class="conn-row">
+          <span class="port-head">{t('gui.settings.server.deploy')}</span>
+          <div class="input-row">
+            <span class="port-label">IP</span>
+            <input class="port-input ip-input" type="text" bind:value={serverIp} placeholder="192.168.0.100" aria-label={t('gui.settings.server.ipAria')} />
+            <span class="port-label">{t('gui.settings.server.port')}</span>
+            <input class="port-input port-num" type="text" bind:value={deployPort} placeholder="7799" aria-label={t('gui.settings.server.deployPortAria')} />
+          </div>
+        </div>
+        <div class="conn-row">
+          <span class="port-head">loreserver</span>
+          <div class="input-row">
+            <span class="port-label">IP</span>
+            <input class="port-input ip-input" type="text" bind:value={loreServerIp} disabled={sameIp} placeholder="192.168.0.100" aria-label="loreserver IP" class:sd-disabled={sameIp} />
+            <span class="port-label">{t('gui.settings.server.port')}</span>
+            <input class="port-input port-num" type="text" bind:value={lorePort} placeholder="41337" aria-label={t('gui.settings.server.lorePortAria')} />
+          </div>
+        </div>
+      </div>
+      <div class="field toggle-field">
+        <label>
+          <input type="checkbox" bind:checked={sameIp} />
+          {t('gui.settings.server.sameIp')}
+        </label>
+      </div>
+      <div class="field">
+        <div class="input-row test-row">
+          <button class="connect-btn" onclick={testConnection} disabled={testing || (!deployEnabled && !loreEnabled)}>
+            {testing ? t('gui.settings.server.testing') : t('gui.settings.server.test')}
+          </button>
+          {#if connectStatus !== 'none' || loreStatus !== 'none'}
+            <span class="conn-result">
+              {t('gui.settings.server.deploy')} {#if connectStatus === 'ok'}{@render iconOk()}{:else if connectStatus === 'fail'}{@render iconFail()}{:else}—{/if}
+              · lore {#if loreStatus === 'ok'}{@render iconOk()}{:else if loreStatus === 'fail'}{@render iconFail()}{:else}—{/if}
+            </span>
+          {/if}
+        </div>
+      </div>
+      <div class="field">
+        <label for="sd-deploy-token">{t('gui.settings.server.tokenLabel')}</label>
+        <input id="sd-deploy-token" type="password" bind:value={deployToken} placeholder="Bearer Token" />
+        <span class="hint">{t('gui.settings.server.tokenHint')}</span>
+      </div>
+      <div class="field toggle-field">
+        <label>
+          <input type="checkbox" bind:checked={autoConnect} />
+          {t('gui.settings.server.autoConnect')}
+        </label>
+      </div>
+      <div class="section-title">{t('gui.settings.server.remoteSection')}</div>
+      <Remote
+        loreServerUrl={savedLoreUrl}
+        recentPaths={recentPaths}
+        enabled={loreEnabled}
+        embedded
+        onOpenProject={onOpenProject}
+        onGoSettings={() => (activeTab = 'server')}
+      />
+    </div>
+    {/if}
+
+    {#if activeTab === 'about'}
+    <div class="section">
+      <div class="section-title">{t('gui.settings.about.software')}</div>
+      {#if aboutLoading && !about}
+        <div class="about-empty">{t('gui.settings.about.loading')}</div>
+      {:else if about}
+        <div class="about-row">
+          <span class="about-label">{t('gui.settings.about.version')}</span>
+          <span class="about-value">
+            <span>{about.name} <b>v{about.version}</b></span>
+          </span>
+        </div>
+        <div class="about-row">
+          <span class="about-label">{t('gui.settings.about.platform')}</span>
+          <span class="about-value">{about.platform}</span>
+        </div>
+        <div class="about-row">
+          <span class="about-label">Lore</span>
+          <span class="about-value">
+            {#if about.lore}
+              <span class="about-inline ok">{@render iconOk()} v{about.lore}</span>
+            {:else}
+              <span class="about-inline bad">{@render iconFail()} {t('gui.settings.about.unavailable')}</span>
+            {/if}
+          </span>
+        </div>
+        {#if about.lore_error}
+          <div class="about-error" role="alert">{about.lore_error}</div>
+        {/if}
+        <span class="hint">{t('gui.settings.about.licenseHint', { license: about.license, version: about.lore_expected })}</span>
+      {:else if aboutError}
+        <div class="about-empty error">{aboutError}</div>
+        <div class="flow-actions">
+          <button class="mini-btn" onclick={() => void loadAbout()}>{t('gui.settings.tags.retry')}</button>
+        </div>
+      {/if}
+    </div>
+
+    <div class="section">
+      <div class="section-title">{t('gui.settings.about.location')}</div>
+      {#if about}
+        <div class="about-row">
+          <span class="about-label">{t('gui.settings.about.exeDir')}</span>
+          <span class="about-path" title={about.exe_dir}>{about.exe_dir}</span>
+          <button class="mini-btn" onclick={() => void openPath(about?.exe_dir || '')}>{t('gui.settings.about.open')}</button>
+        </div>
+        <div class="about-row">
+          <span class="about-label">{t('gui.settings.about.configDir')}</span>
+          <span class="about-path" title={about.config_dir}>{about.config_dir}</span>
+          <button class="mini-btn" onclick={() => void openPath(about?.config_dir || '')}>{t('gui.settings.about.open')}</button>
+        </div>
+      {/if}
+      {#if pathError}
+        <div class="about-error" role="alert">{pathError}</div>
+      {/if}
+    </div>
+
+    <div class="section">
+      <div class="section-title">{t('gui.settings.about.updateSection')}</div>
+      <div class="about-row">
+        <span class="about-label">{t('gui.settings.about.repo')}</span>
+        <span class="about-path" title={about?.project_url}>{about?.project_url}</span>
+        <button class="mini-btn" onclick={() => void openLink(about?.project_url || '')}>{t('gui.settings.about.open')}</button>
+      </div>
+      <div class="about-row">
+        <span class="about-label">{t('gui.settings.about.status')}</span>
+        <span class="about-value">
+          {#if updateLoading}
+            {t('gui.settings.about.checkingUpdate')}
+          {:else if update}
+            {#if update.state === 'available'}
+              <button class="about-link" onclick={() => void openLink(update?.url || '')} title={t('gui.settings.about.openRelease')}>
+                {t('gui.settings.about.found', { version: update.latest ?? '' })}
+              </button>
+              <span>{t('gui.settings.about.current', { version: update.current })}</span>
+            {:else if update.state === 'up_to_date'}
+              <span class="about-inline ok">{@render iconOk()} {update.message}</span>
+            {:else}
+              <span class="about-unknown">{update.message}</span>
+            {/if}
+          {:else if updateError}
+            <span class="about-unknown">{t('gui.settings.about.checkFailed', { error: updateError })}</span>
+          {:else}
+            {t('gui.settings.about.notChecked')}
+          {/if}
+        </span>
+      </div>
+      <div class="about-actions">
+        <button class="mini-btn" onclick={() => void loadUpdate()} disabled={updateLoading}>{updateLoading ? t('gui.settings.about.checkingUpdate') : t('gui.settings.about.checkNow')}</button>
+      </div>
+      {#if update?.checked_at}
+        <span class="hint">{t('gui.settings.about.lastChecked', { time: checkedAtText(update.checked_at) })}</span>
+      {/if}
+    </div>
+    {/if}
+
+    {#if activeTab === 'main'}
+    <div class="section">
       <div class="section-title">Blender</div>
       <div class="field">
-        <span class="hint">Keinestamp 自带独立 Blender，不影响系统已安装的版本，无插件冲突风险</span>
+        <span class="hint">{t('gui.settings.blender.hint')}</span>
         <div class="dl-row">
           {#if versionsLoading}
-            <span class="versions-loading">检测版本列表中...</span>
+            <span class="versions-loading">{t('gui.settings.blender.detecting')}</span>
           {:else}
             <select class="sd-select" bind:value={selectedVersion} disabled={downloading}>
               {#if versions.length === 0}
-                <option value="" disabled>未检测 — 点击「检测新版本」</option>
+                <option value="" disabled>{t('gui.settings.blender.notDetected')}</option>
               {/if}
               {#each versions as v}
                 <option value={v}>
-                  {v}{v === versions[0] ? ' (最新)' : ''}{isInstalled(v) ? ' ✓' : ''}
+                  {v}{v === versions[0] ? t('gui.settings.blender.latestSuffix') : ''}{isInstalled(v) ? ' ✓' : ''}
                 </option>
               {/each}
             </select>
           {/if}
           <button onclick={checkVersions} disabled={versionsLoading || cooldownLeft > 0}>
-            {versionsLoading ? '检测中...' : cooldownLeft > 0 ? `冷却 ${cooldownLeft}s` : '检测新版本'}
+            {versionsLoading ? t('gui.settings.blender.checking') : cooldownLeft > 0 ? t('gui.settings.blender.cooldown', { n: cooldownLeft }) : t('gui.settings.blender.checkNew')}
           </button>
           {#if canDelete}
-            <button class="del" class:confirm={confirmDelete} onclick={armDelete} disabled={deleting || downloading} title="至少保留一个 Blender 版本">
-              {deleting ? '删除中...' : confirmDelete ? '确认删除？' : '删除'}
+            <button class="del" class:confirm={confirmDelete} onclick={armDelete} disabled={deleting || downloading} title={t('gui.settings.blender.keepOne')}>
+              {deleting ? t('gui.settings.blender.deleting') : confirmDelete ? t('gui.settings.blender.confirmDelete') : t('common.delete')}
             </button>
           {:else}
             <button class="accent" onclick={downloadBlender} disabled={downloading || !selectedVersion || isInstalled(selectedVersion)}>
-              {downloading ? '下载中...' : isInstalled(selectedVersion) ? '已安装' : '下载 Blender'}
+              {downloading ? t('gui.settings.blender.downloading') : isInstalled(selectedVersion) ? t('gui.settings.blender.installed') : t('gui.settings.blender.download')}
             </button>
           {/if}
         </div>
@@ -556,269 +937,13 @@
     </div>
     {/if}
 
-    {#if activeTab === 'tags'}
-    <div class="section">
-      <div class="section-title">流程与标签</div>
-      {#if !path}
-        <div class="tag-empty">先打开一个项目后再配置流程与标签（配置保存在项目内，仅对本项目生效）</div>
-      {:else if tagLoading}
-        <div class="tag-empty">正在读取流程配置...</div>
-      {:else if tagError}
-        <div class="tag-empty error">{tagError}</div>
-        <div class="flow-actions">
-          <button class="mini-btn" onclick={() => void loadTagGroups()}>重试</button>
-        </div>
-      {:else}
-        <span class="hint">流程用于给记录归类，每个流程可维护常用标签；仅对当前项目生效，默认只有一个 Blender 流程。</span>
-        {#each tagGroups as group (group.id)}
-          <div class="flow-card">
-            <div class="flow-head">
-              <input class="flow-label" type="text" bind:value={group.label} oninput={() => (tagsDirty = true)} placeholder="流程名称" aria-label="流程名称" />
-              <button class="mini-btn del" onclick={() => removeFlow(group.id)} disabled={tagGroups.length <= 1} title="至少保留一个流程">删除</button>
-            </div>
-            <div class="flow-tags">
-              {#each group.tags as tag (tag)}
-                <span class="flow-tag">{tag}<button class="tag-x" onclick={() => removeTag(group, tag)} title="移除标签" aria-label="移除标签">×</button></span>
-              {/each}
-              {#if group.tags.length === 0}
-                <span class="flow-tag-empty">暂无标签（记录时仍可输入自定义标签）</span>
-              {/if}
-            </div>
-            <div class="flow-add">
-              <input
-                type="text"
-                bind:value={tagDrafts[group.id]}
-                placeholder="输入标签后回车添加"
-                aria-label="新标签"
-                onkeydown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addTag(group) } }}
-              />
-              <button class="mini-btn" onclick={() => addTag(group)} disabled={!(tagDrafts[group.id] || '').trim()}>添加</button>
-            </div>
-          </div>
-        {/each}
-        <div class="flow-actions">
-          <button class="mini-btn" onclick={addFlow}>+ 添加流程</button>
-          <button class="mini-btn" onclick={() => void resetTagGroups()} title="恢复为默认的单个 Blender 流程（点击保存后才写入）">恢复默认</button>
-          {#if tagsDirty}
-            <span class="flow-dirty">有未保存的修改</span>
-          {/if}
-        </div>
-      {/if}
-    </div>
-    {/if}
-
-    {#if activeTab === 'server'}
-    <div class="section">
-      <div class="section-title">服务器</div>
-      <div class="svc-toggle-row">
-        <button class="svc-toggle" class:on={deployEnabled} onclick={() => (deployEnabled = !deployEnabled)} title="开启/关闭网页部署服务">
-          <span class="svc-dot"></span>网页部署
-        </button>
-        <button class="svc-toggle" class:on={loreEnabled} onclick={() => (loreEnabled = !loreEnabled)} title="开启/关闭 loreserver 服务">
-          <span class="svc-dot"></span>loreserver
-        </button>
-      </div>
-      <div class="conn-grid">
-        <div class="conn-row">
-          <span class="port-head">网页部署</span>
-          <div class="input-row">
-            <span class="port-label">IP</span>
-            <input class="port-input ip-input" type="text" bind:value={serverIp} placeholder="192.168.0.100" aria-label="网页部署服务器 IP" />
-            <span class="port-label">端口</span>
-            <input class="port-input port-num" type="text" bind:value={deployPort} placeholder="7799" aria-label="部署端口" />
-          </div>
-        </div>
-        <div class="conn-row">
-          <span class="port-head">loreserver</span>
-          <div class="input-row">
-            <span class="port-label">IP</span>
-            <input class="port-input ip-input" type="text" bind:value={loreServerIp} disabled={sameIp} placeholder="192.168.0.100" aria-label="loreserver IP" class:sd-disabled={sameIp} />
-            <span class="port-label">端口</span>
-            <input class="port-input port-num" type="text" bind:value={lorePort} placeholder="41337" aria-label="loreserver 端口" />
-          </div>
-        </div>
-      </div>
-      <div class="field toggle-field">
-        <label>
-          <input type="checkbox" bind:checked={sameIp} />
-          统一 IP（loreserver 共用网页部署 IP）
-        </label>
-      </div>
-      <div class="field">
-        <div class="input-row test-row">
-          <button class="connect-btn" onclick={testConnection} disabled={testing || (!deployEnabled && !loreEnabled)}>
-            {testing ? '测试中...' : '测试连接'}
-          </button>
-          {#if connectStatus !== 'none' || loreStatus !== 'none'}
-            <span class="conn-result">
-              网页部署 {#if connectStatus === 'ok'}{@render iconOk()}{:else if connectStatus === 'fail'}{@render iconFail()}{:else}—{/if}
-              · lore {#if loreStatus === 'ok'}{@render iconOk()}{:else if loreStatus === 'fail'}{@render iconFail()}{:else}—{/if}
-            </span>
-          {/if}
-        </div>
-      </div>
-      <div class="field">
-        <label for="sd-deploy-token">部署令牌（可选）</label>
-        <input id="sd-deploy-token" type="password" bind:value={deployToken} placeholder="Bearer Token" />
-        <span class="hint">上传认证用；loreserver 无认证，仅限可信局域网</span>
-      </div>
-      <div class="field toggle-field">
-        <label>
-          <input type="checkbox" bind:checked={autoConnect} />
-          打开项目时自动测试连接
-        </label>
-      </div>
-      <div class="section-title">远端仓库</div>
-      <Remote
-        loreServerUrl={savedLoreUrl}
-        recentPaths={recentPaths}
-        enabled={loreEnabled}
-        embedded
-        onOpenProject={onOpenProject}
-        onGoSettings={() => (activeTab = 'server')}
-      />
-    </div>
-    {/if}
-
-    {#if activeTab === 'about'}
-    <div class="section">
-      <div class="section-title">软件</div>
-      {#if aboutLoading && !about}
-        <div class="about-empty">正在读取版本信息…</div>
-      {:else if about}
-        <div class="about-row">
-          <span class="about-label">版本</span>
-          <span class="about-value">
-            <span>{about.name} <b>v{about.version}</b></span>
-          </span>
-        </div>
-        <div class="about-row">
-          <span class="about-label">平台</span>
-          <span class="about-value">{about.platform}</span>
-        </div>
-        <div class="about-row">
-          <span class="about-label">Lore</span>
-          <span class="about-value">
-            {#if about.lore}
-              <span class="about-inline ok">{@render iconOk()} v{about.lore}</span>
-            {:else}
-              <span class="about-inline bad">{@render iconFail()} 不可用</span>
-            {/if}
-          </span>
-        </div>
-        {#if about.lore_error}
-          <div class="about-error" role="alert">{about.lore_error}</div>
-        {/if}
-        <span class="hint">Keinestamp 以 {about.license} 许可发布；随包分发的 Lore v{about.lore_expected} 同属 MIT（© Epic Games, Inc.）</span>
-      {:else if aboutError}
-        <div class="about-empty error">{aboutError}</div>
-        <div class="flow-actions">
-          <button class="mini-btn" onclick={() => void loadAbout()}>重试</button>
-        </div>
-      {/if}
-    </div>
-
-    <div class="section">
-      <div class="section-title">位置</div>
-      {#if about}
-        <div class="about-row">
-          <span class="about-label">程序目录</span>
-          <span class="about-path" title={about.exe_dir}>{about.exe_dir}</span>
-          <button class="mini-btn" onclick={() => void openPath(about?.exe_dir || '')}>打开</button>
-        </div>
-        <div class="about-row">
-          <span class="about-label">配置目录</span>
-          <span class="about-path" title={about.config_dir}>{about.config_dir}</span>
-          <button class="mini-btn" onclick={() => void openPath(about?.config_dir || '')}>打开</button>
-        </div>
-      {/if}
-      {#if pathError}
-        <div class="about-error" role="alert">{pathError}</div>
-      {/if}
-    </div>
-
-    <div class="section">
-      <div class="section-title">更新</div>
-      <div class="about-row">
-        <span class="about-label">源码仓库</span>
-        <span class="about-path" title={about?.project_url}>{about?.project_url}</span>
-        <button class="mini-btn" onclick={() => void openLink(about?.project_url || '')}>打开</button>
-      </div>
-      <div class="about-row">
-        <span class="about-label">状态</span>
-        <span class="about-value">
-          {#if updateLoading}
-            正在检查…
-          {:else if update}
-            {#if update.state === 'available'}
-              <button class="about-link" onclick={() => void openLink(update?.url || '')} title="打开发布页">
-                发现新版本 v{update.latest} ↗
-              </button>
-              <span>当前 v{update.current}</span>
-            {:else if update.state === 'up_to_date'}
-              <span class="about-inline ok">{@render iconOk()} {update.message}</span>
-            {:else}
-              <span class="about-unknown">{update.message}</span>
-            {/if}
-          {:else if updateError}
-            <span class="about-unknown">检查失败：{updateError}</span>
-          {:else}
-            尚未检查
-          {/if}
-        </span>
-      </div>
-      <div class="about-actions">
-        <button class="mini-btn" onclick={() => void loadUpdate()} disabled={updateLoading}>{updateLoading ? '检查中…' : '检查更新'}</button>
-      </div>
-      {#if update?.checked_at}
-        <span class="hint">上次检查：{checkedAtText(update.checked_at)}</span>
-      {/if}
-    </div>
-    {/if}
-
-    {#if activeTab === 'main'}
-    <div class="section">
-      <div class="section-title">通用</div>
-      <div class="field toggle-field">
-        <label>
-          <input type="checkbox" bind:checked={autoRestoreProject} />
-          启动时自动打开上次的项目
-        </label>
-      </div>
-      <div class="field">
-        <div class="label-row">
-          <label for="sd-lore-identity">提交身份</label>
-          <button type="button" class="tip" aria-label="提交身份的命名规则">
-            ?
-            <span class="tip-bubble" role="tooltip">
-              <b>命名自由，不要求 @local</b>
-              <span>推荐「名字@主机」形式：para@local / zhangsan@studio-pc</span>
-              <span>留空则回落到默认 keinestamp@local</span>
-              <span>只影响之后的新记录，历史作者不变</span>
-            </span>
-          </button>
-        </div>
-        <input id="sd-lore-identity" type="text" bind:value={loreIdentity} placeholder="keinestamp@local" />
-        <span class="hint">记录提交的作者标识（程序级全局设置）</span>
-      </div>
-      <div class="field">
-        <label for="sd-close-action">关闭窗口时</label>
-        <select id="sd-close-action" class="sd-select" bind:value={closeAction}>
-          <option value="tray">后台驻留（通知区域）</option>
-          <option value="quit">退出应用</option>
-        </select>
-        <span class="hint">首次关闭会询问一次，之后按此习惯执行；通知区域图标左键打开、右键可随时退出</span>
-      </div>
-    </div>
-    {/if}
-
     {#if activeTab !== 'about'}
     <div class="actions">
       {#if saveError}
         <span class="save-error" role="alert" title={saveError}>{saveError}</span>
       {/if}
-      <button onclick={onClose}>取消</button>
-      <button class="accent" onclick={save} disabled={saving} title={switchNotice || saveError || ''}>{saving ? '保存中…' : switchNotice ? '已切换 ✓' : savedFeedback ? '已保存 ✓' : '保存'}</button>
+      <button onclick={onClose}>{t('common.cancel')}</button>
+      <button class="accent" onclick={save} disabled={saving} title={switchNotice || saveError || ''}>{saving ? t('gui.settings.general.saveSaving') : switchNotice ? t('gui.settings.general.saveSwitched') : savedFeedback ? t('gui.settings.general.saveSaved') : t('gui.settings.general.save')}</button>
     </div>
     {/if}
   </div>
@@ -1079,6 +1204,30 @@
   .flow-add input { flex: 1; min-width: 0; font-size: 11.5px; padding: 2px 8px; }
   .flow-actions { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
   .flow-dirty { font-size: 10.5px; color: var(--accent); margin-left: auto; }
+  /* 流程 / 标签：标题行（标题 + 说明气泡 + 未保存标记） */
+  .tags-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+  .tags-head .section-title { margin: 0; }
+  .tags-head .tip-bubble { left: auto; right: -8px; }
+  .flow-index {
+    font-size: 10px; color: var(--text-dim); min-width: 12px; text-align: right;
+    font-variant-numeric: tabular-nums; flex-shrink: 0;
+  }
+  .flow-count { font-size: 10px; color: var(--text-dim); white-space: nowrap; flex-shrink: 0; }
+  /* 折叠态：虚线胶囊按钮，比常驻输入框安静 */
+  .flow-add-btn {
+    margin-top: 8px; font-size: 11px; padding: 2px 10px;
+    border: 1px dashed var(--border-strong); border-radius: 999px;
+    background: transparent; color: var(--text-dim); cursor: pointer;
+    transition: color 0.12s var(--ease), border-color 0.12s var(--ease);
+  }
+  .flow-add-btn:hover { color: var(--accent); border-color: var(--accent); }
+  .mini-btn.ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+  .mini-btn.ghost:hover:not(:disabled) { background: var(--surface3); color: var(--text); }
+  .mini-btn.del.armed {
+    background: color-mix(in srgb, var(--error) 18%, transparent);
+    border-color: var(--error); color: var(--error); font-weight: 600;
+  }
+  /* 卡片稍提亮，和面板底色区分开 */
   /* 关于页 */
   .sd-dot {
     display: inline-block;

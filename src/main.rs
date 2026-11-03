@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
+use keinestamp::i18n;
 use std::path::{Path, PathBuf};
 
 #[derive(Parser)]
@@ -120,8 +121,30 @@ enum Commands {
     ListBlenderVersions,
 }
 
+/// 本地化 clap 命令树：只换我们自己的文案（子命令 about、参数 help）。
+/// clap 自动生成的 Usage / 参数报错骨架是库内固定英文，不逐条定制。
+fn localized_command() -> clap::Command {
+    let cmd = Cli::command().about(i18n::t("cli.about"));
+    cmd.mut_subcommands(|sub| {
+        let name = sub.get_name().to_string();
+        let mut sub = match i18n::lookup(&format!("cli.cmd.{name}.about")) {
+            Some(about) => sub.about(about),
+            None => sub,
+        };
+        sub = sub.mut_args(|arg| {
+            let id = arg.get_id().to_string();
+            match i18n::lookup(&format!("cli.arg.{id}")) {
+                Some(help) => arg.help(help),
+                None => arg,
+            }
+        });
+        sub
+    })
+}
+
 fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
+    let cli = Cli::from_arg_matches(&localized_command().get_matches())
+        .unwrap_or_else(|e| e.exit());
     // 前置依赖检测：Lore v0.8.6（编译期捆绑；缺失/版本不符 → 报错退出）。
     // 仅拦截需要 lore 的子命令：blender 版本列表/下载与配置查看不依赖 lore。
     let needs_lore = !matches!(
@@ -130,7 +153,7 @@ fn main() -> anyhow::Result<()> {
     );
     if needs_lore {
         if let Err(e) = keinestamp::lore_backend::check_lore_env() {
-            eprintln!("错误：{}", e);
+            eprintln!("{}", i18n::tf("cli.errorPrefix", &[("error", &e.to_string())]));
             std::process::exit(1);
         }
     }
@@ -177,21 +200,19 @@ fn main() -> anyhow::Result<()> {
         Some(Commands::ListBlenderVersions) => {
             let versions = keinestamp::blender_download::fetch_blender_versions()
                 .unwrap_or_else(|_| keinestamp::blender_download::list_blender_versions());
-            println!("可用 Blender 版本：");
+            println!("{}", i18n::t("cli.blender.available"));
             for (i, v) in versions.iter().enumerate() {
-                let marker = if i == 0 { " (最新)" } else { "" };
+                let marker = if i == 0 { i18n::t("cli.blender.latest") } else { String::new() };
                 println!("  {}{}", v, marker);
             }
             Ok(())
         }
         None => {
-            println!("Keinestamp - Binary Project Progress Board (Lore)");
-            println!("用法: keinestamp <子命令> [选项]");
-            println!(
-                "子命令: init, record, push, pull, rollback, restore, status, log, config, export, serve, deploy, download-blender, list-blender-versions"
-            );
-            println!("GUI 模式: 运行 `cargo tauri dev` 或使用编译后的 Tauri 应用");
-            println!("查看详细帮助: keinestamp --help");
+            println!("{}", i18n::t("cli.about"));
+            println!("{}", i18n::t("cli.usage"));
+            println!("{}", i18n::t("cli.subcommands"));
+            println!("{}", i18n::t("cli.guiMode"));
+            println!("{}", i18n::t("cli.helpHint"));
             Ok(())
         }
     }
@@ -208,18 +229,18 @@ fn cmd_record(path: &Path, message: &str) -> anyhow::Result<()> {
 
     if let Ok(rs) = keinestamp::lore_project::rollback_state(&meta.project_root) {
         if rs.active {
-            eprintln!("⚠️ 注意：当前处于回退状态，记录后将顶替被回退的记录（原记录被新记录取代）");
+            eprintln!("{}", i18n::t("cli.record.rollbackWarn"));
         }
     }
 
     let rev = keinestamp::lore_project::record(&meta.project_root, message, None, None, &hidden)?;
     // 回退状态下记录 = 顶替，成功后清除回退标记；失败只警告（提交已成功）
     if let Err(e) = keinestamp::lore_project::clear_rollback(&meta.project_root) {
-        eprintln!("⚠️ 警告：清除回退标记失败: {}", e);
+        eprintln!("{}", i18n::tf("cli.record.clearMarkerFailed", &[("error", &e.to_string())]));
     }
 
     let short_hash = &rev[..7.min(rev.len())];
-    println!("已提交 {} — {}", short_hash, message);
+    println!("{}", i18n::tf("cli.record.committed", &[("hash", short_hash), ("message", message)]));
     Ok(())
 }
 
@@ -227,8 +248,8 @@ fn cmd_push(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
     keinestamp::lore_backend::push_to_server(&meta.project_root)
-        .map_err(|e| anyhow::anyhow!("推送失败: {}", e))?;
-    println!("已推送到远端");
+        .map_err(|e| anyhow::anyhow!(i18n::tf("cli.push.failed", &[("error", &e.to_string())])))?;
+    println!("{}", i18n::t("cli.push.done"));
     Ok(())
 }
 
@@ -238,11 +259,11 @@ fn cmd_pull(path: &Path) -> anyhow::Result<()> {
     // 必须走远程通道：run_lore 会强制追加 --offline，lore sync --offline 会
     // 直接 exit 0 且完全不连服务器——旧实现在这里恒报"已从远端拉取"（假成功，审查 P1-3）
     if !keinestamp::lore_backend::has_remote_url(&meta.project_root) {
-        anyhow::bail!("该项目没有配置远端（离线仓库），无法拉取；请先在备份设置里迁移为在线仓库");
+        anyhow::bail!(i18n::t("cli.pull.offline"));
     }
     keinestamp::lore_backend::sync_from_server(&meta.project_root)
-        .map_err(|e| anyhow::anyhow!("同步失败: {}", e))?;
-    println!("已从远端拉取");
+        .map_err(|e| anyhow::anyhow!(i18n::tf("cli.pull.failed", &[("error", &e.to_string())])))?;
+    println!("{}", i18n::t("cli.pull.done"));
     Ok(())
 }
 
@@ -254,20 +275,17 @@ fn cmd_rollback(path: &Path, entry: &str) -> anyhow::Result<()> {
     let tl = keinestamp::timeline::read_timeline(&timeline_path)?;
     let full = keinestamp::timeline::get_entry(&tl, entry)
         .map(|e| e.id.clone())
-        .ok_or_else(|| anyhow::anyhow!("记录不存在: {}", entry))?;
+        .ok_or_else(|| anyhow::anyhow!(i18n::tf("cli.rollback.notFound", &[("entry", entry)])))?;
 
     // 回退状态下再次回退：先撤销上次回退，再回退到新目标（恢复目标始终为首次回退前）；
     // 自动恢复路径直接丢弃回退期间更改（CLI 非交互）
     if keinestamp::lore_project::rollback_state(&meta.project_root)?.active {
         keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden, Some(true))
-            .map_err(|e| anyhow::anyhow!("先撤销上次回退失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!(i18n::tf("cli.rollback.undoFailed", &[("error", &e.to_string())])))?;
     }
 
     keinestamp::lore_project::rollback(&meta.project_root, &full, &hidden, false)?;
-    println!(
-        "已回退到记录 {}（可用 restore 恢复）",
-        &full[..7.min(full.len())]
-    );
+    println!("{}", i18n::tf("cli.rollback.done", &[("entry", &full[..7.min(full.len())])]));
     Ok(())
 }
 
@@ -277,10 +295,10 @@ fn cmd_restore(path: &Path) -> anyhow::Result<()> {
 
     let st = keinestamp::lore_project::rollback_state(&meta.project_root)?;
     if !st.active {
-        anyhow::bail!("没有可恢复的回退");
+        anyhow::bail!(i18n::t("cli.restore.nothing"));
     }
     keinestamp::lore_project::undo_rollback(&meta.project_root, &hidden, None)?;
-    println!("已恢复回退前的状态");
+    println!("{}", i18n::t("cli.restore.done"));
     Ok(())
 }
 
@@ -290,9 +308,9 @@ fn cmd_status(path: &Path) -> anyhow::Result<()> {
 
     let files = keinestamp::lore_project::changed_files(&meta.project_root, &hidden)?;
     if files.is_empty() {
-        println!("工作区干净，没有未提交的修改");
+        println!("{}", i18n::t("cli.status.clean"));
     } else {
-        println!("未提交的修改：");
+        println!("{}", i18n::t("cli.status.changes"));
         for f in &files {
             println!("  {} {}", state_code(&f.state), f.path);
         }
@@ -322,7 +340,7 @@ fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
         .collect();
 
     if entries.is_empty() {
-        println!("暂无提交记录");
+        println!("{}", i18n::t("cli.log.empty"));
         return Ok(());
     }
 
@@ -333,7 +351,7 @@ fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| "Keinestamp".to_string());
 
-    println!("{} 提交历史（最近 {} 条）：", project, count);
+    println!("{}", i18n::tf("cli.log.header", &[("project", &project), ("count", &count.to_string())]));
 
     // 文件数从 timeline 缓存取（展示缓存，rebuild_cache 在每次 record 时重建）；拿不到则显示 0
     let mut file_counts: std::collections::HashMap<String, usize> =
@@ -356,10 +374,7 @@ fn cmd_log(path: &Path, count: usize) -> anyhow::Result<()> {
             .get("creator")
             .map(String::as_str)
             .unwrap_or("lore");
-        println!(
-            "  {}  {}  {}  ({} 文件)",
-            short_id, date, author, file_count
-        );
+        println!("{}", i18n::tf("cli.log.line", &[("hash", short_id), ("date", &date), ("author", author), ("count", &file_count.to_string())]));
         println!("         {}", r.message);
     }
 
@@ -410,7 +425,7 @@ fn cmd_deploy(path: &Path, server: &str, deploy_token: Option<&str>) -> anyhow::
         server
     };
     if server_url.is_empty() {
-        anyhow::bail!("未设置服务器地址，请通过 --server 参数或软件设置中配置");
+        anyhow::bail!(i18n::t("cli.deploy.noServer"));
     }
     if meta.project_id.is_none() {
         meta.project_id = Some(keinestamp::config::generate_project_id());
@@ -434,14 +449,14 @@ fn cmd_deploy(path: &Path, server: &str, deploy_token: Option<&str>) -> anyhow::
     meta.site_name = Some(project_name);
     meta.site_locked = true;
     keinestamp::config::write_meta(&keinestamp::config::meta_path(path), &meta)?;
-    println!("已部署到 {}", url);
+    println!("{}", i18n::tf("cli.deploy.done", &[("url", &url)]));
     Ok(())
 }
 
 fn cmd_download_blender(version: Option<&str>) -> anyhow::Result<()> {
     match keinestamp::blender_download::download_blender(version) {
         Ok(path) => {
-            println!("Blender 已下载到: {}", path.display());
+            println!("{}", i18n::tf("cli.blender.downloaded", &[("path", &path.display().to_string())]));
             Ok(())
         }
         Err(e) => Err(e),
@@ -458,39 +473,27 @@ fn cmd_config(path: &Path, set: Option<&str>) -> anyhow::Result<()> {
 fn cmd_config_show(path: &Path) -> anyhow::Result<()> {
     let meta = load_meta(path)?;
 
-    println!("当前配置：");
-    println!("  版本:           {}", meta.version);
-    println!("  初始化时间:     {}", meta.init_time);
-    println!("  工程根目录:     {}", meta.project_root.display());
-    println!("  网页输出目录:   {}", meta.web_root.display());
+    println!("{}", i18n::t("cli.config.header"));
+    println!("{}", i18n::tf("cli.config.version", &[("value", &meta.version)]));
+    println!("{}", i18n::tf("cli.config.initTime", &[("value", &meta.init_time)]));
+    println!("{}", i18n::tf("cli.config.projectRoot", &[("value", &meta.project_root.display().to_string())]));
+    println!("{}", i18n::tf("cli.config.webRoot", &[("value", &meta.web_root.display().to_string())]));
 
-    println!(
-        "  自动连接:       {}",
-        if keinestamp::app_config::get_auto_connect() {
-            "是"
-        } else {
-            "否"
-        }
-    );
+    println!("{}", i18n::tf("cli.config.autoConnect", &[("value", if keinestamp::app_config::get_auto_connect() { i18n::t("cli.config.yes") } else { i18n::t("cli.config.no") }.as_str())]));
 
     if let Some(ref token) = meta.access_token {
-        println!("  访问令牌:       {}****", &token[..4.min(token.len())]);
+        println!("{}", i18n::tf("cli.config.token", &[("prefix", &token[..4.min(token.len())])]));
     } else {
-        println!("  访问令牌:       (未设置)");
+        println!("{}", i18n::t("cli.config.tokenUnset"));
     }
 
-    println!(
-        "  提交身份:       {}",
-        keinestamp::app_config::get_lore_identity()
-    );
+    println!("{}", i18n::tf("cli.config.identity", &[("value", &keinestamp::app_config::get_lore_identity())]));
 
     Ok(())
 }
 
 fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
-    let equal_pos = kv.find('=').ok_or_else(|| {
-        anyhow::anyhow!("格式错误，请使用 key=value 格式，例如 access_token=abc123")
-    })?;
+    let equal_pos = kv.find('=').ok_or_else(|| anyhow::anyhow!(i18n::t("cli.config.badFormat")))?;
 
     let key = &kv[..equal_pos];
     let value_str = &kv[equal_pos + 1..];
@@ -516,15 +519,12 @@ fn cmd_config_set(path: &Path, kv: &str) -> anyhow::Result<()> {
             keinestamp::app_config::set_lore_identity(value.unwrap_or(""));
         }
         _ => {
-            anyhow::bail!(
-                "未知配置项: {}。可用项: access_token, auto_connect（软件级）, identity（提交身份）",
-                key
-            );
+            anyhow::bail!(i18n::tf("cli.config.unknownKey", &[("key", key)]));
         }
     }
 
     keinestamp::config::write_meta(&meta_path, &meta)?;
-    println!("已更新 {} = {}", key, value.unwrap_or("(清空)"));
+    println!("{}", i18n::tf("cli.config.updated", &[("key", key), ("value", value.unwrap_or(&i18n::t("cli.config.cleared")))]));
 
     Ok(())
 }

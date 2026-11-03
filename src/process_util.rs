@@ -43,7 +43,7 @@ pub fn run_with_timeout(
                     let _ = child.kill();
                     // 先回收 reader 线程（kill 后管道 EOF，join 立即返回）再报超时
                     join_drain(stdout_handle, stderr_handle);
-                    anyhow::bail!("{} 超时（{}s），已终止", label, timeout.as_secs());
+                    anyhow::bail!(crate::i18n::tf("err.util.timeout", &[("label", label), ("n", &timeout.as_secs().to_string())]));
                 }
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }

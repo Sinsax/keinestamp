@@ -22,5 +22,6 @@ pub mod timeline;
 pub mod lore_backend;
 
 pub mod hidden;
+pub mod i18n;
 pub mod kra_thumbnail;
 pub mod lore_project;

@@ -69,19 +69,19 @@ pub fn generate_access_token() -> Result<String> {
     let mut bytes = [0u8; 24];
     // 熵源失败必须显式报错：unwrap_or_default 会产出可预测的全零 token
     getrandom::getrandom(&mut bytes)
-        .map_err(|e| anyhow::anyhow!("生成访问令牌失败（系统熵源不可用）: {}", e))?;
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.config.tokenFailed", &[("error", &e.to_string())])))?;
     Ok(bytes.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 pub fn validate_site_name(name: &str) -> Result<()> {
     if name.is_empty() {
-        anyhow::bail!("网页名称不能为空");
+        anyhow::bail!(crate::i18n::t("err.config.siteNameEmpty"));
     }
     if !name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
-        anyhow::bail!("网页名称仅限英文、数字、- 和 _");
+        anyhow::bail!(crate::i18n::t("err.config.siteNameInvalid"));
     }
     Ok(())
 }

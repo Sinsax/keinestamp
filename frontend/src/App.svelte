@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
+  import { t, localeEpoch } from './lib/i18n/index.svelte'
+  import { errorCode, stripErrorCode } from './lib/errors'
   import TitleBar from './lib/TitleBar.svelte'
   import Sidebar from './lib/Sidebar.svelte'
   import ProjectTabs from './lib/ProjectTabs.svelte'
@@ -83,7 +85,7 @@ interface BlenderDownloadProgress {
   const hasPreviewMarked = $derived(
     [...previewMarked].some((f) => isPreviewable(f) && (commitSelection === null || commitSelection.includes(f)))
   )
-  let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] })
+  let rollbackState = $state<RollbackState>({ rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [], restore_modified_files: [] })
   // 回退版本改动标注：change_files（回退改动，可勾选）+ deleted_files（回退删除，只读）
 const rollbackChangeFiles = $derived(rollbackState.change_files)
 const rollbackDeletedFiles = $derived(rollbackState.deleted_files)
@@ -125,6 +127,17 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     localStorage.setItem('keinestamp_theme', theme)
   })
 
+  // 语言切换后：状态面板 / 时间线 / 日志里的文案由后端生成，需要按新语言重新拉一次
+  let localeSeen = -1
+  $effect(() => {
+    const epoch = localeEpoch()
+    if (localeSeen === -1) { localeSeen = epoch; return }
+    if (epoch === localeSeen) return
+    localeSeen = epoch
+    void refreshStatus().catch(() => {})
+    if (activePath) void loadProject(activePath, true).catch(() => {})
+  })
+  
   let sidebarCollapsed = $state(localStorage.getItem('keinestamp_sidebar_collapsed') === '1')
   let timelineWidth = $state(Math.min(480, Math.max(240, parseInt(localStorage.getItem('keinestamp_timeline_width') || '320', 10) || 320)))
 
@@ -176,6 +189,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   }
 
   function pushToast(msg: string, type: string = 'info') {
+    // 错误消息可能带 [code:xxx] 前缀（控制流用），展示前剥掉
+    msg = stripErrorCode(msg)
     if (type === 'error') console.log(`[debug] toast error:`, msg)
     const id = ++toastId
     toasts = [...toasts, { id, msg, type }]
@@ -270,11 +285,11 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
   let deployAhead = $derived(!!deployStatus && deployStatus.local > (deployStatus.remote ?? 0))
   let deployTip = $derived.by(() => {
-    if (!deployStatus) return '部署到服务器'
+    if (!deployStatus) return t('gui.actionbar.deployTip')
     const r = deployStatus.remote ?? '—'
     return deployAhead
-      ? `有新版本可部署：本地 v${deployStatus.local} > 服务器 v${r}`
-      : `已是最新：本地 v${deployStatus.local} / 服务器 v${r}`
+      ? t('gui.app.deployAhead', { local: deployStatus.local, remote: r })
+      : t('gui.app.deployUpToDate', { local: deployStatus.local, remote: r })
   })
 
   async function loadProject(path: string, preserveSelection = false) {
@@ -293,7 +308,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     // 自动恢复上次项目：记录最后一次打开的项目
     try { localStorage.setItem('keinestamp_last_project', activePath) } catch { /* ignore */ }
     if (!preserveSelection) commitSelection = null
-    rollbackState = { rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [] }
+    rollbackState = { rollback_point: null, head_matches: false, deleted_files: [], change_files: [], modified_files: [], restore_modified_files: [] }
     try {
       const t1 = performance.now()
       const pt = await api.detect(path)
@@ -335,7 +350,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
         trackedFiles = []
         emptyDirs = []
         pendingReinit = path
-        pushToast('项目配置缺失（.keinestamp.toml）：需要重新生成', 'error')
+        pushToast(t('gui.app.err.configMissing'), 'error')
       } else {
         entries = []
         statusOutput = ''
@@ -383,14 +398,14 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     const path = pendingReinit
     pendingReinit = null
     if (!path) return
-    busyText = '重新生成配置...'
+    busyText = t('gui.app.busy.reinit')
     try {
       await api.initProject(path)
-      pushToast('项目配置已重新生成', 'success')
+      pushToast(t('gui.app.toast.configRegenerated'), 'success')
       await loadRecent()
       await loadProject(path)
     } catch (e: any) {
-      pushToast(`重新生成失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.reinitFailed', { error: e }), 'error')
     }
     busyText = ''
   }
@@ -449,10 +464,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     if (isEmptyRecord && !rollbackState.rollback_point) {
       pendingConfirm = {
         kind: 'empty_record',
-        title: '确认空记录？',
+        title: t('gui.app.confirm.emptyRecordTitle'),
         message:
-          '当前没有选择任何文件变更，将创建一条空记录 / 纯里程碑记录。\n' +
-          '是否继续？',
+          t('gui.app.confirm.emptyRecordLine1') +
+          t('gui.app.confirm.emptyRecordLine2'),
         data: { msg, tag, tagCategory, tags, noPreview, files, previewFiles },
       }
       return false
@@ -465,17 +480,17 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       const checkedOut = rollbackState.change_files?.length ?? 0
       const scopeNote =
         files.length === 0 && checkedOut > 0
-          ? `你没有勾选任何文件，但当前处于回退状态：本次记录将提交全部 ${checkedOut} 个回退检出文件。\n`
+          ? t('gui.app.confirm.rollbackScopeAll', { n: checkedOut }) + '\n'
           : files.length > 0
-            ? `本次将提交 ${files.length} 个文件。\n`
+            ? t('gui.app.confirm.rollbackScopeFiles', { n: files.length }) + '\n'
             : ''
       pendingConfirm = {
         kind: 'empty_record',
-        title: '确认回退状态记录？',
+        title: t('gui.app.confirm.rollbackRecordTitle'),
         message:
           scopeNote +
-          '当前处于回退状态，提交将基于过去的版本创建新记录，并顶替当前时间线结构。\n' +
-          '这可能会影响时间线，请确认是否继续？',
+          t('gui.app.confirm.rollbackRecordLine1') +
+          t('gui.app.confirm.rollbackRecordLine2'),
         data: { msg, tag, tagCategory, tags, noPreview, files, previewFiles },
       }
       return false
@@ -497,14 +512,14 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     recording = true
     let unlisten: (() => void) | undefined
     try {
-      statusText = '记录中...'
+      statusText = t('gui.app.status.recording')
       unlisten = await listen<CommitProgress>('commit-progress', (event) => {
         statusText = event.payload.message
         commitProgressMsg = event.payload.message
       })
       const sel = commitSelection
       const hash = await api.record(activePath, msg, tag, tagCategory, tags, noPreview, files, previewFiles)
-      pushToast(`已记录 ${hash}`, 'success')
+      pushToast(t('gui.app.toast.recorded', { hash }), 'success')
       previewMarked = new Set()
       if (sel !== null && files) {
         const committed = new Set(files)
@@ -512,12 +527,12 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       }
       // 立即结束“记录中”状态并关闭弹窗，再后台刷新项目数据；
       // 否则大项目 full walk（loadTrackedFiles）会一直显示“记录中”/看起来卡住
-      statusText = '已记录'
+      statusText = t('gui.app.status.recorded')
       setTimeout(() => { void loadProject(activePath) }, 0)
       return true
     } catch (e: any) {
-      pushToast(`记录失败: ${e}`, 'error')
-      statusText = '记录失败'
+      pushToast(t('gui.app.err.recordFailed', { error: e }), 'error')
+      statusText = t('gui.app.status.recordFailed')
       return false
     } finally {
       recording = false
@@ -533,7 +548,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     pendingConfirm = null
     showCommit = false
     // 回退状态提交 = 顶替操作，显示等待遮罩，避免用户以为卡住
-    busyText = '回退中记录...'
+    busyText = t('gui.app.busy.rollbackRecord')
     void performRecord(msg, tag, tagCategory, tags, noPreview, files, previewFiles).finally(() => {
       busyText = ''
     })
@@ -542,16 +557,16 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function handleDeploy() {
     if (!activePath) return
     deploying = true
-    statusText = '部署中...'
+    statusText = t('gui.app.status.deploying')
     try {
       await api.deploy(activePath)
-      pushToast('部署成功', 'success')
+      pushToast(t('gui.app.toast.deployed'), 'success')
       await testConnection()
       await loadProject(activePath)
-      statusText = '部署完成'
+      statusText = t('gui.app.status.deployed')
     } catch (e: any) {
-      pushToast(`部署失败: ${e}`, 'error')
-      statusText = '部署失败'
+      pushToast(t('gui.app.err.deployFailed', { error: e }), 'error')
+      statusText = t('gui.app.status.deployFailed')
     } finally {
       deploying = false
     }
@@ -560,20 +575,20 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function handleBackup() {
     if (!activePath) return
     backupBusy = true
-    statusText = '备份中...'
+    statusText = t('gui.app.status.backingUp')
     try {
       await api.backup(activePath)
-      pushToast('备份成功', 'success')
-      statusText = '备份完成'
+      pushToast(t('gui.app.toast.backedUp'), 'success')
+      statusText = t('gui.app.status.backedUp')
     } catch (e: any) {
       const msg = String(e)
-      if (msg.includes('离线创建')) {
+      if (errorCode(msg) === 'offline_repo') {
         // 离线仓库无法备份 → 引导迁移为在线仓库
         pendingMigrate = activePath
       } else {
-        pushToast(`备份失败: ${msg}`, 'error')
+        pushToast(t('gui.app.err.backupFailed', { error: msg }), 'error')
       }
-      statusText = '备份失败'
+      statusText = t('gui.app.status.backupFailed')
     } finally {
       backupBusy = false
     }
@@ -584,15 +599,15 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     pendingMigrate = null
     if (!path) return
     backupBusy = true
-    busyText = '迁移为在线仓库...'
+    busyText = t('gui.app.busy.migrate')
     try {
       await api.migrateRepo(path)
-      pushToast('已迁移为在线仓库，正在备份...', 'success')
+      pushToast(t('gui.app.toast.migrated'), 'success')
       await api.backup(path)
-      pushToast('备份成功', 'success')
+      pushToast(t('gui.app.toast.backedUp'), 'success')
       await loadProject(path)
     } catch (e: any) {
-      pushToast(`迁移/备份失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.migrateBackupFailed', { error: e }), 'error')
     }
     busyText = ''
     backupBusy = false
@@ -600,40 +615,40 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
   function handleTokenChange(val: string) {
     accessToken = val
-    pushToast('Token 已保存', 'success')
+    pushToast(t('gui.app.toast.tokenSaved'), 'success')
   }
 
   async function handleSiteNameChange(val: string): Promise<boolean> {
     if (!/^[A-Za-z0-9_-]+$/.test(val)) {
-      pushToast('网页名称仅限英文、数字、- 和 _', 'error')
+      pushToast(t('gui.app.toast.siteNameInvalid'), 'error')
       return false
     }
     try {
       await api.updateConfig(activePath, 'site_name', val || null)
       siteName = val
-      pushToast('网页名称已保存', 'success')
+      pushToast(t('gui.app.toast.siteNameSaved'), 'success')
       return true
     } catch (e: any) {
-      pushToast(`网页名称保存失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.siteNameSaveFailed', { error: e }), 'error')
       return false
     }
   }
 
   async function handleOpenSite() {
     if (!siteName) {
-      pushToast('未设置网页名称', 'info')
+      pushToast(t('gui.app.toast.siteNameMissing'), 'info')
       return
     }
     try {
       const serverUrl = await api.getDeployServerUrl()
       if (!serverUrl) {
-        pushToast('未配置服务器地址', 'info')
+        pushToast(t('gui.app.toast.serverMissing'), 'info')
         return
       }
       const url = `${serverUrl.replace(/\/+$/, '')}/${siteName}/`
       await api.openSite(url)
     } catch (e: any) {
-      pushToast(`打开网页失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.openSiteFailed', { error: e }), 'error')
     }
   }
 
@@ -642,7 +657,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     try {
       await api.openWebTimeline(activePath)
     } catch (e: any) {
-      pushToast(`本地查看失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.localViewFailed', { error: e }), 'error')
     }
   }
 
@@ -662,7 +677,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
   async function handleRollback(entry: TimelineEntry) {    if (!activePath || rollbackBusy) return
     rollbackBusy = true
-    busyText = '回退中...'
+    busyText = t('gui.app.busy.rollback')
     try {
       await api.rollback(activePath, entry.id)
       // 命令完成即清遮罩 + toast；loadProject 后台刷新（大项目 full walk/status 可能较慢，
@@ -670,22 +685,22 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       commitSelection = []
       busyText = ''
       rollbackBusy = false
-      pushToast(`已回退到记录 ${entry.id.slice(0, 7)} 之前（文件保留该记录的版本，可修改后记录）`, 'success')
+      pushToast(t('gui.app.toast.rolledBack', { id: entry.id.slice(0, 7) }), 'success')
       setTimeout(() => { void loadProject(activePath) }, 0)
       return
     } catch (e: any) {
       const msg = String(e)
-      if (msg.includes('需要丢弃确认')) {
+      if (errorCode(msg) === 'rollback_discard_confirm') {
         // 连续回退：回退期间的更改内容（上次回退检出的中间态）需丢弃确认
-        const files = rollbackState.modified_files?.length ? `\n文件：${rollbackState.modified_files.join(', ')}` : ''
+        const files = rollbackState.modified_files?.length ? '\n' + t('gui.app.confirm.files', { files: rollbackState.modified_files.join(', ') }) : ''
         pendingConfirm = {
           kind: 'rollback',
           entry,
-          title: '丢弃并继续回退',
-          message: `检测到回退期间的更改内容（上次回退检出的文件），继续回退将丢弃这些更改，且恢复时不会找回。${files}\n确定丢弃并回退到记录 ${entry.id.slice(0, 7)} 之前吗？`,
+          title: t('gui.app.confirm.discardRollbackTitle'),
+          message: t('gui.app.confirm.discardRollbackIntro') + files + '\n' + t('gui.app.confirm.discardRollbackAsk', { id: entry.id.slice(0, 7) }),
         }
       } else {
-        pushToast(`回退失败: ${msg}`, 'error')
+        pushToast(t('gui.app.err.rollbackFailed', { error: msg }), 'error')
       }
     }
     busyText = ''
@@ -697,18 +712,18 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     pendingConfirm = null
     if (!entry || !activePath) return
     rollbackBusy = true
-    busyText = '回退中...（丢弃中间更改）'
+    busyText = t('gui.app.busy.rollbackDiscard')
     try {
       await api.rollback(activePath, entry.id, true)
       // 命令完成即清遮罩 + toast；loadProject 后台刷新
       commitSelection = []
       busyText = ''
       rollbackBusy = false
-      pushToast(`已丢弃回退期间的更改并回退到记录 ${entry.id.slice(0, 7)} 之前`, 'success')
+      pushToast(t('gui.app.toast.rolledBackDiscarded', { id: entry.id.slice(0, 7) }), 'success')
       setTimeout(() => { void loadProject(activePath) }, 0)
       return
     } catch (e: any) {
-      pushToast(`回退失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.rollbackFailed', { error: e }), 'error')
     }
     busyText = ''
     rollbackBusy = false
@@ -716,14 +731,15 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
   async function handleRestore() {
     if (!activePath) return
-    // 恢复确认：只有"真修改"（用户改过/删过内容）才弹窗；回退删除标记属检出，直接恢复
-    const hasChanges = (rollbackState.modified_files?.length ?? 0) > 0
+    // 恢复确认：只有"真修改"（用户改过/删过内容）才弹窗；回退删除标记属检出，直接恢复。
+    // 只看跟踪文件修改（restore_modified_files）——未跟踪新文件恢复时不会被删除，不进确认列表
+    const hasChanges = (rollbackState.restore_modified_files?.length ?? 0) > 0
     if (hasChanges) {
-      const files = rollbackState.modified_files?.length ? `\n文件：${rollbackState.modified_files.join(', ')}` : ''
+      const files = rollbackState.restore_modified_files?.length ? '\n' + t('gui.app.confirm.files', { files: rollbackState.restore_modified_files.join(', ') }) : ''
       pendingConfirm = {
         kind: 'restore',
-        title: '恢复前确认',
-        message: `回退期间有已修改的内容：${files}\n「丢弃并恢复」将丢弃这些更改并恢复回退前的状态；\n「留下」将取消恢复（保持当前回退状态）。`,
+        title: t('gui.app.confirm.restoreTitle'),
+        message: t('gui.app.confirm.restoreIntro') + files + '\n' + t('gui.app.confirm.restoreLine1') + '\n' + t('gui.app.confirm.restoreLine2'),
       }
       return
     }
@@ -733,30 +749,30 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function doRestore(confirm: boolean | null) {
     if (!activePath) return
     rollbackBusy = true
-    busyText = '恢复中...'
+    busyText = t('gui.app.busy.restore')
     try {
       await api.restoreRollback(activePath, confirm)
       // 命令完成即清遮罩 + toast；loadProject 后台刷新（恢复后保持默认全选）。
       // 之前这里 await loadProject，若 restore 后的 status/full walk 较慢会导致 GUI 一直“恢复中”
       busyText = ''
       rollbackBusy = false
-      pushToast('已恢复回退前的状态', 'success')
+      pushToast(t('gui.app.toast.restored'), 'success')
       setTimeout(() => { void loadProject(activePath) }, 0)
       return
     } catch (e: any) {
       const msg = String(e)
-      if (msg.includes('回退冲突')) {
+      if (errorCode(msg) === 'rollback_conflict') {
         await loadConflictFiles()
-      } else if (msg.includes('恢复需要确认')) {
-        // 快照过时/后端实时判定有真修改 → 弹确认窗（后端为权威判定源）
-        const files = rollbackState.modified_files?.length ? `\n文件：${rollbackState.modified_files.join(', ')}` : ''
+      } else if (errorCode(msg) === 'restore_confirm') {
+        // 快照过时/后端实时判定有真修改 → 弹确认窗（后端为权威判定源；只列跟踪文件修改）
+        const files = rollbackState.restore_modified_files?.length ? '\n' + t('gui.app.confirm.files', { files: rollbackState.restore_modified_files.join(', ') }) : ''
         pendingConfirm = {
           kind: 'restore',
-          title: '恢复前确认',
-          message: `回退期间有已修改的内容：${files}\n「丢弃并恢复」将丢弃这些更改并恢复回退前的状态；\n「留下」将取消恢复（保持当前回退状态）。`,
+          title: t('gui.app.confirm.restoreTitle'),
+          message: t('gui.app.confirm.restoreIntro') + files + '\n' + t('gui.app.confirm.restoreLine1') + '\n' + t('gui.app.confirm.restoreLine2'),
         }
       } else {
-        pushToast(`恢复失败: ${msg}`, 'error')
+        pushToast(t('gui.app.err.restoreFailed', { error: msg }), 'error')
       }
     }
     busyText = ''
@@ -777,16 +793,16 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   async function doDiscard(file: string) {
     console.log('[discard] doDiscard', { activePath, file })
     if (!activePath) {
-      pushToast('取消更改失败: 未打开项目', 'error')
+      pushToast(t('gui.app.err.discardNoProject'), 'error')
       return
     }
     try {
       await api.discardFile(activePath, file)
-      pushToast(`已取消更改 ${file}`, 'success')
+      pushToast(t('gui.app.toast.discarded', { file }), 'success')
       // 轻量刷新：status/变更面板 + 回退状态（trackedFiles 全量 walk 不受影响）
       await Promise.all([refreshStatus(), refreshRollbackState()])
     } catch (e: any) {
-      pushToast(`取消更改失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.discardFailed', { error: e }), 'error')
     }
   }
 
@@ -802,7 +818,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     try {
       conflictFiles = await api.getRollbackConflicts(activePath)
     } catch (e: any) {
-      pushToast(`读取冲突失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.conflictReadFailed', { error: e }), 'error')
       conflictFiles = null
     }
   }
@@ -815,11 +831,11 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       // 命令完成即关闭冲突弹窗/清 busy；loadProject 后台刷新，避免大项目刷新让弹窗一直“恢复中”
       conflictFiles = null
       resolvingConflict = false
-      pushToast('冲突已解决，已恢复回退前的状态', 'success')
+      pushToast(t('gui.app.toast.conflictResolved'), 'success')
       setTimeout(() => { void loadProject(activePath).then(() => refreshRollbackState()) }, 0)
       return
     } catch (e: any) {
-      pushToast(`完成恢复失败: ${e}`, 'error')
+      pushToast(t('gui.app.err.resolveFailed', { error: e }), 'error')
     }
     resolvingConflict = false
   }
@@ -828,7 +844,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     const selected = await open({
       directory: true,
       multiple: false,
-      title: '选择导出位置',
+      title: t('gui.app.dialog.exportTitle'),
     })
     if (!selected) return
     pendingExport = {
@@ -909,7 +925,7 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
         const info = await api.checkLoreEnv()
         loreOk = info.ok
         if (!info.ok) {
-          loreError = 'Lore 环境异常（请重新安装/构建）'
+          loreError = t('gui.app.toast.loreEnvError')
           showLoreMissing = true
         }
       } catch (e: any) {
@@ -943,13 +959,13 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
       const phase = e.payload.phase
       if (!blenderDlActive && (phase === 'downloading' || phase === 'extracting')) {
         blenderDlActive = true
-        pushToast('正在下载 Blender...', 'info')
+        pushToast(t('gui.app.toast.blenderDownloading'), 'info')
       } else if (blenderDlActive && phase === 'done') {
         blenderDlActive = false
-        pushToast('Blender 下载完成', 'success')
+        pushToast(t('gui.app.toast.blenderDownloaded'), 'success')
       } else if (blenderDlActive && phase === 'error') {
         blenderDlActive = false
-        pushToast('Blender 下载失败', 'error')
+        pushToast(t('gui.app.toast.blenderDownloadFailed'), 'error')
       }
     })
     const refreshProjectPoll = () => {
@@ -1010,9 +1026,9 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
         <div class="rollback-banner">
           <span class="rb-label">
             <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.3 14.4 13.3H1.6L8 2.3z"/><path d="M8 6.6v2.8"/><circle cx="8" cy="11.6" r="0.75" fill="currentColor" stroke="none"/></svg>
-            当前处于回退状态，提交将顶替时间线结构
+            {t('gui.app.rollbackBanner')}
           </span>
-          <button onclick={handleRestore} disabled={rollbackBusy}>恢复</button>
+          <button onclick={handleRestore} disabled={rollbackBusy}>{t('gui.actionbar.restore')}</button>
         </div>
       {/if}
 
@@ -1021,14 +1037,14 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
           {#if !activePath}
             <div class="empty-state">
               <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.3"><path d="M2 6a2 2 0 012-2h5.757a2 2 0 011.414.586l1.12 1.12A2 2 0 0013.757 6H20a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V6z"/></svg></div>
-              <div>从上方标签页选择项目，或点击 + 新建项目</div>
-              <button class="empty-new-btn" onclick={handleNewProject}>新建项目</button>
+              {t('gui.app.empty.pickProject')}
+              <button class="empty-new-btn" onclick={handleNewProject}>{t('gui.app.empty.newProject')}</button>
             </div>
           {:else if projectType !== 'initialized'}
             <div class="empty-state">
               <div class="big"><svg viewBox="0 0 24 24" width="32" height="32" fill="currentColor" opacity="0.5"><path d="M12 2a1 1 0 01.894.553l9 18A1 1 0 0121 22H3a1 1 0 01-.894-1.447l9-18A1 1 0 0112 2zm0 3.236L4.472 20h15.056L12 5.236z"/><path d="M12 9a.5.5 0 01.5.5v5a.5.5 0 01-1 0v-5A.5.5 0 0112 9z"/><circle cx="12" cy="16.5" r=".5"/></svg></div>
-              <div>未初始化</div>
-              <div style="font-size:12px">请重新打开文件夹进行初始化</div>
+              <div>{t('gui.app.empty.notInitialized')}</div>
+              {t('gui.app.empty.reopenFolder')}
             </div>
           {:else}
             <StatusPanel {statusOutput} {statusError} {statusErrorMsg} {trackedFiles} {rollbackChangeFiles} {rollbackDeletedFiles} {rollbackModifiedFiles} onRefresh={refreshStatus} {activePath} selection={commitSelection} rollbackActive={!!rollbackState.rollback_point} onSelectionChange={(sel) => commitSelection = sel} onDiscardChanges={handleDiscardChanges} {previewMarked} onTogglePreviewMark={togglePreviewMark} sidebarCollapsed={sidebarCollapsed} onToggleSidebar={() => sidebarCollapsed = !sidebarCollapsed} displayPath={activePath ? cleanPath(activePath) : ''} onOpenFolder={(p) => { try { openFolder(p) } catch { /* ignore */ } }} />
@@ -1075,10 +1091,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
   loreOk={loreOk}
         restoreEnabled={!!rollbackState.rollback_point && rollbackState.head_matches}
         restoreTitle={!rollbackState.rollback_point
-          ? '没有可恢复的回退'
+          ? t('gui.app.restore.none')
           : rollbackState.head_matches
-            ? '恢复回退前的状态'
-            : '回退后已有新记录，无法恢复'}
+            ? t('gui.app.restore.ready')
+            : t('gui.app.restore.blocked')}
         busy={deploying || recording || rollbackBusy || backupBusy}
       />
 
@@ -1108,8 +1124,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     <ConfirmDialog
       title={pendingConfirm.title}
       message={pendingConfirm.message}
-      okLabel="丢弃并跳转"
-      cancelLabel="留下"
+      okLabel={t('gui.app.dialog.discardAndJump')}
+      cancelLabel={t('gui.app.dialog.keep')}
       onConfirm={confirmDiscardRollback}
       onCancel={() => (pendingConfirm = null)}
     />
@@ -1117,8 +1133,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     <ConfirmDialog
       title={pendingConfirm.title}
       message={pendingConfirm.message}
-      okLabel="确认记录"
-      cancelLabel="取消"
+      okLabel={t('gui.app.dialog.confirmRecord')}
+      cancelLabel={t('common.cancel')}
       danger
       onConfirm={confirmRollbackRecord}
       onCancel={() => (pendingConfirm = null)}
@@ -1127,8 +1143,8 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
     <ConfirmDialog
       title={pendingConfirm.title}
       message={pendingConfirm.message}
-      okLabel="丢弃并恢复"
-      cancelLabel="留下"
+      okLabel={t('gui.app.dialog.discardAndRestore')}
+      cancelLabel={t('gui.app.dialog.keep')}
       onConfirm={() => { pendingConfirm = null; doRestore(true) }}
       onCancel={() => (pendingConfirm = null)}
     />
@@ -1137,10 +1153,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
 {#if pendingMigrate}
   <ConfirmDialog
-    title="迁移为在线仓库"
-    message={'该项目为离线创建，无法备份到服务器。\n是否迁移为在线仓库（保留全部历史，迁移后自动备份）？'}
-    okLabel="迁移并备份"
-    cancelLabel="取消"
+    title={t('gui.app.dialog.migrateTitle')}
+    message={t('gui.app.dialog.migrateMessage')}
+    okLabel={t('gui.app.dialog.migrateOk')}
+    cancelLabel={t('common.cancel')}
     onConfirm={confirmMigrateAndBackup}
     onCancel={() => (pendingMigrate = null)}
   />
@@ -1149,10 +1165,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 {#if pendingDiscard}
   <!-- 不用 {@const}（事件闭包作用域隐患）：onConfirm 内直接可选链取值 + 守卫 -->
   <ConfirmDialog
-    title="取消更改"
-    message={`将丢弃「${pendingDiscard.file}」的未提交修改，恢复到最近记录版本。\n此操作不可撤销。`}
-    okLabel="取消更改"
-    cancelLabel="留下"
+    title={t('gui.app.dialog.discardTitle')}
+    message={t('gui.app.dialog.discardMessage', { file: pendingDiscard.file })}
+    okLabel={t('gui.app.dialog.discardOk')}
+    cancelLabel={t('gui.app.dialog.keep')}
     danger
     onConfirm={() => { const f = pendingDiscard?.file ?? ''; pendingDiscard = null; if (f) doDiscard(f) }}
     onCancel={() => (pendingDiscard = null)}
@@ -1161,9 +1177,9 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
 {#if showLoreMissing}
   <ConfirmDialog
-    title="缺少 Lore 环境"
-    message={`${loreError || '未找到 Lore v0.8.6'}\n记录/回退/备份等操作不可用。请重新安装或构建 Keinestamp（编译期自动捆绑 Lore）。`}
-    okLabel="知道了"
+    title={t('gui.app.dialog.loreMissingTitle')}
+    message={t('gui.app.dialog.loreMissingMessage', { error: loreError || t('gui.app.dialog.loreMissingFallback') })}
+    okLabel={t('gui.app.dialog.loreMissingOk')}
     cancelLabel=""
     onConfirm={() => (showLoreMissing = false)}
     onCancel={() => (showLoreMissing = false)}
@@ -1172,10 +1188,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
 {#if pendingReinit}
   <ConfirmDialog
-    title="需要重新生成项目配置"
-    message={`「${pendingReinit.split(/[/\\]/).pop()}」缺少 .keinestamp.toml（配置/隐藏规则缺失）。\n重新生成将补齐配置与私有目录（不影响 lore 历史）。`}
-    okLabel="重新生成"
-    cancelLabel="取消"
+    title={t('gui.app.dialog.reinitTitle')}
+    message={t('gui.app.dialog.reinitMessage', { name: pendingReinit.split(/[/\\]/).pop() ?? '' })}
+    okLabel={t('gui.app.dialog.reinitOk')}
+    cancelLabel={t('common.cancel')}
     onConfirm={reinitProject}
     onCancel={() => (pendingReinit = null)}
   />
@@ -1191,10 +1207,10 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
 {#if pendingRemove}
   <ConfirmDialog
-    title="移除项目"
-    message={`从最近项目中移除「${pendingRemove.split(/[/\\]/).pop()}」？\n项目文件不会被删除。`}
-    okLabel="移除"
-    cancelLabel="取消"
+    title={t('gui.app.dialog.removeTitle')}
+    message={t('gui.app.dialog.removeMessage', { name: pendingRemove.split(/[/\\]/).pop() ?? '' })}
+    okLabel={t('gui.app.dialog.removeOk')}
+    cancelLabel={t('common.cancel')}
     onConfirm={confirmRemoveRecent}
     onCancel={() => pendingRemove = null}
   />
@@ -1202,11 +1218,11 @@ const rollbackModifiedFiles = $derived(rollbackState.modified_files)
 
 {#if pendingExport}
   <InputDialog
-    title="导出到"
-    label="目录名"
+    title={t('gui.app.dialog.exportTitle')}
+    label={t('gui.app.dialog.exportLabel')}
     initial={pendingExport.defaultName}
-    okLabel="导出"
-    cancelLabel="取消"
+    okLabel={t('gui.app.dialog.exportOk')}
+    cancelLabel={t('common.cancel')}
     onConfirm={confirmExport}
     onCancel={() => pendingExport = null}
   />

@@ -92,18 +92,15 @@ pub fn delete_blender_version(version: &str) -> Result<()> {
 fn delete_blender_version_at(dir: &Path, version: &str) -> Result<()> {
     let installed = list_installed_versions_from(dir);
     if !installed.iter().any(|v| v == version) {
-        anyhow::bail!("未安装该 Blender 版本: {}", version);
+        anyhow::bail!(crate::i18n::tf("err.blender.notInstalled", &[("version", version)]));
     }
     if installed.len() <= 1 {
-        anyhow::bail!(
-            "至少保留一个 Blender 版本（当前仅 {}）",
-            installed.join(", ")
-        );
+        anyhow::bail!(crate::i18n::tf("err.blender.keepOne", &[("versions", &installed.join(", "))]));
     }
     let target = find_installed_blender_dir(dir, version)
-        .ok_or_else(|| anyhow::anyhow!("未找到 Blender {} 的安装目录", version))?;
+        .ok_or_else(|| anyhow::anyhow!(crate::i18n::tf("err.blender.noInstallDir", &[("version", version)])))?;
     std::fs::remove_dir_all(&target)
-        .map_err(|e| anyhow::anyhow!("删除 {} 失败: {}", target.display(), e))?;
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.deleteFailed", &[("path", &target.display().to_string()), ("error", &e.to_string())])))?;
     // blender_path 指向被删版本 → 清空
     if let Some(p) = crate::app_config::get_blender_path() {
         if p.starts_with(&target) {
@@ -245,9 +242,9 @@ fn fetch_url(url: &str, timeout_secs: u64) -> Result<String> {
     let body = ureq::get(url)
         .timeout(std::time::Duration::from_secs(timeout_secs))
         .call()
-        .map_err(|e| anyhow::anyhow!("获取版本列表失败: {}", e))?
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.listFailed", &[("error", &e.to_string())])))?
         .into_string()
-        .map_err(|e| anyhow::anyhow!("获取版本列表失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.listFailed", &[("error", &e.to_string())])))?;
     Ok(body)
 }
 
@@ -283,7 +280,7 @@ pub fn download_blender_with_progress(
         "[debug] download_blender: install_dir={}",
         app_dir.display()
     );
-    std::fs::create_dir_all(&app_dir).map_err(|e| anyhow::anyhow!("创建目录失败: {}", e))?;
+    std::fs::create_dir_all(&app_dir).map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.mkdirFailed", &[("error", &e.to_string())])))?;
 
     let mut last_err = None;
     for mirror_base in DOWNLOAD_MIRRORS {
@@ -293,14 +290,14 @@ pub fn download_blender_with_progress(
 
         on_progress(DownloadProgress {
             phase: "downloading".into(),
-            message: format!("正在下载 Blender {}...", ver),
+            message: crate::i18n::tf("err.blender.downloadingVersion", &[("version", &ver)]),
             percent: 0,
             bytes_downloaded: 0,
             bytes_total: 0,
         });
 
         if !is_allowed_download_url(&url) {
-            last_err = Some(anyhow::anyhow!("拒绝非 HTTPS 下载源: {url}"));
+            last_err = Some(anyhow::anyhow!(crate::i18n::tf("err.blender.rejectInsecure", &[("url", &url)])));
             continue;
         }
 
@@ -312,10 +309,7 @@ pub fn download_blender_with_progress(
                         url
                     );
                     let _ = std::fs::remove_file(&archive_path);
-                    last_err = Some(anyhow::anyhow!(
-                        "下载完成但未找到文件: {}",
-                        archive_path.to_string_lossy()
-                    ));
+                    last_err = Some(anyhow::anyhow!(crate::i18n::tf("err.blender.fileMissing", &[("path", &archive_path.to_string_lossy())])));
                     continue;
                 }
                 // 完整性：至少把 sha256 记下来（写入 <version>.sha256 便于审计），
@@ -323,14 +317,12 @@ pub fn download_blender_with_progress(
                 // 因此默认"记录 + 可 pin"，而不是假装校验过。
                 match crate::process_util::file_sha256_hex(&archive_path) {
                     Ok(digest) => {
-                        eprintln!("[blender] 下载包 sha256 = {digest} ({url})");
+                        eprintln!("[blender] sha256 = {digest} ({url})");
                         if let Ok(expected) = std::env::var("KEINESTAMP_BLENDER_SHA256") {
                             let expected = expected.trim().to_ascii_lowercase();
                             if !expected.is_empty() && expected != digest {
                                 let _ = std::fs::remove_file(&archive_path);
-                                last_err = Some(anyhow::anyhow!(
-                                    "Blender 安装包 sha256 不匹配（期望 {expected}，实际 {digest}），已丢弃"
-                                ));
+                                last_err = Some(anyhow::anyhow!(crate::i18n::tf("err.blender.shaMismatch", &[("expected", &expected), ("actual", &digest)])));
                                 continue;
                             }
                         }
@@ -340,7 +332,7 @@ pub fn download_blender_with_progress(
                         );
                     }
                     Err(e) => {
-                        eprintln!("[blender] 计算下载包 sha256 失败（继续解压）: {e}");
+                        eprintln!("[blender] sha256 computation failed (continuing to extract): {e}");
                     }
                 }
                 return extract_blender(&app_dir, &archive_path, on_progress, ver);
@@ -353,7 +345,7 @@ pub fn download_blender_with_progress(
         }
     }
 
-    Err(last_err.unwrap_or_else(|| anyhow::anyhow!("所有镜像源均下载失败")))
+    Err(last_err.unwrap_or_else(|| anyhow::anyhow!(crate::i18n::t("err.blender.allMirrorsFailed"))))
 }
 
 /// 下载源必须是 HTTPS：压缩包会被解压并执行其中的 blender.exe，
@@ -371,7 +363,7 @@ fn extract_blender(
 ) -> Result<PathBuf> {
     on_progress(DownloadProgress {
         phase: "extracting".into(),
-        message: "正在解压...".into(),
+        message: crate::i18n::t("err.blender.extracting"),
         percent: 0,
         bytes_downloaded: 0,
         bytes_total: 0,
@@ -389,7 +381,7 @@ fn extract_blender(
                 "Expand-Archive -Path $env:KS_ARC -DestinationPath $env:KS_DIR -Force",
             ])
             .output()
-            .map_err(|e| anyhow::anyhow!("解压失败: {}", e))?
+            .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.extractFailed", &[("error", &e.to_string())])))?
     } else {
         crate::process_util::hide_console(std::process::Command::new("tar"))
             .args([
@@ -399,13 +391,13 @@ fn extract_blender(
                 &app_dir.to_string_lossy(),
             ])
             .output()
-            .map_err(|e| anyhow::anyhow!("解压失败: {}", e))?
+            .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.extractFailed", &[("error", &e.to_string())])))?
     };
 
     if !extract_result.status.success() {
         let stderr = String::from_utf8_lossy(&extract_result.stderr);
         let _ = std::fs::remove_file(archive_path);
-        anyhow::bail!("解压失败: {}", stderr.trim());
+        anyhow::bail!(crate::i18n::tf("err.blender.extractFailed", &[("error", &stderr.trim())]));
     }
 
     let _ = std::fs::remove_file(archive_path);
@@ -413,7 +405,7 @@ fn extract_blender(
 
     on_progress(DownloadProgress {
         phase: "configuring".into(),
-        message: "正在配置...".into(),
+        message: crate::i18n::t("err.blender.configuring"),
         percent: 95,
         bytes_downloaded: 0,
         bytes_total: 0,
@@ -435,11 +427,7 @@ fn extract_blender(
                 extracted_files.push_str(&entry.file_name().to_string_lossy());
             }
         }
-        anyhow::anyhow!(
-            "在解压目录中未找到 {}。解压后的内容: [{}]",
-            blender_name,
-            extracted_files
-        )
+        anyhow::anyhow!(crate::i18n::tf("err.blender.missingAfterExtract", &[("name", &blender_name), ("content", &extracted_files)]))
     })?;
 
     crate::app_config::set_blender_path(&blender_exe.to_string_lossy());
@@ -450,7 +438,7 @@ fn extract_blender(
 
     on_progress(DownloadProgress {
         phase: "done".into(),
-        message: format!("Blender {} 已安装", ver),
+        message: crate::i18n::tf("err.blender.installed", &[("version", &ver)]),
         percent: 100,
         bytes_downloaded: 0,
         bytes_total: 0,
@@ -467,7 +455,7 @@ fn streaming_download(
     eprintln!("[debug] streaming_download: connecting to {}", url);
     let resp = ureq::get(url)
         .call()
-        .map_err(|e| anyhow::anyhow!("下载连接失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.connectFailed", &[("error", &e.to_string())])))?;
 
     let total_size: u64 = resp
         .header("Content-Length")
@@ -480,7 +468,7 @@ fn streaming_download(
 
     let mut reader = resp.into_reader();
     let mut file =
-        std::fs::File::create(dest).map_err(|e| anyhow::anyhow!("创建文件失败: {}", e))?;
+        std::fs::File::create(dest).map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.createFileFailed", &[("error", &e.to_string())])))?;
 
     let mut buf = vec![0u8; 65536];
     let mut downloaded: u64 = 0;
@@ -489,12 +477,12 @@ fn streaming_download(
     loop {
         let n = reader
             .read(&mut buf)
-            .map_err(|e| anyhow::anyhow!("下载读取失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.readFailed", &[("error", &e.to_string())])))?;
         if n == 0 {
             break;
         }
         file.write_all(&buf[..n])
-            .map_err(|e| anyhow::anyhow!("写入文件失败: {}", e))?;
+            .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.writeFailed", &[("error", &e.to_string())])))?;
         downloaded += n as u64;
 
         if total_size > 0 {
@@ -503,7 +491,7 @@ fn streaming_download(
                 last_percent = pct;
                 on_progress(DownloadProgress {
                     phase: "downloading".into(),
-                    message: format!("正在下载... {}%", pct),
+                    message: crate::i18n::tf("err.blender.progressPercent", &[("pct", &pct.to_string())]),
                     percent: pct,
                     bytes_downloaded: downloaded,
                     bytes_total: total_size,
@@ -519,7 +507,7 @@ fn streaming_download(
             if downloaded % 1_048_576 < 65536 {
                 on_progress(DownloadProgress {
                     phase: "downloading".into(),
-                    message: format!("正在下载... {:.1} MB", mb),
+                    message: crate::i18n::tf("err.blender.progressMb", &[("mb", &format!("{:.1}", mb))]),
                     percent: pct_downloaded.max(1),
                     bytes_downloaded: downloaded,
                     bytes_total: 0,
@@ -529,7 +517,7 @@ fn streaming_download(
     }
 
     file.flush()
-        .map_err(|e| anyhow::anyhow!("刷新文件失败: {}", e))?;
+        .map_err(|e| anyhow::anyhow!(crate::i18n::tf("err.blender.syncFailed", &[("error", &e.to_string())])))?;
     drop(file);
 
     Ok(())
@@ -630,10 +618,10 @@ fn set_current_blender_version_at(dir: &Path, version: &str) -> Result<()> {
         "blender"
     };
     let install_dir = find_installed_blender_dir(dir, version)
-        .ok_or_else(|| anyhow::anyhow!("未安装该 Blender 版本: {}", version))?;
+        .ok_or_else(|| anyhow::anyhow!(crate::i18n::tf("err.blender.notInstalled", &[("version", version)])))?;
     let exe = install_dir.join(exe_name);
     if !exe.exists() {
-        anyhow::bail!("未安装该 Blender 版本: {}", version);
+        anyhow::bail!(crate::i18n::tf("err.blender.notInstalled", &[("version", version)]));
     }
     crate::app_config::set_blender_path(&exe.to_string_lossy());
     Ok(())

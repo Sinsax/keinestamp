@@ -1,6 +1,7 @@
 <script lang="ts">
   import { parseStatus, ruleHidden, findRuleHidden, type StatusFile } from './statusParse'
   import StatusTreeItem from './StatusTreeItem.svelte'
+  import { t } from './i18n/index.svelte'
   import { buildFileTree, type FileTreeNode } from './fileTree'
   import { openFolder, addToGitignore, getIgnoreInfo, addSkipWorktree, removeIgnore } from '../api'
   import { isPreviewable } from './preview'
@@ -516,7 +517,7 @@
 
 <div class="status-panel">
   <div class="sp-header">
-    <button class="sp-icon-btn" onclick={onToggleSidebar} title={sidebarCollapsed ? '展开侧栏' : '折叠侧栏'}>
+    <button class="sp-icon-btn" onclick={onToggleSidebar} title={sidebarCollapsed ? t('gui.statuspanel.expandSidebar') : t('gui.statuspanel.collapseSidebar')}>
       {#if sidebarCollapsed}
         <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M6 3l5 5-5 5V3z"/></svg>
       {:else}
@@ -525,7 +526,7 @@
     </button>
     {#if displayPath}
       <span class="sp-crumb" title={displayPath}>{displayPath}</span>
-      <button class="sp-icon-btn" onclick={() => onOpenFolder(activePath)} title="在文件管理器中打开">
+      <button class="sp-icon-btn" onclick={() => onOpenFolder(activePath)} title={t('gui.statuspanel.openInExplorer')}>
         <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor">
           <path d="M1.5 2.5a1 1 0 0 1 1-1h3.672a1 1 0 0 1 .707.293l.828.828A1 1 0 0 0 8.414 3H13.5a1 1 0 0 1 1 1v1.5H1.5V2.5Z"/>
           <path d="M1.5 6h13l-1.41 5.44a1 1 0 0 1-.97.81H3.88a1 1 0 0 1-.97-.81L1.5 6Z"/>
@@ -533,16 +534,16 @@
       </button>
       <span class="sp-divider"></span>
     {/if}
-    <span class="sp-title">变更</span>
-    <span class="sp-count">{selectedCount}/{statusFiles.length} 个文件{#if ignoredVisibleCount > 0} · {ignoredVisibleCount} 已忽略{/if}</span>
+    <span class="sp-title">{t('gui.statuspanel.title')}</span>
+    <span class="sp-count">{ignoredVisibleCount > 0 ? t('gui.statuspanel.countIgnored', { selected: selectedCount, total: statusFiles.length, ignored: ignoredVisibleCount }) : t('gui.statuspanel.count', { selected: selectedCount, total: statusFiles.length })}</span>
     <div class="sp-spacer"></div>
     {#if !allSelected}
-      <button class="sp-select-all" onclick={selectAll} title="全部选中">全选</button>
+      <button class="sp-select-all" onclick={selectAll} title={t('gui.statuspanel.selectAllTitle')}>{t('gui.statuspanel.selectAll')}</button>
     {/if}
     {#if selectedCount > 0}
-      <button class="sp-select-all" onclick={selectNone} title="全部取消">全不选</button>
+      <button class="sp-select-all" onclick={selectNone} title={t('gui.statuspanel.selectNoneTitle')}>{t('gui.statuspanel.selectNone')}</button>
     {/if}
-    <button class="sp-refresh sp-icon-btn" onclick={onRefresh} title="刷新状态">
+    <button class="sp-refresh sp-icon-btn" onclick={onRefresh} title={t('gui.statuspanel.refreshTitle')}>
       <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor"><path d="M8 3a5 5 0 014.546 2.916.5.5 0 01-.908.417A4 4 0 108 11.5a4.002 4.002 0 003.392-1.87.5.5 0 11.854.52A5 5 0 113 8a5 5 0 015-5z"/><path d="M11.5 3.5A.5.5 0 0112 4v2.5a.5.5 0 01-.5.5H9a.5.5 0 010-1h1.802A4.003 4.003 0 004 8a.5.5 0 01-1 0 5 5 0 015-5 .5.5 0 01.5.5z"/></svg>
     </button>
   </div>
@@ -554,17 +555,17 @@
     <div class="sp-empty">
       <div class="sp-empty-icon"><svg viewBox="0 0 16 16" width="28" height="28" fill="currentColor" opacity="0.5"><path d="M13.854 3.646a.5.5 0 010 .708l-7 7a.5.5 0 01-.708 0l-3.5-3.5a.5.5 0 11.708-.708L6.5 10.293l6.646-6.647a.5.5 0 01.708 0z"/></svg></div>
       {#if statusError}
-        <div>状态获取失败</div>
-        <div style="font-size:12px" title={statusErrorMsg}>{statusErrorMsg || 'Lore 状态读取出错，点击刷新重试'}</div>
+        <div>{t('gui.statuspanel.loadFailed')}</div>
+        {statusErrorMsg || t('gui.statuspanel.errorHint')}
       {:else}
-        <div>无变更 — 工作区干净</div>
+        <div>{t('gui.statuspanel.clean')}</div>
       {/if}
     </div>
   {:else}
     <!-- svelte-ignore a11y_no_static_element_interactions -->
     <div class="sp-list" oncontextmenu={(e) => e.preventDefault()}>
       {#if statusFiles.length === 0 && ignoredVisibleCount === visibleFiles.length && visibleFiles.length > 0}
-        <div class="sp-ignored-only-hint">仅被忽略文件（灰显，可右键取消忽略）</div>
+        <div class="sp-ignored-only-hint">{t('gui.statuspanel.ignoredOnly')}</div>
       {/if}
       {#each tree as node (node.path)}
         <StatusTreeItem
@@ -596,36 +597,36 @@
     <div
       class="sp-hidden-header"
       onclick={() => (hiddenCollapsed = !hiddenCollapsed)}
-      title="忽略文件/格式：手动输入规则（如 cache/、*.tmp），或在变更列表右键设置"
+      title={t('gui.statuspanel.ignoreTitle')}
     >
       <span class="sp-hidden-caret">{hiddenCollapsed ? '▸' : '▾'}</span>
-      <span>忽略文件/格式</span>
+      <span>{t('gui.statuspanel.ignoreLabel')}</span>
       {#if userHiddenRules.length > 0}
         <span class="sp-hidden-count">{userHiddenRules.length}</span>
       {/if}
     </div>
     {#if !hiddenCollapsed}
       <div class="sp-hidden-body">
-        <span class="sp-hidden-hint">手动输入规则（如 cache/、*.tmp），或右键变更列表中的文件设置</span>
+        <span class="sp-hidden-hint">{t('gui.statuspanel.ignoreHint')}</span>
         <div class="sp-hidden-list">
           {#each userHiddenRules as rule}
             <div class="sp-hidden-row">
               <span class="sp-hidden-rule" title={rule}>{rule}</span>
-              <button class="sp-hidden-del" title="移除隐藏" onclick={() => removeHiddenRule(rule)}>×</button>
+              <button class="sp-hidden-del" title={t('gui.statuspanel.removeHidden')} onclick={() => removeHiddenRule(rule)}>×</button>
             </div>
           {/each}
           {#if userHiddenRules.length === 0}
-            <span class="sp-hidden-empty">无用户隐藏规则</span>
+            <span class="sp-hidden-empty">{t('gui.statuspanel.hiddenEmpty')}</span>
           {/if}
         </div>
         <div class="sp-hidden-input-row">
           <input
             type="text"
             bind:value={hiddenInput}
-            placeholder="输入路径/格式，如 cache/ 或 *.tmp"
+            placeholder={t('gui.statuspanel.hiddenPlaceholder')}
             onkeydown={(e) => { if (e.key === 'Enter') addHiddenRule() }}
           />
-          <button onclick={addHiddenRule} disabled={!hiddenInput.trim()}>添加</button>
+          <button onclick={addHiddenRule} disabled={!hiddenInput.trim()}>{t('common.add')}</button>
         </div>
       </div>
     {/if}
@@ -635,27 +636,27 @@
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
     <div class="ctx-backdrop" onclick={closeContextMenu} oncontextmenu={(e) => { e.preventDefault(); closeContextMenu() }}></div>
     <div class="ctx-menu" bind:this={menuEl} style="left: {contextMenu.x ?? contextMenu.cursorX}px; top: {contextMenu.y ?? contextMenu.cursorY}px">
-      <button onclick={menuOpenFolder}>打开所在文件夹</button>
-      <button onclick={menuCopyPath}>复制路径</button>
-      <button onclick={menuCopyName}>复制名称</button>
+      <button onclick={menuOpenFolder}>{t('gui.sidebar.openFolder')}</button>
+      <button onclick={menuCopyPath}>{t('gui.sidebar.copyPath')}</button>
+      <button onclick={menuCopyName}>{t('gui.sidebar.copyName')}</button>
       {#if !contextMenu.isDir && isPreviewable(contextMenu.path)}
         <button onclick={menuTogglePreviewMark}>
-          {previewMarked.has(contextMenu.path) ? '取消预览标记' : '标记预览'}
+          {previewMarked.has(contextMenu.path) ? t('gui.statuspanel.previewOff') : t('gui.statuspanel.previewOn')}
         </button>
       {/if}
       {#if canDiscard(contextMenu.path)}
-        <button class="ctx-danger" onclick={menuDiscardChanges} title="丢弃此文件的未提交更改，恢复到最近记录版本">取消更改</button>
+        <button class="ctx-danger" onclick={menuDiscardChanges} title={t('gui.statuspanel.discardTitle')}>{t('gui.statuspanel.discard')}</button>
       {/if}
       <div class="ctx-sep"></div>
       {#if isIgnored(contextMenu.path)}
-        <button onclick={menuUnignore}>取消忽略</button>
+        <button onclick={menuUnignore}>{t('gui.statuspanel.unignore')}</button>
       {:else if contextMenu.isDir}
-        <button onclick={() => menuIgnore('dir')}>忽略目录</button>
+        <button onclick={() => menuIgnore('dir')}>{t('gui.statuspanel.ignoreDir')}</button>
       {:else if isTracked(contextMenu.path)}
-        <button onclick={() => menuIgnore('file')} title="本地忽略，可随时恢复">忽略文件</button>
+        <button onclick={() => menuIgnore('file')} title={t('gui.statuspanel.ignoreFileTitle')}>{t('gui.statuspanel.ignoreFile')}</button>
       {:else}
-        <button onclick={() => menuIgnore('file')}>忽略文件</button>
-        <button onclick={() => menuIgnore('ext')}>忽略格式</button>
+        <button onclick={() => menuIgnore('file')}>{t('gui.statuspanel.ignoreFile')}</button>
+        <button onclick={() => menuIgnore('ext')}>{t('gui.statuspanel.ignoreExt')}</button>
       {/if}
     </div>
   {/if}
@@ -1011,3 +1012,4 @@
     cursor: default;
   }
 </style>
+

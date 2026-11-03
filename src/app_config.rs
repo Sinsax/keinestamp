@@ -28,6 +28,9 @@ pub struct AppConfig {
     pub deploy_enabled: bool,
     #[serde(default)]
     pub lore_enabled: bool,
+    /// 界面语言偏好："system"（省略=跟随系统）/ "zh-CN" / "en-US"
+    #[serde(default)]
+    pub locale: Option<String>,
 }
 
 impl AppConfig {
@@ -73,8 +76,29 @@ impl Default for AppConfig {
             lore_identity: None,
             deploy_enabled: false,
             lore_enabled: false,
+            locale: None,
         }
     }
+}
+
+/// 界面语言偏好："system" | "zh-CN" | "en-US"（未设置 = 跟随系统）
+pub fn get_locale_pref() -> String {
+    AppConfig::load()
+        .locale
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "system".to_string())
+}
+
+pub fn set_locale_pref(pref: &str) {
+    let mut cfg = AppConfig::load();
+    let value = pref.trim();
+    // 跟随系统 = 不落盘，保持配置文件干净、旧版本也能读
+    cfg.locale = if value.is_empty() || value.eq_ignore_ascii_case("system") {
+        None
+    } else {
+        Some(value.to_string())
+    };
+    cfg.save();
 }
 
 pub fn get_server_toggles() -> (bool, bool) {
@@ -269,6 +293,24 @@ mod tests {
         assert!(path.to_string_lossy().contains("app-config.toml"));
     }
 
+    /// 旧版本 app-config.toml（没有 locale 字段）必须能读，且语义 = 跟随系统
+    #[test]
+    fn test_load_legacy_config_without_locale() {
+        let dir =
+            std::env::temp_dir().join(format!("keinestamp_app_config_legacy_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("app-config.toml");
+        std::fs::write(
+            &path,
+            "lore_server_url = \"lore://127.0.0.1:41337\"\nauto_connect = true\n",
+        )
+        .unwrap();
+        let cfg = AppConfig::load_from(&path);
+        assert_eq!(cfg.locale, None);
+        assert!(cfg.auto_connect);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn test_load_save_roundtrip() {
         let dir =
@@ -289,6 +331,7 @@ mod tests {
             lore_identity: None,
             deploy_enabled: false,
             lore_enabled: false,
+            locale: None,
         };
         cfg.save_to(&path);
 
