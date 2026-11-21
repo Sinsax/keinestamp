@@ -257,6 +257,9 @@ impl PreviewProvider for GlbProvider {
             return Ok(Some(out));
         }
 
+        // 失败**不**降级成 Ok(None)：那会让时间线只剩一句「未能生成预览」，
+        // 真实原因（Blender 报错）随 eprintln 一起丢失（GUI 无控制台）。
+        // 透传 Err，由 record 写进 timeline 的 preview_errors。
         match crate::blender_render::export_to_glb(
             file,
             output_dir,
@@ -265,8 +268,8 @@ impl PreviewProvider for GlbProvider {
         ) {
             Ok(path) => Ok(Some(path)),
             Err(e) => {
-                eprintln!("[debug] GlbProvider: 导出跳过（降级为无预览）: {e}");
-                Ok(None)
+                eprintln!("[debug] GlbProvider: 导出失败: {e:#}");
+                Err(e)
             }
         }
     }

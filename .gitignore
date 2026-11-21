@@ -27,3 +27,6 @@ src-tauri/resources/lore-bin/
 
 # 内部评审材料（含本机 token 与审查记录，不发布）
 review/
+
+# 发布产物（scripts/package-release.ps1 生成）
+/dist

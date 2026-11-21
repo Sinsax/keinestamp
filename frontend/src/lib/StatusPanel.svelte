@@ -103,6 +103,16 @@
     selection === null ? autoSelectedFiles.length : selection.filter((p) => fileSet.has(p)).length
   )
   const allSelected = $derived(selection === null || selectedCount === autoSelectedFiles.length)
+  // 头部计数文案：窄侧栏下会被省略号截断，故同时用作 title（悬停看完整）
+  const countText = $derived(
+    ignoredVisibleCount > 0
+      ? t('gui.statuspanel.countIgnored', {
+          selected: selectedCount,
+          total: statusFiles.length,
+          ignored: ignoredVisibleCount,
+        })
+      : t('gui.statuspanel.count', { selected: selectedCount, total: statusFiles.length })
+  )
 
   const dirFilesMap = $derived.by(() => {
     const map: Record<string, string[]> = {}
@@ -535,7 +545,7 @@
       <span class="sp-divider"></span>
     {/if}
     <span class="sp-title">{t('gui.statuspanel.title')}</span>
-    <span class="sp-count">{ignoredVisibleCount > 0 ? t('gui.statuspanel.countIgnored', { selected: selectedCount, total: statusFiles.length, ignored: ignoredVisibleCount }) : t('gui.statuspanel.count', { selected: selectedCount, total: statusFiles.length })}</span>
+    <span class="sp-count" title={countText}>{countText}</span>
     <div class="sp-spacer"></div>
     {#if !allSelected}
       <button class="sp-select-all" onclick={selectAll} title={t('gui.statuspanel.selectAllTitle')}>{t('gui.statuspanel.selectAll')}</button>
@@ -676,6 +686,10 @@
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
     min-height: 34px;
+    /* 侧栏变窄时禁止换行：否则「变更」竖排、计数被折成两行（挤成 3 行高） */
+    flex-wrap: nowrap;
+    min-width: 0;
+    overflow: hidden;
   }
   .sp-icon-btn {
     background: none;
@@ -711,6 +725,9 @@
   .sp-title {
     font-size: 12px;
     font-weight: 650;
+    /* 「变更」不允许被压缩换行（窄侧栏会变成两行竖排） */
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .sp-count {
     font-size: 10.5px;
@@ -719,8 +736,14 @@
     padding: 0 7px;
     border-radius: 8px;
     line-height: 1.7;
+    /* 计数优先保持单行，空间不足时省略而不是折行 */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex: 0 1 auto;
+    min-width: 0;
   }
-  .sp-spacer { flex: 1; }
+  .sp-spacer { flex: 1; min-width: 0; }
   .sp-select-all {
     background: none;
     border: 1px solid var(--border-strong);
@@ -730,6 +753,9 @@
     border-radius: var(--radius-sm);
     cursor: pointer;
     transition: color 0.12s, border-color 0.12s, background 0.12s;
+    /* 「全选/全不选」按钮不换行、不被压缩（否则窄侧栏竖排） */
+    white-space: nowrap;
+    flex-shrink: 0;
   }
   .sp-select-all:hover {
     color: var(--accent);

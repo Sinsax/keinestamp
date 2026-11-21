@@ -2629,9 +2629,10 @@ fn handle_rollback(request: tiny_http::Request, web_root: &Path, project_name: &
 pub(crate) fn mime_type(path: &Path) -> &'static str {
     match path.extension().and_then(|e| e.to_str()) {
         Some("html") => "text/html; charset=utf-8",
-        Some("js") => "application/javascript; charset=utf-8",
+        Some("js") | Some("cjs") => "application/javascript; charset=utf-8",
         Some("json") => "application/json; charset=utf-8",
         Some("css") => "text/css; charset=utf-8",
+        Some("wasm") => "application/wasm",
         Some("png") => "image/png",
         Some("jpg") | Some("jpeg") => "image/jpeg",
         Some("glb") => "model/gltf-binary",
@@ -2653,6 +2654,85 @@ fn normalize_url_path(raw: &str) -> String {
 /// 是否属于必须拒绝的路径：点开头（含 '.'/'..' 段）、或显式 '..' 段。
 fn is_unsafe_static_path(path: &str) -> bool {
     path.starts_with('.') || path.contains("/.") || path.split('/').any(|seg| seg == "..")
+}
+
+/// 内容不可变的静态资源：预览产物文件名带 revision 前缀（`cefef64_modeling_model.glb`），
+/// 同一 URL 永远同一内容 → 可强缓存一年；wasm 解码器同样固定。
+fn is_immutable_asset(path: &str) -> bool {
+    const MUTABLE_PREFIXES: [&str; 4] = [
+        "previews_glb/",
+        "previews_image/",
+        "previews_video/",
+        "previews/",
+    ];
+    MUTABLE_PREFIXES.iter().any(|p| path.starts_with(p)) || path.ends_with(".wasm")
+}
+
+/// 可 gzip 的文本资源（GLB/wasm/图片已压缩，再压没收益）。
+fn is_compressible(mime: &str) -> bool {
+    mime.starts_with("text/") || mime.contains("javascript") || mime.contains("json")
+}
+
+/// 按「路径 + ETag」缓存 gzip 结果：同一文件只在内容变化时压一次，
+/// 避免每个请求都重复压缩 1.4 MB 的 three.cjs。
+fn gzip_cached(path: &str, etag: &str, data: &[u8]) -> Vec<u8> {
+    use std::io::Write;
+
+    static CACHE: OnceLock<Mutex<HashMap<String, (String, Vec<u8>)>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock() {
+        if let Some((cached_etag, bytes)) = guard.get(path) {
+            if cached_etag == etag {
+                return bytes.clone();
+            }
+        }
+    }
+    let mut encoder =
+        flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::new(6));
+    let out = match encoder.write_all(data) {
+        Ok(()) => encoder.finish().unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    if !out.is_empty() {
+        if let Ok(mut guard) = cache.lock() {
+            if guard.len() >= 64 {
+                guard.clear();
+            }
+            guard.insert(path.to_string(), (etag.to_string(), out.clone()));
+        }
+    }
+    out
+}
+
+/// 解析单段 `Range: bytes=start-end`（多段 range 降级为整包 200）。
+fn parse_byte_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    if total == 0 {
+        return None;
+    }
+    let spec = header.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (a, b) = spec.split_once('-')?;
+    let (start, end) = if a.trim().is_empty() {
+        let suffix: u64 = b.trim().parse().ok()?;
+        if suffix == 0 {
+            return None;
+        }
+        (total.saturating_sub(suffix), total - 1)
+    } else {
+        let start: u64 = a.trim().parse().ok()?;
+        let end = if b.trim().is_empty() {
+            total - 1
+        } else {
+            b.trim().parse::<u64>().ok()?.min(total - 1)
+        };
+        (start, end)
+    };
+    if start > end || start >= total {
+        return None;
+    }
+    Some((start, end))
 }
 
 fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &str) -> Result<()> {
@@ -2723,13 +2803,102 @@ fn handle_static(request: tiny_http::Request, web_root: &Path, project_name: &st
         match std::fs::read(&file_path) {
             Ok(content) => {
                 let mime = mime_type(&file_path);
-                let hdr = Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap();
-                let nosniff =
-                    Header::from_bytes(&b"X-Content-Type-Options"[..], &b"nosniff"[..]).unwrap();
-                let response = Response::from_data(content)
-                    .with_header(hdr)
-                    .with_header(nosniff);
-                log_info("ACCESS", &format!("{}200 ({})", access_msg, mime));
+                let total = content.len() as u64;
+                // ETag = 大小 + mtime(ms)：无需读内容算 hash，改文件即失效
+                let etag = std::fs::metadata(&file_path)
+                    .ok()
+                    .map(|m| {
+                        let mt = m
+                            .modified()
+                            .ok()
+                            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map(|d| d.as_millis())
+                            .unwrap_or(0);
+                        format!("\"{:x}-{:x}\"", m.len(), mt)
+                    })
+                    .unwrap_or_default();
+                // 预览产物文件名带 revision 前缀，内容不可变 → 一年强缓存；
+                // 其余（index.html / timeline.json / three.cjs）走 no-cache + 304 校验
+                let cache_control = if is_immutable_asset(&clean_path) {
+                    "public, max-age=31536000, immutable"
+                } else {
+                    "no-cache"
+                };
+                let inm = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("If-None-Match"))
+                    .map(|h| h.value.as_str().to_string());
+                let range = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("Range"))
+                    .map(|h| h.value.as_str().to_string());
+                let accept_gzip = request
+                    .headers()
+                    .iter()
+                    .find(|h| h.field.equiv("Accept-Encoding"))
+                    .map(|h| h.value.as_str().to_ascii_lowercase().contains("gzip"))
+                    .unwrap_or(false);
+
+                let mut gzip_used = false;
+                let mut response = if !etag.is_empty() && inm.as_deref() == Some(etag.as_str()) {
+                    log_info("ACCESS", &format!("{}304 (etag)", access_msg));
+                    Response::from_data(Vec::new()).with_status_code(304)
+                } else if let Some((start, end)) =
+                    range.as_deref().and_then(|h| parse_byte_range(h, total))
+                {
+                    let part = content
+                        .get(start as usize..=(end as usize))
+                        .unwrap_or_default()
+                        .to_vec();
+                    log_info("ACCESS", &format!("{}206 (range {}-{})", access_msg, start, end));
+                    let mut r = Response::from_data(part).with_status_code(206);
+                    r.add_header(
+                        Header::from_bytes(
+                            &b"Content-Range"[..],
+                            format!("bytes {}-{}/{}", start, end, total).as_bytes(),
+                        )
+                        .unwrap(),
+                    );
+                    r.add_header(Header::from_bytes(&b"Accept-Ranges"[..], &b"bytes"[..]).unwrap());
+                    r
+                } else if accept_gzip && total >= 1024 && is_compressible(mime) {
+                    log_info(
+                        "ACCESS",
+                        &format!("{}200 gzip ({})", access_msg, mime),
+                    );
+                    gzip_used = true;
+                    Response::from_data(gzip_cached(&clean_path, &etag, &content))
+                } else {
+                    log_info("ACCESS", &format!("{}200 ({})", access_msg, mime));
+                    Response::from_data(content)
+                };
+
+                response
+                    .add_header(Header::from_bytes(&b"Content-Type"[..], mime.as_bytes()).unwrap());
+                response.add_header(
+                    Header::from_bytes(
+                        &b"X-Content-Type-Options"[..],
+                        &b"nosniff"[..],
+                    )
+                    .unwrap(),
+                );
+                response.add_header(
+                    Header::from_bytes(&b"Cache-Control"[..], cache_control.as_bytes()).unwrap(),
+                );
+                if gzip_used {
+                    response.add_header(
+                        Header::from_bytes(&b"Content-Encoding"[..], &b"gzip"[..]).unwrap(),
+                    );
+                    response.add_header(
+                        Header::from_bytes(&b"Vary"[..], &b"Accept-Encoding"[..]).unwrap(),
+                    );
+                }
+                if !etag.is_empty() {
+                    response
+                        .add_header(Header::from_bytes(&b"ETag"[..], etag.as_bytes()).unwrap());
+                }
                 request.respond(response)?;
             }
             Err(e) => {
@@ -2848,6 +3017,152 @@ pub fn serve_local(web_root: &Path, port_tx: std::sync::mpsc::Sender<u16>) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_byte_range_cases() {
+        // 头尾完整
+        assert_eq!(parse_byte_range("bytes=0-99", 1000), Some((0, 99)));
+        // 开区间 → 到末尾
+        assert_eq!(parse_byte_range("bytes=900-", 1000), Some((900, 999)));
+        // 后缀形式
+        assert_eq!(parse_byte_range("bytes=-100", 1000), Some((900, 999)));
+        // 越界 end 截断
+        assert_eq!(parse_byte_range("bytes=990-5000", 1000), Some((990, 999)));
+        // 非法输入降级为 None（走整包 200）
+        assert_eq!(parse_byte_range("bytes=1000-", 1000), None);
+        assert_eq!(parse_byte_range("bytes=50-10", 1000), None);
+        assert_eq!(parse_byte_range("items=0-10", 1000), None);
+        assert_eq!(parse_byte_range("bytes=0-10,20-30", 1000), None);
+        assert_eq!(parse_byte_range("bytes=-0", 1000), None);
+        assert_eq!(parse_byte_range("bytes=0-", 0), None);
+    }
+
+    #[test]
+    fn is_immutable_asset_classification() {
+        // 预览产物带 revision 前缀 → 强缓存
+        assert!(is_immutable_asset("previews_glb/cefef64_modeling_model.glb"));
+        assert!(is_immutable_asset("previews_image/abc.png"));
+        assert!(is_immutable_asset("previews_video/x.mp4"));
+        assert!(is_immutable_asset("three/draco/draco_decoder.wasm"));
+        // 会随记录变化 → 必须走 304 校验
+        assert!(!is_immutable_asset("index.html"));
+        assert!(!is_immutable_asset("timeline.json"));
+        assert!(!is_immutable_asset("three/three.cjs"));
+        assert!(!is_immutable_asset("three/loaders/GLTFLoader.js"));
+    }
+
+    /// 真实 HTTP 往返：预览产物必须带 immutable 缓存头 + ETag，且带 If-None-Match 时回 304。
+    #[test]
+    fn static_preview_gets_immutable_cache_and_304() -> Result<()> {
+        use std::io::{Read, Write};
+
+        let dir = std::env::temp_dir().join(format!("ks_static_cache_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("proj").join("previews_glb"))?;
+        std::fs::write(dir.join("proj").join("previews_glb").join("abc_model.glb"), b"GLBDATA")?;
+
+        let server = Server::http("127.0.0.1:0").map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let addr = match server.server_addr() {
+            tiny_http::ListenAddr::IP(a) => a,
+            other => anyhow::bail!("unexpected listen addr: {other:?}"),
+        };
+        let web_root = dir.clone();
+        let handle = std::thread::spawn(move || {
+            for _ in 0..2 {
+                if let Ok(req) = server.recv() {
+                    let _ = handle_static(req, &web_root, "proj");
+                }
+            }
+        });
+
+        let get = |extra: &str| -> String {
+            let mut s = std::net::TcpStream::connect(addr).unwrap();
+            let req = format!(
+                "GET /proj/previews_glb/abc_model.glb HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n{}\r\n",
+                extra
+            );
+            s.write_all(req.as_bytes()).unwrap();
+            let mut buf = String::new();
+            let _ = s.read_to_string(&mut buf);
+            buf
+        };
+
+        let first = get("");
+        assert!(first.starts_with("HTTP/1.1 200"), "首次应 200：{}", &first[..40.min(first.len())]);
+        assert!(
+            first.contains("Cache-Control: public, max-age=31536000, immutable"),
+            "预览产物必须强缓存"
+        );
+        let etag = first
+            .lines()
+            .find(|l| l.to_ascii_lowercase().starts_with("etag:"))
+            .and_then(|l| l.split_once(':'))
+            .map(|(_, v)| v.trim().to_string())
+            .expect("响应必须带 ETag");
+
+        let second = get(&format!("If-None-Match: {}\r\n", etag));
+        assert!(
+            second.starts_with("HTTP/1.1 304"),
+            "ETag 命中应 304：{}",
+            &second[..40.min(second.len())]
+        );
+
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
+
+    /// 文本资源在 `Accept-Encoding: gzip` 下必须压缩传输，且解压后与原文一致。
+    #[test]
+    fn static_text_is_gzipped_when_accepted() -> Result<()> {
+        use std::io::{Read, Write};
+
+        let dir = std::env::temp_dir().join(format!("ks_static_gzip_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("proj"))?;
+        // >1KB 的可压缩文本
+        let original = format!("<html><body>{}</body></html>", "keinestamp ".repeat(200));
+        std::fs::write(dir.join("proj").join("index.html"), &original)?;
+
+        let server = Server::http("127.0.0.1:0").map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let addr = match server.server_addr() {
+            tiny_http::ListenAddr::IP(a) => a,
+            other => anyhow::bail!("unexpected listen addr: {other:?}"),
+        };
+        let web_root = dir.clone();
+        let handle = std::thread::spawn(move || {
+            if let Ok(req) = server.recv() {
+                let _ = handle_static(req, &web_root, "proj");
+            }
+        });
+
+        let mut s = std::net::TcpStream::connect(addr)?;
+        let req = "GET /proj/index.html HTTP/1.1\r\nHost: localhost\r\nAccept-Encoding: gzip\r\nConnection: close\r\n\r\n";
+        s.write_all(req.as_bytes())?;
+        let mut raw = Vec::new();
+        let _ = s.read_to_end(&mut raw);
+
+        let split = raw
+            .windows(4)
+            .position(|w| w == b"\r\n\r\n")
+            .expect("响应应包含头部结束标记");
+        let head = String::from_utf8_lossy(&raw[..split]).to_ascii_lowercase();
+        let body = &raw[split + 4..];
+        assert!(head.starts_with("http/1.1 200"), "应 200：{head}");
+        assert!(
+            head.contains("content-encoding: gzip"),
+            "文本资源应 gzip 传输：{head}"
+        );
+        assert!(body.len() < original.len(), "压缩后应更小");
+
+        let mut decoded = String::new();
+        flate2::read::GzDecoder::new(body).read_to_string(&mut decoded)?;
+        assert_eq!(decoded, original, "解压后内容必须与原文一致");
+
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        Ok(())
+    }
 
     #[test]
     fn parse_loreserver_info_extracts_version_store_auth() {

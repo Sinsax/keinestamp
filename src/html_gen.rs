@@ -168,6 +168,7 @@ const TEMPLATE: &str = r##"<!DOCTYPE html>
 <script src="./three/utils/BufferGeometryUtils.js"></script>
 <script src="./three/controls/OrbitControls.js"></script>
 <script src="./three/loaders/GLTFLoader.js"></script>
+<script src="./three/loaders/DRACOLoader.js"></script>
 <style>
 :root {
   --bg: #f2f4f7; --surface: #ffffff; --surface2: #f1f3f5; --surface3: #e6e9ed;
@@ -390,6 +391,9 @@ var calData = {{CALENDAR_JSON}};
 
 var TAG_PRESETS = {'建模':0,'UV拆分':1,'绑定':2,'贴图':3,'修复':4};
 var TAG_COLORS = ['#89b4fa','#a6e3a1','#cba6f7','#fab387','#f38ba8','#94e2d5'];
+// 月份名必须是全局：renderCalendar() 在另一个函数里用它，写在 render() 内部会
+// 抛 ReferenceError，连带打断其后 initModelsLazy()（日历空白 + 3D 永远 Loading）。
+var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function tagColor(tag) {
   if (TAG_PRESETS[tag] !== undefined) return TAG_COLORS[TAG_PRESETS[tag]];
@@ -409,7 +413,6 @@ function render() {
   document.getElementById('project-title').textContent = data.project || 'Keinestamp';
   // web 只显示主线：被顶替（superseded）记录不展示（GUI 时间线保留折叠区，部署页不显示）
   var mainline = (data.entries || []).filter(function(e) { return !e.superseded; });
-  var MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var total = mainline.length;
   var msCount = mainline.filter(function(e) { return e.milestone; }).length;
   document.getElementById('meta-count').textContent = total + ' records';
@@ -856,6 +859,18 @@ function createViewer(container, w, h, url, isOverlay) {
 
   var GL = window.GLTFLoader || THREE.GLTFLoader;
   var loader = new GL();
+  // Draco 解码器：新导出的 GLB 用 KHR_draco_mesh_compression 压过几何（约 6×），
+  // 旧 GLB 不含该扩展，挂了 DRACOLoader 也不影响解析。
+  var DRL = window.DRACOLoader || THREE.DRACOLoader;
+  if (DRL) {
+    try {
+      var dracoLoader = new DRL();
+      dracoLoader.setDecoderPath('./three/draco/');
+      loader.setDRACOLoader(dracoLoader);
+    } catch (e) {
+      console.error('DRACOLoader init failed:', e);
+    }
+  }
   loader.load(url, function(gltf) {
     modelObj = gltf.scene;
     var box = new THREE.Box3().setFromObject(modelObj);
@@ -1202,9 +1217,11 @@ function openFullscreen(el) {
     v.resize(nw, nh);
   });
 }
-render();
-renderCalendar();
-initModelsLazy();
+// 各区块独立初始化：任一处抛错都不应拖垮其他功能（曾因 renderCalendar 抛
+// ReferenceError 导致 3D 预览初始化根本不执行，页面永远停在 Loading 3D model…）
+try { render(); } catch (e) { console.error('[keinestamp] render failed', e); }
+try { renderCalendar(); } catch (e) { console.error('[keinestamp] renderCalendar failed', e); }
+try { initModelsLazy(); } catch (e) { console.error('[keinestamp] initModelsLazy failed', e); }
 </script>
 </body>
 </html>"##;
@@ -1877,6 +1894,34 @@ mod tests {
 
         std::fs::remove_dir_all(&dir)?;
         Ok(())
+    }
+
+    #[test]
+    fn test_month_names_is_global_not_inside_render() {
+        // 回归防护：MONTH_NAMES 若被放在 render() 内部，renderCalendar() 会抛
+        // ReferenceError: MONTH_NAMES is not defined —— 日历空白，且紧邻的
+        // initModelsLazy() 不再执行，3D 预览永远停在 "Loading 3D model…"。
+        let render_pos = TEMPLATE.find("function render()").expect("render() 应存在");
+        let month_pos = TEMPLATE
+            .find("var MONTH_NAMES")
+            .expect("MONTH_NAMES 应定义在全局");
+        assert!(
+            month_pos < render_pos,
+            "MONTH_NAMES 必须在 render() 之前定义（全局作用域）"
+        );
+    }
+
+    #[test]
+    fn test_page_init_calls_are_isolated() {
+        // 三个初始化各自 try/catch：一个区块失败不能拖垮其他区块（曾导致 3D 预览全灭）
+        for call in ["render()", "renderCalendar()", "initModelsLazy()"] {
+            let guarded = format!("try {{ {}; }} catch", call);
+            assert!(
+                TEMPLATE.contains(&guarded),
+                "{} 必须被 try/catch 单独包裹",
+                call
+            );
+        }
     }
 
     #[test]

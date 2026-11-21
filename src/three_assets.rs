@@ -8,6 +8,15 @@ pub(crate) const ORBIT_CONTROLS_SRC: &[u8] = include_bytes!("three-src/controls/
 
 pub(crate) const GLTF_LOADER_SRC: &[u8] = include_bytes!("three-src/loaders/GLTFLoader.js");
 
+/// Draco 解码器（GLTFLoader 需要它才能读 KHR_draco_mesh_compression 的 GLB）。
+pub(crate) const DRACO_LOADER_SRC: &[u8] = include_bytes!("three-src/loaders/DRACOLoader.js");
+
+/// Draco wasm 解码器包装（DRACOLoader 按 decoderPath 自行 fetch，原样拷贝即可）。
+const DRACO_WASM_WRAPPER_SRC: &[u8] = include_bytes!("three-src/draco/draco_wasm_wrapper.js");
+
+/// Draco 解码器 wasm 本体（约 279 KB）。
+const DRACO_DECODER_WASM: &[u8] = include_bytes!("three-src/draco/draco_decoder.wasm");
+
 const BUFFER_GEOMETRY_UTILS_SRC: &[u8] = include_bytes!("three-src/utils/BufferGeometryUtils.js");
 
 const LOGO_PNG: &[u8] = include_bytes!("../frontend/public/keinestamp.png");
@@ -39,7 +48,7 @@ pub fn ensure_threejs(three_dir: &Path) -> Result<()> {
         }
     }
 
-    let subdirs = ["controls", "loaders", "utils"];
+    let subdirs = ["controls", "loaders", "utils", "draco"];
     for subdir in &subdirs {
         let dir = three_dir.join(subdir);
         if !dir.exists() {
@@ -48,15 +57,17 @@ pub fn ensure_threejs(three_dir: &Path) -> Result<()> {
         }
     }
 
-    let files: [(&str, &[u8], bool); 4] = [
+    let files: [(&str, &[u8], bool); 6] = [
         ("three.cjs", THREE_CJS, false),
         ("controls/OrbitControls.js", ORBIT_CONTROLS_SRC, true),
         ("loaders/GLTFLoader.js", GLTF_LOADER_SRC, true),
+        ("loaders/DRACOLoader.js", DRACO_LOADER_SRC, true),
         (
             "utils/BufferGeometryUtils.js",
             BUFFER_GEOMETRY_UTILS_SRC,
             true,
         ),
+        ("draco/draco_wasm_wrapper.js", DRACO_WASM_WRAPPER_SRC, false),
     ];
 
     for (name, data, needs_transform) in &files {
@@ -81,6 +92,17 @@ pub fn ensure_threejs(three_dir: &Path) -> Result<()> {
 
         eprintln!("[debug] ensure_threejs: writing {}", name);
         std::fs::write(&dest, &expected).with_context(|| format!("failed to write {:?}", dest))?;
+    }
+
+    // wasm 是二进制，不能走上面的 UTF-8 文本通道：逐字节比对后写入
+    let wasm_dest = three_dir.join("draco/draco_decoder.wasm");
+    let wasm_unchanged = std::fs::read(&wasm_dest)
+        .map(|existing| existing == DRACO_DECODER_WASM)
+        .unwrap_or(false);
+    if !wasm_unchanged {
+        eprintln!("[debug] ensure_threejs: writing draco/draco_decoder.wasm");
+        std::fs::write(&wasm_dest, DRACO_DECODER_WASM)
+            .with_context(|| format!("failed to write {:?}", wasm_dest))?;
     }
 
     Ok(())

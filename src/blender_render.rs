@@ -31,39 +31,14 @@ fn blender_cmd(blender_path: Option<&Path>) -> std::process::Command {
 
 /// GLB 导出参数版本：变更导出脚本（减面策略/纹理尺寸等）后 +1，
 /// 旧版 GLB（无对应标记）会重新导出——否则"已存在跳过"会保留旧产物。
-const GLB_EXPORT_VERSION: u32 = 3;
+/// v4：修复 Blender 5.x 移除 `Image.use_alpha` 导致的导出崩溃（透明贴图改用 alpha_mode/depth 判定）。
+/// v5：Draco 几何压缩（约 6×）+ 贴图限 2048/质量 85（体积再降），页面需 DRACOLoader。
+const GLB_EXPORT_VERSION: u32 = 5;
 
-pub fn export_to_glb(
-    blend_path: &Path,
-    output_dir: &Path,
-    output_name: &str,
-    blender_path: Option<&Path>,
-) -> Result<PathBuf> {
-    eprintln!(
-        "[debug] export_to_glb: blend={:?}, output_dir={:?}, name={}, blender={:?}",
-        blend_path, output_dir, output_name, blender_path
-    );
-    std::fs::create_dir_all(output_dir)?;
-
-    let output_path = output_dir.join(format!("{}.glb", output_name));
-    let version_marker = output_dir.join(format!("{}.glb.v{}", output_name, GLB_EXPORT_VERSION));
-    if output_path.exists() && version_marker.exists() {
-        eprintln!(
-            "[debug] export_to_glb: GLB already exists (v{}), skipping: {:?}",
-            GLB_EXPORT_VERSION, output_path
-        );
-        return Ok(output_path);
-    }
-    if output_path.exists() {
-        eprintln!(
-            "[debug] export_to_glb: 旧版 GLB 无 v{} 标记，重新导出（瘦身参数变更）: {:?}",
-            GLB_EXPORT_VERSION, output_path
-        );
-    }
-
-    // 预览瘦身（v2）：临时移除形态键 → Decimate 减面（目标 ~5 万顶点）→ 贴图限 1024px。
-    // 全部为内存操作（--background 不保存），.blend 原文件零改动。
-    let python_script = r#"import bpy
+/// Blender GLB 导出脚本：形态键移除 → Decimate 减面 → 透明贴图 BLEND → 导出。
+/// 全部为内存操作（--background 不保存），.blend 原文件零改动。
+/// 改动此脚本需同步递增 `GLB_EXPORT_VERSION`，否则旧 GLB 不会被重新导出。
+const GLB_EXPORT_SCRIPT: &str = r#"import bpy
 import sys
 
 output_path = sys.argv[sys.argv.index('--') + 1]
@@ -111,21 +86,41 @@ for obj in bpy.data.objects:
         md.decimate_type = 'COLLAPSE'
         md.ratio = max(TARGET_VERTS / vcount, 0.05)
 
-# 3) 贴图保持原始尺寸，不缩放（WebP 仍会编码，但分辨率不再降低）
+# 3) 贴图尺寸上限 2048px（预览足够；4K 原图会显著撑大体积，实测 2.35MB → 0.4MB）
+MAX_TEX = 2048
+for img in bpy.data.images:
+    try:
+        w, h = img.size
+        if w > MAX_TEX or h > MAX_TEX:
+            s = MAX_TEX / max(w, h)
+            img.scale(max(1, int(w * s)), max(1, int(h * s)))
+    except Exception:
+        pass
+
 # 4) 透明贴图：若材质使用了带 alpha 的图像，设为 BLEND 混合，保证 GLB 网页预览正确显示透明
 for mat in bpy.data.materials:
     if mat is None or not mat.use_nodes or mat.node_tree is None:
         continue
     for node in mat.node_tree.nodes:
-        if node.type == 'TEX_IMAGE' and node.image and node.image.use_alpha:
+        if node.type != 'TEX_IMAGE' or node.image is None:
+            continue
+        # Blender 5.x 移除了 Image 的 use_alpha 属性：用 depth/alpha_mode 兼容判定
+        has_alpha = getattr(node.image, 'use_alpha', None)
+        if has_alpha is None:
+            has_alpha = getattr(node.image, 'depth', 24) == 32 and getattr(node.image, 'alpha_mode', 'NONE') != 'NONE'
+        if not has_alpha:
+            continue
+        try:
             mat.blend_method = 'BLEND'
-            break
+        except Exception:
+            pass
+        break
 
 bpy.ops.export_scene.gltf(
     filepath=output_path,
     export_format='GLB',
     export_image_format='WEBP',
-    export_image_quality=95,
+    export_image_quality=85,
     use_selection=False,
     use_visible=True,
     use_renderable=False,
@@ -136,6 +131,12 @@ bpy.ops.export_scene.gltf(
     export_animations=False,
     export_skins=False,
     export_morph=False,
+    # Draco 几何压缩：几何通常占 GLB 体积 90%+，实测 8.6MB → ~1MB
+    export_draco_mesh_compression_enable=True,
+    export_draco_mesh_compression_level=6,
+    export_draco_position_quantization=14,
+    export_draco_normal_quantization=10,
+    export_draco_texcoord_quantization=12,
 )
 
 for name, state in saved.items():
@@ -143,8 +144,37 @@ for name, state in saved.items():
         bpy.data.objects[name].hide_render = state
 "#;
 
+pub fn export_to_glb(
+    blend_path: &Path,
+    output_dir: &Path,
+    output_name: &str,
+    blender_path: Option<&Path>,
+) -> Result<PathBuf> {
+    eprintln!(
+        "[debug] export_to_glb: blend={:?}, output_dir={:?}, name={}, blender={:?}",
+        blend_path, output_dir, output_name, blender_path
+    );
+    std::fs::create_dir_all(output_dir)?;
+
+    let output_path = output_dir.join(format!("{}.glb", output_name));
+    let version_marker = output_dir.join(format!("{}.glb.v{}", output_name, GLB_EXPORT_VERSION));
+    if output_path.exists() && version_marker.exists() {
+        eprintln!(
+            "[debug] export_to_glb: GLB already exists (v{}), skipping: {:?}",
+            GLB_EXPORT_VERSION, output_path
+        );
+        return Ok(output_path);
+    }
+    if output_path.exists() {
+        eprintln!(
+            "[debug] export_to_glb: 旧版 GLB 无 v{} 标记，重新导出（瘦身参数变更）: {:?}",
+            GLB_EXPORT_VERSION, output_path
+        );
+    }
+
+
     let temp_script = output_dir.join(format!("glb_export_{}.py", std::process::id()));
-    std::fs::write(&temp_script, python_script)?;
+    std::fs::write(&temp_script, GLB_EXPORT_SCRIPT)?;
 
     // 超时兜底 + 输出管道排空（blender 挂死/输出量大时防止 record 无限卡死）
     let label = format!("Blender GLB export: {}", blend_path.display());
@@ -205,29 +235,51 @@ for name, state in saved.items():
         }
         st if st.success() => {
             let stderr = String::from_utf8_lossy(&stderr);
+            let detail = summarize_blender_error(&stderr);
             eprintln!(
                 "[debug] export_to_glb: Blender exited 0 but GLB not found, stderr: {}",
                 stderr.trim().chars().take(300).collect::<String>()
             );
-            anyhow::bail!(
-                "Blender GLB export produced no output for {:?}: {}",
-                blend_path,
-                stderr.trim().chars().take(200).collect::<String>()
-            )
+            anyhow::bail!("Blender GLB export produced no output: {}", detail)
         }
         _ => {
             let stderr = String::from_utf8_lossy(&stderr);
+            let detail = summarize_blender_error(&stderr);
             eprintln!(
                 "[debug] export_to_glb: Blender failed: {}",
                 stderr.trim().chars().take(200).collect::<String>()
             );
-            anyhow::bail!(
-                "Blender GLB export failed for {:?}: {}",
-                blend_path,
-                stderr.trim()
-            )
+            anyhow::bail!("Blender GLB export failed: {}", detail)
         }
     }
+}
+
+/// 从 Blender stderr 里挑出最有诊断价值的一行，供 `preview_errors` 展示。
+///
+/// GUI 是 `windows_subsystem = "windows"`，没有控制台，`eprintln!` 里的真实错误
+/// 用户永远看不到；只显示「未能生成预览」时无从排查（2026-11 芙姆米项目事故）。
+/// 策略：优先最后一条 Python 异常行（`XxxError: ...`），否则取最后一个非空行；
+/// 截断到 [`BLENDER_ERROR_MAX_CHARS`]，避免把整段 traceback 写进 timeline.json。
+fn summarize_blender_error(stderr: &str) -> String {
+    const BLENDER_ERROR_MAX_CHARS: usize = 300;
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
+    let picked = lines
+        .iter()
+        .rev()
+        .find(|l| {
+            l.contains("Error:")
+                || l.contains("Exception:")
+                || l.contains("ERROR")
+                || l.starts_with("error")
+        })
+        .or_else(|| lines.last())
+        .copied()
+        .unwrap_or("no stderr output");
+    picked.chars().take(BLENDER_ERROR_MAX_CHARS).collect()
 }
 
 /// 清理 previews_glb 目录：**只删未被 timeline.json 引用的孤儿 GLB**（保留被引用的旧预览，
@@ -307,6 +359,64 @@ mod tests {
         assert_eq!(config.resolution, (1920, 1080));
         assert_eq!(config.camera_name, "ProgressCamera");
         assert_eq!(config.max_previews, 50);
+    }
+
+    #[test]
+    fn test_summarize_blender_error_prefers_python_exception() {
+        // 2026-11 事故的实际 stderr 形态：traceback + 末行版本信息
+        let stderr = "Read blend: \"model.blend\"\n\
+Traceback (most recent call last):\n\
+  File \"glb_export.py\", line 55, in <module>\n\
+    if node.type == 'TEX_IMAGE' and node.image and node.image.use_alpha:\n\
+AttributeError: 'Image' object has no attribute 'use_alpha'\n\
+Blender 5.2.0 LTS (hash fbe6228777e7 built 2026-07-14)\n\
+Blender quit\n";
+        assert_eq!(
+            summarize_blender_error(stderr),
+            "AttributeError: 'Image' object has no attribute 'use_alpha'"
+        );
+    }
+
+    #[test]
+    fn test_summarize_blender_error_falls_back_to_last_line() {
+        assert_eq!(summarize_blender_error("\n\n  some detail  \n\n"), "some detail");
+        assert_eq!(summarize_blender_error(""), "no stderr output");
+    }
+
+    #[test]
+    fn test_summarize_blender_error_truncates() {
+        let long = "E".repeat(1000);
+        assert_eq!(summarize_blender_error(&long).chars().count(), 300);
+    }
+
+    /// 回归防护：Blender 5.x 移除了 `Image` 的 use_alpha 属性，直接访问会让导出脚本在
+    /// `export_scene.gltf` 之前崩溃（且退出码仍为 0），预览全灭。
+    #[test]
+    fn test_export_script_does_not_use_removed_image_api() {
+        assert!(
+            !GLB_EXPORT_SCRIPT.contains(concat!(".use", "_alpha")),
+            "导出脚本不得直接访问已移除的 Image 属性；请用 alpha_mode/depth 兼容判定"
+        );
+        assert!(
+            GLB_EXPORT_SCRIPT.contains("alpha_mode"),
+            "导出脚本应保留 alpha_mode 兼容判定（透明贴图 BLEND）"
+        );
+        assert!(GLB_EXPORT_SCRIPT.contains("export_scene.gltf"));
+        assert!(GLB_EXPORT_SCRIPT.contains("import bpy"));
+    }
+
+    /// 回归防护：导出必须开启 Draco 几何压缩 + 贴图上限，否则预览文件回到十几 MB。
+    #[test]
+    fn test_export_script_enables_draco_and_texture_cap() {
+        assert!(
+            GLB_EXPORT_SCRIPT.contains("export_draco_mesh_compression_enable=True"),
+            "必须开启 Draco 几何压缩（实测能把几何从 8.6MB 压到 ~1MB）"
+        );
+        assert!(GLB_EXPORT_SCRIPT.contains("MAX_TEX = 2048"));
+        assert!(
+            !GLB_EXPORT_SCRIPT.contains("export_image_quality=95"),
+            "贴图质量应为 85（95 会让贴图占体积一半以上）"
+        );
     }
 
     #[test]

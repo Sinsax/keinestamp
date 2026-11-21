@@ -1,0 +1,32 @@
+# Keinestamp serve 配置示例（Linux / Windows 通用）
+#
+# 用法：
+#   ./keinestamp serve --config /path/to/serve.toml
+#
+# 查找顺序：--config → <程序目录>/serve.toml → <项目目录>/serve.toml → 自动生成
+# 注意：web_root 写相对路径时，基准是**程序目录**（不是当前工作目录）。
+#
+# 部署提示（Linux 服务器）：
+#   1. 把 keinestamp 与 lore-bin/ 放在同一目录（lore 检测要求 v0.8.6，缺失会拒绝启动 serve）
+#   2. web_root 建议放独立可写目录，程序目录可以只读
+#   3. 反向代理（Caddy/nginx）后面时打开 trust_proxy，并透传 X-Forwarded-Proto
+#   4. 监听 socket 的读超时不会继承给已接受连接，务必在代理上配置 request read timeout
+
+host = "0.0.0.0"
+port = 7799
+
+# 部署令牌：app → server 上传/health 认证用（空 = 无认证，等于谁都能传，别这么干）
+deploy_token = "请替换为随机 hex，例如 openssl rand -hex 32 的输出"
+
+# 网页产物根目录：相对「程序目录」，也可写绝对路径
+web_root = "web-root"
+
+# 是否启用备份服务器（loreserver）。关闭时只做网页托管。
+enable_loreserver = false
+
+# 反向代理后面（Caddy / nginx）时打开：按 X-Forwarded-Proto 判断 https，
+# 决定登录 cookie 是否带 Secure
+trust_proxy = false
+
+# 站点标题（可选，默认 Keinestamp）
+# site_name = "My Progress Board"

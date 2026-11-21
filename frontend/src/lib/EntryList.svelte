@@ -350,8 +350,33 @@
   })
 
   // 被顶替记录折叠组（默认折叠）
-  let supersededOpen = $state(false)
-  const supersededCount = $derived(filteredEntries.filter((e) => e.superseded).length)
+  // 每个**连续段**独立展开：标题里的 (n) 是该段内的条数，若共用开关，
+  // 点开「(3)」会把另外几段（本例共 6 段）一起展开，数字与内容对不上。
+  let supersededExpanded = $state<string[]>([])
+  // 折叠组标题的「被顶替记录 (n)」只显示**该连续段内**的数量：
+  // 用全局总数会在每个段都显示同一个大数字（实际分布 3/1/2/1/1/1 却每处都写 9）。
+  const supersededGroupAt = $derived.by(() => {
+    const info = new Array<{ key: string; count: number } | null>(grouped.length).fill(null)
+    let i = 0
+    while (i < grouped.length) {
+      if (!grouped[i].entry.superseded) {
+        i++
+        continue
+      }
+      let run = 0
+      while (i + run < grouped.length && grouped[i + run].entry.superseded) run++
+      const key = grouped[i].entry.id
+      for (let k = 0; k < run; k++) info[i + k] = { key, count: run }
+      i += run
+    }
+    return info
+  })
+  const isSupersededExpanded = (key: string) => supersededExpanded.includes(key)
+  function toggleSuperseded(key: string) {
+    supersededExpanded = isSupersededExpanded(key)
+      ? supersededExpanded.filter((k) => k !== key)
+      : [...supersededExpanded, key]
+  }
 </script>
 
 <div class="entries">
@@ -380,6 +405,7 @@
       {@const entry = g.entry}
       {@const entryTag = entry.tag || null}
       {@const prevEntry = grouped[i - 1]?.entry}
+      {@const supersededGroup = supersededGroupAt[i]}
       {#if g.showGroup}
         <div class="tag-group">
           <span class="tag-group-dot" style="background:{g.groupColor}"></span>
@@ -387,14 +413,14 @@
           <span class="tag-group-line"></span>
         </div>
       {/if}
-      {#if entry.superseded && !prevEntry?.superseded}
+      {#if entry.superseded && !prevEntry?.superseded && supersededGroup}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <div class="superseded-header" onclick={() => (supersededOpen = !supersededOpen)}>
-          <span class="arr">{supersededOpen ? '▾' : '▸'}</span>
-          <span>{t('gui.entrylist.superseded', { n: supersededCount })}</span>
+        <div class="superseded-header" onclick={() => toggleSuperseded(supersededGroup.key)}>
+          <span class="arr">{isSupersededExpanded(supersededGroup.key) ? '▾' : '▸'}</span>
+          <span>{t('gui.entrylist.superseded', { n: supersededGroup.count })}</span>
         </div>
       {/if}
-      {#if !entry.superseded || supersededOpen}
+      {#if !entry.superseded || (supersededGroup && isSupersededExpanded(supersededGroup.key))}
       <div class="tl-row">
         <div class="tl-rail" aria-hidden="true">
           <span class="tl-line"></span>
