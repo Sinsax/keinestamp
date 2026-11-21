@@ -1785,10 +1785,21 @@ fn bind_listener_with_timeout(
     {
         let _ = sock.set_reuse_address(true);
     }
-    sock.set_read_timeout(Some(timeout))
-        .context(crate::i18n::t("cli.serve.recvTimeout"))?;
-    sock.set_write_timeout(Some(timeout))
-        .context(crate::i18n::t("cli.serve.sendTimeout"))?;
+    // Windows：accepted socket 会继承监听 socket 的 IO 超时（PR-2：防半开连接占死工作线程）。
+    // Unix：SO_RCVTIMEO 不随 accept 继承，反而作用于 accept() 本身——无连接超时返回
+    // WouldBlock，tiny-http 视为致命错误退出（服务启动约 30s 后自杀）。故 Unix 跳过设置，
+    // 请求读超时交由反向代理兜底（与启动 WARN 的建议一致）。
+    #[cfg(windows)]
+    {
+        sock.set_read_timeout(Some(timeout))
+            .context(crate::i18n::t("cli.serve.recvTimeout"))?;
+        sock.set_write_timeout(Some(timeout))
+            .context(crate::i18n::t("cli.serve.sendTimeout"))?;
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = timeout;
+    }
     sock.bind(&sa.into())
         .with_context(|| crate::i18n::tf("cli.serve.bindFailed", &[("addr", &sa.to_string())]))?;
     sock.listen(128).context(crate::i18n::t("cli.serve.listenFailed"))?;
