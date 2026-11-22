@@ -57,23 +57,35 @@ fn request_ip(request: &tiny_http::Request) -> IpAddr {
     fallback
 }
 
-// 反代（Caddy/nginx/CF）场景：serve.toml trust_proxy=true 时取 X-Forwarded-For 第一个 IP（真实客户端）。
-// 默认关闭——直接暴露时 X-Forwarded-For 可伪造，切勿开启。
+// 反代（Caddy/nginx/CF）场景：serve.toml trust_proxy=true 时按可信来源头取真实客户端 IP。
+// 优先级：CF-Connecting-IP（Cloudflare 必带，客户端伪造值会被 CF 覆盖）> X-Forwarded-For
+// 首跳 > TCP 对端。cloudflared 隧道回源不写 XFF——只看 XFF 会让所有公网访客落到隧道进程
+// 的对端 IP 共享同一个限流桶。默认关闭——直接暴露时这些头可伪造，切勿开启。
 fn request_ip_trusted(request: &tiny_http::Request) -> IpAddr {
-    if *TRUST_PROXY.get().unwrap_or(&false) {
-        if let Some(h) = request
-            .headers()
-            .iter()
-            .find(|h| h.field.equiv("X-Forwarded-For"))
-        {
-            if let Some(first) = h.value.as_str().split(',').next() {
-                if let Ok(ip) = first.trim().parse::<IpAddr>() {
-                    return ip;
-                }
+    let fallback = request_ip(request);
+    if !*TRUST_PROXY.get().unwrap_or(&false) {
+        return fallback;
+    }
+    if let Some(ip) = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("CF-Connecting-IP"))
+        .and_then(|h| h.value.as_str().trim().parse::<IpAddr>().ok())
+    {
+        return ip;
+    }
+    if let Some(h) = request
+        .headers()
+        .iter()
+        .find(|h| h.field.equiv("X-Forwarded-For"))
+    {
+        if let Some(first) = h.value.as_str().split(',').next() {
+            if let Ok(ip) = first.trim().parse::<IpAddr>() {
+                return ip;
             }
         }
     }
-    request_ip(request)
+    fallback
 }
 
 // 客户端是否走 HTTPS——用于登录 cookie 动态 Secure：
@@ -273,7 +285,8 @@ fn check_deploy_auth(
     let auth_value = match auth_header {
         Some(h) => h.value.as_str(),
         None => {
-            rate_limiter.record_failure(&ip);
+            // 无凭据的访问（探测/误入）不算暴力破解尝试：只 401，不计数。
+            // 计数仅针对"带凭据但错误"，否则部署健康探测类客户端会被误伤。
             return AuthResult::Unauthorized;
         }
     };
@@ -330,9 +343,15 @@ fn check_browser_static_auth(
         .iter()
         .find(|h| h.field.equiv("Authorization"));
 
+    // 带"可验证凭据"（Bearer 或项目 cookie）才算尝试：凭据错误计一次失败；
+    // 完全无凭据（浏览器首次打开、cookie 过期清空、爬虫探测）只 401 不计数——
+    // 否则页面加载几十个资源的 401 连击会在 60s 窗口内自我触发 429 封禁。
+    let mut has_credential = false;
+
     if let Some(h) = auth_header {
         let value = h.value.as_str();
         if value.starts_with("Bearer ") {
+            has_credential = true;
             let token = value.trim_start_matches("Bearer ");
             if project_tokens
                 .read()
@@ -348,6 +367,7 @@ fn check_browser_static_auth(
     }
 
     if let Some(cookie_token) = get_cookie(request, "keinestamp_token") {
+        has_credential = true;
         if project_tokens
             .read()
             .unwrap()
@@ -359,7 +379,9 @@ fn check_browser_static_auth(
         }
     }
 
-    rate_limiter.record_failure(&ip);
+    if has_credential {
+        rate_limiter.record_failure(&ip);
+    }
     AuthResult::Unauthorized
 }
 
